@@ -11,54 +11,156 @@ export const DEFAULT_OPTIONS: CleanOptions = {
 
 const encoder = new TextEncoder();
 const bytes = (value: string): number => encoder.encode(value).byteLength;
-interface Match { start: number; end: number; value: string; category: 'SECRET' | 'EMAIL' }
+interface Match { start: number; end: number; category: 'SECRET' | 'EMAIL' | 'CUSTOM' }
+interface RedactionMaps { SECRET: Map<string, string>; EMAIL: Map<string, string>; CUSTOM: Map<string, string> }
 
-function addMatches(matches: Match[], content: string, regex: RegExp, category: Match['category']): void {
+export const CUSTOM_SECRET_LIMITS = { maxItems: 50, minCharacters: 3, maxCharacters: 1000 } as const;
+
+/** Preserve literal whitespace; errors deliberately contain no submitted values. */
+export function validateCustomSecrets(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > CUSTOM_SECRET_LIMITS.maxItems) {
+    throw new Error('Custom redactions must be a list containing at most 50 values.');
+  }
+  const unique = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error('Each custom redaction must be a nonblank string containing 3 to 1,000 characters.');
+    }
+    let characters = 0;
+    for (const _character of item) {
+      characters++;
+      if (characters > CUSTOM_SECRET_LIMITS.maxCharacters) break;
+    }
+    if (characters < CUSTOM_SECRET_LIMITS.minCharacters || characters > CUSTOM_SECRET_LIMITS.maxCharacters) {
+      throw new Error('Each custom redaction must be a nonblank string containing 3 to 1,000 characters.');
+    }
+    unique.add(item);
+  }
+  return [...unique];
+}
+
+function* regexMatches(content: string, regex: RegExp, category: Match['category']): Generator<Match> {
   for (const match of content.matchAll(regex)) {
-    matches.push({ start: match.index, end: match.index + match[0].length, value: match[0], category });
+    yield { start: match.index, end: match.index + match[0].length, category };
   }
 }
 
-function redactContent(content: string, secrets: Map<string, string>, emails: Map<string, string>, scanSecrets: boolean, scanEmails: boolean): { content: string; secretCount: number; emailCount: number } {
-  const matches: Match[] = [];
+function* literalMatches(content: string, value: string): Generator<Match> {
+  let cursor = 0;
+  for (;;) {
+    const start = content.indexOf(value, cursor);
+    if (start < 0) return;
+    yield { start, end: start + value.length, category: 'CUSTOM' };
+    // Include crossing occurrences, such as "aba" at both ends of "ababa".
+    cursor = start + 1;
+  }
+}
+
+function* bearerMatches(content: string): Generator<Match> {
+  for (const match of content.matchAll(/\bBearer[ \t]+([A-Za-z0-9._~+\/-]{8,}=*)/gi)) {
+    const value = match[1]!;
+    const start = match.index + match[0].indexOf(value);
+    yield { start, end: start + value.length, category: 'SECRET' };
+  }
+}
+
+function* assignmentMatches(content: string): Generator<Match> {
+  const assignments = /\b(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|secret(?:[_-]?access[_-]?key)?|token|database[_-]?url|connection[_-]?string)\b["']?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|(\[(?:SECRET|EMAIL|CUSTOM)_\d+\]|[^\s,;"'}\]]+))/gi;
+  for (const match of content.matchAll(assignments)) {
+    const value = match[1] ?? match[2] ?? match[3] ?? '';
+    if (value.length < 4 || /^(?:null|true|false|undefined|\[(?:SECRET|EMAIL|CUSTOM)_\d+\])$/i.test(value)) continue;
+    const start = match.index + match[0].lastIndexOf(value);
+    yield { start, end: start + value.length, category: 'SECRET' };
+  }
+}
+
+/** Merge sorted match streams without allocating one object per occurrence up front. */
+function* orderedMatches(sources: Generator<Match>[]): Generator<Match> {
+  const heap: { match: Match; source: Generator<Match> }[] = [];
+  const before = (a: Match, b: Match): boolean => a.start < b.start || (a.start === b.start && a.end > b.end);
+  const push = (entry: { match: Match; source: Generator<Match> }): void => {
+    let index = heap.length;
+    heap.push(entry);
+    while (index > 0) {
+      const parent = (index - 1) >>> 1;
+      if (!before(entry.match, heap[parent]!.match)) break;
+      heap[index] = heap[parent]!;
+      index = parent;
+    }
+    heap[index] = entry;
+  };
+  for (const source of sources) {
+    const next = source.next();
+    if (!next.done) push({ match: next.value, source });
+  }
+  while (heap.length) {
+    const first = heap[0]!;
+    const last = heap.pop()!;
+    if (heap.length) {
+      let index = 0;
+      while (index * 2 + 1 < heap.length) {
+        let child = index * 2 + 1;
+        if (child + 1 < heap.length && before(heap[child + 1]!.match, heap[child]!.match)) child++;
+        if (!before(heap[child]!.match, last.match)) break;
+        heap[index] = heap[child]!;
+        index = child;
+      }
+      heap[index] = last;
+    }
+    yield first.match;
+    const next = first.source.next();
+    if (!next.done) push({ match: next.value, source: first.source });
+  }
+}
+
+function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolean, scanEmails: boolean, customSecrets: string[]): { content: string; secretCount: number; emailCount: number; customCount: number } {
+  const sources: Generator<Match>[] = customSecrets.map((value) => literalMatches(content, value));
   if (scanSecrets) {
     // Provider-shaped credentials plus contextual assignments. This is a heuristic scanner,
     // not proof that a transcript contains no secrets. No values are logged or exported.
-    addMatches(matches, content, /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g, 'SECRET');
-    addMatches(matches, content, /\b(?:sk-(?:proj-|ant-(?:api\d{2}-)?)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/g, 'SECRET');
-    addMatches(matches, content, /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, 'SECRET');
-    for (const match of content.matchAll(/\bBearer[ \t]+([A-Za-z0-9._~+\/-]{8,}=*)/gi)) {
-      const value = match[1]!;
-      const start = match.index + match[0].indexOf(value);
-      matches.push({ start, end: start + value.length, value, category: 'SECRET' });
-    }
-    const assignments = /\b(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd|secret(?:[_-]?access[_-]?key)?|token|database[_-]?url|connection[_-]?string)\b["']?\s*[:=]\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|(\[(?:SECRET|EMAIL)_\d+\]|[^\s,;"'}\]]+))/gi;
-    for (const match of content.matchAll(assignments)) {
-      const value = match[1] ?? match[2] ?? match[3] ?? '';
-      if (value.length < 4 || /^(?:null|true|false|undefined|\[(?:SECRET|EMAIL)_\d+\])$/i.test(value)) continue;
-      const start = match.index + match[0].lastIndexOf(value);
-      matches.push({ start, end: start + value.length, value, category: 'SECRET' });
-    }
+    sources.push(regexMatches(content, /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g, 'SECRET'));
+    sources.push(regexMatches(content, /\b(?:sk-(?:proj-|ant-(?:api\d{2}-)?)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/g, 'SECRET'));
+    sources.push(regexMatches(content, /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, 'SECRET'));
+    sources.push(bearerMatches(content), assignmentMatches(content));
   }
-  if (scanEmails) addMatches(matches, content, /\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+\b/g, 'EMAIL');
+  if (scanEmails) sources.push(regexMatches(content, /\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+\b/g, 'EMAIL'));
 
-  // Prefer a containing match (e.g. an assignment around a provider token).
-  // Nonoverlapping replacements preserve the rest of the message exactly.
-  matches.sort((a, b) => a.start - b.start || b.end - a.end);
   let cursor = 0;
   let result = '';
   let secretCount = 0;
   let emailCount = 0;
-  for (const match of matches) {
-    if (match.start < cursor) continue;
-    const map = match.category === 'SECRET' ? secrets : emails;
-    let alias = map.get(match.value);
-    if (!alias) { alias = `[${match.category}_${map.size + 1}]`; map.set(match.value, alias); }
-    result += content.slice(cursor, match.start) + alias;
-    cursor = match.end;
-    if (match.category === 'SECRET') secretCount++; else emailCount++;
+  let customCount = 0;
+  let cluster: { start: number; end: number; primary: Match } | undefined;
+  const priority = { CUSTOM: 2, SECRET: 1, EMAIL: 0 };
+  const emit = (): void => {
+    if (!cluster) return;
+    const category = cluster.primary.category;
+    const value = content.slice(cluster.start, cluster.end);
+    const map = maps[category];
+    let alias = map.get(value);
+    if (!alias) { alias = `[${category}_${map.size + 1}]`; map.set(value, alias); }
+    result += content.slice(cursor, cluster.start) + alias;
+    cursor = cluster.end;
+    if (category === 'SECRET') secretCount++;
+    else if (category === 'EMAIL') emailCount++;
+    else customCount++;
+  };
+  for (const match of orderedMatches(sources)) {
+    if (!cluster || match.start >= cluster.end) {
+      emit();
+      cluster = { start: match.start, end: match.end, primary: match };
+      continue;
+    }
+    // Merge crossing matches so a shorter rule cannot leave a sensitive suffix.
+    // The longest individual interval owns the alias; custom wins exact ties.
+    cluster.end = Math.max(cluster.end, match.end);
+    const length = match.end - match.start;
+    const longest = cluster.primary.end - cluster.primary.start;
+    if (length > longest || (length === longest && priority[match.category] > priority[cluster.primary.category])) cluster.primary = match;
   }
-  return { content: result + content.slice(cursor), secretCount, emailCount };
+  emit();
+  return { content: result + content.slice(cursor), secretCount, emailCount, customCount };
 }
 
 function stripImages(content: string): { content: string; count: number } {
@@ -94,11 +196,11 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
   if (!Number.isFinite(options.toolLimit) || options.toolLimit < 200 || options.toolLimit > 1_000_000) {
     throw new Error('Tool output limit must be between 200 and 1,000,000 characters.');
   }
+  const customSecrets = validateCustomSecrets(options.customSecrets);
   const changes: Change[] = [];
   const warnings: string[] = [];
   const seenTools = new Map<string, string>();
-  const secrets = new Map<string, string>();
-  const emails = new Map<string, string>();
+  const maps: RedactionMaps = { SECRET: new Map(), EMAIL: new Map(), CUSTOM: new Map() };
   let beforeBytes = 0;
   let afterBytes = 0;
   let imagesRemoved = 0;
@@ -106,6 +208,7 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
   let duplicatesRemoved = 0;
   let secretsRedacted = 0;
   let emailsRedacted = 0;
+  let customRedacted = 0;
   const messages = conversation.messages.map((message) => {
     const original = message.content;
     beforeBytes += bytes(original);
@@ -120,25 +223,31 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
       imagesRemoved += stripped.count;
       change('image', stripped.count, previous);
     }
-    // Deduplicate before trimming/redaction so unrelated outputs never become identical
-    // merely because their differing middle/credentials were removed.
+    // Compare unchanged output before any redaction/trim, so distinct raw outputs
+    // cannot become "duplicates" merely because their credentials were removed.
+    let firstDuplicate: string | undefined;
     if (message.role === 'tool' && options.deduplicate && content.length > 0) {
-      const first = seenTools.get(content);
-      if (first) {
-        const previous = content;
-        content = `[ThreadPack: duplicate tool output omitted; identical to message ${first}]`;
-        duplicatesRemoved++;
-        change('duplicate', 1, previous);
-      } else seenTools.set(content, message.id);
+      firstDuplicate = seenTools.get(content);
+      if (!firstDuplicate) seenTools.set(content, message.id);
     }
-    if (options.redact || options.redactEmails) {
+    if (options.redact || options.redactEmails || customSecrets.length) {
       const previous = content;
-      const redacted = redactContent(content, secrets, emails, options.redact, options.redactEmails);
+      const redacted = redactContent(content, maps, options.redact, options.redactEmails, customSecrets);
       content = redacted.content;
       secretsRedacted += redacted.secretCount;
       emailsRedacted += redacted.emailCount;
+      customRedacted += redacted.customCount;
       if (redacted.secretCount) change('secret', redacted.secretCount, previous);
       if (redacted.emailCount) change('email', redacted.emailCount, previous);
+      if (redacted.customCount) change('custom', redacted.customCount, previous);
+    }
+    // Scan full originals before replacing duplicates, so custom values are
+    // counted consistently even when the repeated output is subsequently omitted.
+    if (firstDuplicate) {
+      const previous = content;
+      content = `[ThreadPack: duplicate tool output omitted; identical to message ${firstDuplicate}]`;
+      duplicatesRemoved++;
+      change('duplicate', 1, previous);
     }
     // Scan the complete retained output before trimming. A head/tail cut can
     // remove a PEM header or credential prefix and leave sensitive suffixes
@@ -153,18 +262,20 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
     return { ...message, content };
   });
   if (outputsTrimmed || duplicatesRemoved || imagesRemoved) warnings.push('This is a lossy, normalized copy for review and handoff. Keep the original export; the copy is not a resumable agent session.');
-  if (options.redact || options.redactEmails) warnings.push('Redaction uses local patterns and can miss secrets or personal information. Review the export before sharing.');
-  const titleResult = redactContent(conversation.title, secrets, emails, options.redact, options.redactEmails);
-  const sourceResult = redactContent(conversation.source, secrets, emails, options.redact, options.redactEmails);
+  if (options.redact || options.redactEmails || customSecrets.length) warnings.push('Redaction uses local patterns and exact custom values and can miss secrets or personal information. Review the export before sharing.');
+  const titleResult = redactContent(conversation.title, maps, options.redact, options.redactEmails, customSecrets);
+  const sourceResult = redactContent(conversation.source, maps, options.redact, options.redactEmails, customSecrets);
   const metadataSecretCount = titleResult.secretCount + sourceResult.secretCount;
   const metadataEmailCount = titleResult.emailCount + sourceResult.emailCount;
+  const metadataCustomCount = titleResult.customCount + sourceResult.customCount;
   secretsRedacted += metadataSecretCount;
   emailsRedacted += metadataEmailCount;
-  if (metadataSecretCount || metadataEmailCount) warnings.push('Sensitive patterns in the conversation title or source label were also redacted. Byte totals describe message bodies only.');
+  customRedacted += metadataCustomCount;
+  if (metadataSecretCount || metadataEmailCount || metadataCustomCount) warnings.push('Sensitive patterns in the conversation title or source label were also redacted. Byte totals describe message bodies only.');
   return {
     conversation: { ...conversation, title: titleResult.content, source: sourceResult.content, messages },
     changes,
-    stats: { beforeBytes, afterBytes, removedBytes: Math.max(0, beforeBytes - afterBytes), imagesRemoved, outputsTrimmed, duplicatesRemoved, secretsRedacted, emailsRedacted },
+    stats: { beforeBytes, afterBytes, removedBytes: Math.max(0, beforeBytes - afterBytes), imagesRemoved, outputsTrimmed, duplicatesRemoved, secretsRedacted, emailsRedacted, customRedacted },
     warnings,
   };
 }

@@ -4,12 +4,13 @@ import { resolve, dirname, basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import {
-  parseInput, cleanConversation, DEFAULT_OPTIONS,
+  parseInput, cleanConversation, DEFAULT_OPTIONS, validateCustomSecrets,
   buildTranscript, buildJsonl, buildHandoff,
 } from '../src/core/index';
 
 declare const __THREADPACK_VERSION__: string;
 const MAX_BYTES = 100 * 1024 * 1024;
+const MAX_REDACTION_BYTES = 64 * 1024;
 class CliError extends Error {}
 const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
@@ -23,14 +24,18 @@ Options:
   --keep-images                          Keep inline image payloads
   --keep-tool-outputs                    Keep full tool output text
   --keep-duplicates                      Keep repeated tool outputs
-  --no-redact                            Disable rule-based secret redaction
+  --no-redact                            Disable built-in secret recognition
   --redact-emails                        Also replace email addresses
+  --redact-file <file>                   Exact values to redact, one per UTF-8 line
   --force                                Replace an existing output file
   --help, -h                             Show this help
   --version                              Show the installed version
 
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.
-Your input is never overwritten. Exports are portable copies, not native sessions.
+Redaction files are limited to 64 KiB, with up to 50 values of 3–1000 characters.
+Blank lines are ignored. Other whitespace is significant. Custom rules stay active
+with --no-redact. Input, output, and redaction files must be different files.
+Source files are never overwritten. Exports are portable copies, not native sessions.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 `;
 
@@ -62,6 +67,30 @@ async function fileInfo(path: string) {
   }
 }
 
+async function sameFile(first: string, second: string): Promise<boolean> {
+  const normalize = (path: string) => process.platform === 'win32' ? path.toLowerCase() : path;
+  if (normalize(resolve(first)) === normalize(resolve(second))) return true;
+  const [firstInfo, secondInfo] = await Promise.all([fileInfo(first), fileInfo(second)]);
+  if (!firstInfo || !secondInfo) return false;
+  if (firstInfo.dev === secondInfo.dev && firstInfo.ino === secondInfo.ino) return true;
+  return normalize(await realpath(first)) === normalize(await realpath(second));
+}
+
+async function readRedactionFile(path: string): Promise<string[]> {
+  const info = await stat(path);
+  if (!info.isFile()) throw new CliError('The redaction file must be a regular UTF-8 file.');
+  if (info.size > MAX_REDACTION_BYTES) throw new CliError('The redaction file exceeds the 64 KiB limit.');
+  const content = await readFile(path);
+  if (content.byteLength > MAX_REDACTION_BYTES) throw new CliError('The redaction file exceeds the 64 KiB limit.');
+  let text: string;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(content); }
+  catch { throw new CliError('The redaction file must contain valid UTF-8 text.'); }
+  // Preserve meaningful leading/trailing spaces; only blank lines are ignored.
+  const rules = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(line => line.trim().length > 0);
+  try { return validateCustomSecrets(rules); }
+  catch { throw new CliError('Redaction rules require at most 50 values of 3–1000 Unicode characters.'); }
+}
+
 async function main() {
   let args: ReturnType<typeof parseArgs>;
   try {
@@ -72,7 +101,7 @@ async function main() {
         conversation: { type: 'string' }, 'tool-limit': { type: 'string' }, recent: { type: 'string' },
         'keep-images': { type: 'boolean' }, 'keep-tool-outputs': { type: 'boolean' },
         'keep-duplicates': { type: 'boolean' }, 'no-redact': { type: 'boolean' },
-        'redact-emails': { type: 'boolean' }, force: { type: 'boolean' },
+        'redact-emails': { type: 'boolean' }, 'redact-file': { type: 'string' }, force: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean' },
       },
     });
@@ -91,6 +120,20 @@ async function main() {
   const recent = integer(values.recent as string | undefined, 8, 0, 100, '--recent');
   const input = args.positionals[0];
   const output = resolve(values.out);
+  const redactionFile = values['redact-file'];
+  if (redactionFile !== undefined && (typeof redactionFile !== 'string' || !redactionFile.trim())) {
+    throw new CliError('Provide a regular UTF-8 file with --redact-file.');
+  }
+  if (input !== '-' && await sameFile(resolve(input), output)) {
+    throw new CliError('Input and output must be different files, including aliases.');
+  }
+  if (typeof redactionFile === 'string') {
+    const rulesPath = resolve(redactionFile);
+    if (await sameFile(rulesPath, output) || (input !== '-' && await sameFile(rulesPath, resolve(input)))) {
+      throw new CliError('The redaction file must differ from input and output, including aliases.');
+    }
+  }
+  const customSecrets = typeof redactionFile === 'string' ? await readRedactionFile(resolve(redactionFile)) : [];
   let text: string;
   if (input === '-') {
     text = await readStdin();
@@ -99,13 +142,6 @@ async function main() {
     const inputInfo = await stat(inputPath);
     if (!inputInfo.isFile()) throw new CliError('Input must be a regular file.');
     if (inputInfo.size > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
-    const inputReal = await realpath(inputPath);
-    const outputInfo = await fileInfo(output);
-    const outputReal = outputInfo ? await realpath(output) : output;
-    if (inputReal.toLowerCase() === outputReal.toLowerCase()
-      || (outputInfo && inputInfo.dev === outputInfo.dev && inputInfo.ino === outputInfo.ino)) {
-      throw new CliError('Input and output must be different files, including aliases.');
-    }
     text = await readFile(inputPath, 'utf8');
     if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
   }
@@ -117,7 +153,7 @@ async function main() {
     ...DEFAULT_OPTIONS,
     stripImages: !values['keep-images'], trimToolOutputs: !values['keep-tool-outputs'],
     deduplicate: !values['keep-duplicates'], redact: !values['no-redact'],
-    redactEmails: Boolean(values['redact-emails']), toolLimit,
+    redactEmails: Boolean(values['redact-emails']), toolLimit, customSecrets,
   });
   let rendered: string;
   if (format === 'jsonl') rendered = buildJsonl(result.conversation);
@@ -144,7 +180,7 @@ async function main() {
   }
   const warnings = archive.warnings.length + result.warnings.length;
   process.stderr.write(`ThreadPack: exported ${result.conversation.messages.length} messages; ${result.stats.beforeBytes} → ${result.stats.afterBytes} bytes of message text.\n`);
-  process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails.\n`);
+  process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails, ${result.stats.customRedacted} custom values.\n`);
   if (warnings) process.stderr.write(`Review needed: ${warnings} parser/cleaner warnings. Inspect the browser preview before sharing an unfamiliar format.\n`);
 }
 

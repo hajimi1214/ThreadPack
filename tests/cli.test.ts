@@ -136,3 +136,93 @@ test('CLI creates an explicitly labeled deterministic handoff', async () => {
   assert.match(handoff, /deterministic|excerpt/i);
   assert.ok(!handoff.includes(fakeSecret));
 });
+
+test('CLI custom literal redaction remains active with --no-redact and preserves significant spaces', async () => {
+  const exactValue = ['PRIVATE', 'PROJECT[42].*'].join('_');
+  const spacedValue = '  EXPLICIT SPACES  ';
+  const rules = join(folder, 'literal-rules.txt');
+  await writeFile(rules, `\uFEFF${exactValue}\r\n\r\n   \r\n${spacedValue}\r\n`);
+  const input = JSON.stringify({ messages: [{
+    role: 'user',
+    content: `Exact: ${exactValue}. Again: ${exactValue}. Spaced:${spacedValue}|EXPLICIT SPACES|. Provider: ${fakeSecret}`,
+  }] });
+  const output = join(folder, 'literal-cleaned.jsonl');
+  const result = run(['-', '--out', output, '--format', 'jsonl', '--redact-file', rules, '--no-redact'], input);
+  assert.equal(result.status, 0, result.stderr);
+  const messages = (await readFile(output, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const content = messages[0].content as string;
+  assert.equal((content.match(/\[CUSTOM_1\]/g) ?? []).length, 2);
+  assert.ok(content.includes('[CUSTOM_2]|EXPLICIT SPACES|'));
+  assert.ok(!content.includes(exactValue));
+  assert.ok(!content.includes(spacedValue));
+  assert.ok(content.includes(fakeSecret));
+  assert.ok(!result.stderr.includes(exactValue));
+  assert.ok(!result.stderr.includes(rules));
+  assert.equal(result.stdout, '');
+});
+
+test('CLI custom redaction report contains only aggregate custom counts', async () => {
+  const exactValue = ['SYNTHETIC', 'INTERNAL_ACCOUNT_73'].join('_');
+  const rules = join(folder, 'report-custom-rules.txt');
+  const output = join(folder, 'custom-report.json');
+  await writeFile(rules, exactValue);
+  const input = JSON.stringify({
+    title: `Private project ${exactValue}`,
+    messages: [{ role: 'user', content: `${exactValue} and ${exactValue}` }],
+  });
+  const result = run(['-', '--out', output, '--format', 'report', '--redact-file', rules], input);
+  assert.equal(result.status, 0, result.stderr);
+  const raw = await readFile(output, 'utf8');
+  const report = JSON.parse(raw);
+  assert.equal(report.stats.customRedacted, 3);
+  assert.ok(!raw.includes(exactValue));
+  assert.ok(!raw.includes('customSecrets'));
+  assert.ok(!raw.includes(rules));
+  assert.ok(!result.stderr.includes(exactValue));
+  assert.ok(!result.stderr.includes(rules));
+});
+
+test('CLI protects custom rule files and their hard-linked aliases from both input and output roles', async () => {
+  const rules = join(folder, 'protected-rules.txt');
+  const alias = join(folder, 'protected-rules-alias.txt');
+  const input = join(folder, 'rules-protection-input.json');
+  const ruleText = 'SYNTHETIC_PROTECTED_LITERAL';
+  await writeFile(rules, ruleText);
+  await link(rules, alias);
+  await writeFile(input, transcript);
+  for (const output of [rules, alias]) {
+    const result = run([input, '--out', output, '--redact-file', rules, '--force']);
+    assert.equal(result.status, 1);
+    assert.ok(!result.stderr.includes(ruleText));
+    assert.ok(!result.stderr.includes(rules));
+  }
+  for (const source of [rules, alias]) {
+    const result = run([source, '--out', join(folder, 'rules-must-not-be-input.md'), '--redact-file', rules, '--force']);
+    assert.equal(result.status, 1);
+  }
+  assert.equal(await readFile(rules, 'utf8'), ruleText);
+  assert.equal(await readFile(alias, 'utf8'), ruleText);
+  assert.equal(await readFile(input, 'utf8'), transcript);
+});
+
+test('CLI rejects invalid custom rule files without leaking values or file paths', async () => {
+  const cases: [string, string | Buffer][] = [
+    ['too-short', '汉字'],
+    ['too-many', Array.from({ length: 51 }, (_, index) => `SYNTHETIC_RULE_${index}`).join('\n')],
+    ['too-long', 'V'.repeat(1001)],
+    ['too-large', Buffer.alloc(64 * 1024 + 1, 'X')],
+    ['invalid-utf8', Buffer.from([0xff, 0xfe, 0xff])],
+  ];
+  for (const [name, content] of cases) {
+    const rules = join(folder, `${name}-private-rules.txt`);
+    const output = join(folder, `${name}-rejected.md`);
+    await writeFile(rules, content);
+    const result = run(['-', '--out', output, '--redact-file', rules], transcript);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.ok(!result.stderr.includes(rules));
+    assert.ok(!result.stderr.includes('SYNTHETIC_RULE_'));
+    await assert.rejects(readFile(output), { code: 'ENOENT' });
+    if (name === 'too-large') assert.ok(result.stderr.includes('64 KiB limit'));
+  }
+});

@@ -28,11 +28,12 @@ export interface CleanOptions {
   deduplicate: boolean;
   redact: boolean;
   redactEmails: boolean;
+  customSecrets?: string[];
 }
 
 export interface Change {
   messageId: string;
-  kind: 'image' | 'tool' | 'duplicate' | 'secret' | 'email';
+  kind: 'image' | 'tool' | 'duplicate' | 'secret' | 'email' | 'custom';
   count: number;
   removedBytes: number;
 }
@@ -46,6 +47,7 @@ export interface CleanStats {
   duplicatesRemoved: number;
   secretsRedacted: number;
   emailsRedacted: number;
+  customRedacted: number;
 }
 
 export interface CleanResult {
