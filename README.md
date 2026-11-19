@@ -24,6 +24,8 @@ ThreadPack processes exported AI conversations without uploading them to another
 
 The browser application runs from a single self-contained HTML file. The command-line interface uses the same parsing, cleaning, and export engine. Neither interface requires an account, API key, backend, or model.
 
+The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
+
 ![ThreadPack workbench with a synthetic conversation](docs/assets/demo.png)
 
 ## Supported formats
@@ -42,13 +44,15 @@ Provider exports change over time. Unsupported records and partial imports produ
 ## Processing workflow
 
 1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
-2. **Configure cleanup:** remove embedded images, clip long tool outputs while retaining the beginning and end, collapse exact repeated tool outputs, redact recognized secrets, and optionally redact email addresses.
-3. **Review** the packed and original views. Search or filter messages and pin the context that should remain in a handoff.
+2. **Configure cleanup:** remove embedded images, clip long tool outputs while retaining the beginning and end, collapse exact repeated tool outputs, redact recognized secrets, and optionally redact email addresses or your own exact values.
+3. **Review** the packed and original views. Filter to changed messages, inspect per-message cleanup labels, search within long messages, and pin the context that should remain in a handoff.
 4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, or a handoff with goal, decisions, constraints, and next steps.
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
 
 Handoffs use deterministic excerpts. They do not infer decisions or generate an AI summary. Pinned messages and user notes are preserved even when they exceed the selected handoff budget; the output explicitly reports that condition.
+
+Switching conversations in the same archive preserves each conversation's notes, pins, and handoff settings in memory. Clearing the workspace, replacing the archive, or closing the tab removes these drafts. Custom redactions also clear when the workspace or archive is replaced. No conversation text, notes, or custom values are saved to browser storage.
 
 ## Installation and usage
 
@@ -94,6 +98,7 @@ After building, `npm link` makes the `threadpack` command available locally:
 
 ```sh
 threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
+threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
 threadpack --help
 ```
@@ -106,17 +111,23 @@ threadpack --help
 | `--keep-images` | Retain inline image payloads |
 | `--keep-tool-outputs` | Retain full tool output |
 | `--keep-duplicates` | Retain repeated tool output |
-| `--no-redact` | Disable secret redaction |
+| `--no-redact` | Disable built-in secret recognition; custom rules stay active |
 | `--redact-emails` | Also replace email addresses |
+| `--redact-file FILE` | Redact exact values from a local UTF-8 file, one value per line |
 | `--recent N` | Recent messages included in a handoff, from 0 to 100 |
 | `--force` | Replace an existing output file |
 
 Both interfaces accept input up to **100 MiB**. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. The input file and its aliases are always protected from overwrite. Diagnostics contain aggregate counts rather than transcript content.
 
+For values that generic secret detectors cannot recognize, supply `--redact-file redact-values.txt`. The file must be UTF-8 and at most **64 KiB**, with up to **50 nonblank lines**, each containing **3–1000 Unicode characters**. Matching is literal and case-sensitive, not a regular expression. Blank lines are ignored; other leading and trailing spaces remain significant. Repeated values receive stable `[CUSTOM_1]` aliases. These rules remain active with `--no-redact`, which only disables built-in secret recognition.
+
+Input, output, and redaction files must be distinct, including file aliases; `--force` never permits replacing a redaction file. Custom values and rule-file paths are omitted from diagnostics and reports; reports expose only match counts. Treat your redaction file as sensitive local data and keep it out of version control.
+
 ## Privacy and limitations
 
 - **Local processing:** the application has no upload endpoint, analytics, external model calls, or account system. Conversation data remains in tab memory; only the language preference is stored locally.
 - **Rule-based redaction:** recognized provider token formats, common credential assignments, authorization values, private keys, and optional email addresses are replaced with consistent aliases. Detection can miss secrets and can produce false positives. Review exports before sharing.
+- **Custom literal redaction:** explicit values can cover private names and internal identifiers that built-in rules do not recognize. Only exact, case-sensitive matches are replaced; encoded, reformatted, or differently cased variants require separate rules.
 - **Portable exports:** normalized JSONL is an interchange format, not a native Codex or Claude session file. ThreadPack does not repair native compaction or resume an agent directly.
 - **Lossy cleanup:** removed images no longer carry visual information; clipped output and omitted messages may contain relevant details. Keep the source export.
 - **Normalized references:** exported message IDs are sequential references rather than provider IDs. Valid timestamps are normalized. Browser handoff notes use a separate `NOTE_` alias namespace when redacted.

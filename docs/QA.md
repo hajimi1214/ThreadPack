@@ -10,7 +10,7 @@ The sign-off covers the supported local workflows, not semantic summarization or
 | Exports | Read real Markdown, JSONL, report, handoff downloads | Format dialog and handoff |
 | Offline processing | Open production HTML via file URL with network disabled | Local file in desktop browser |
 | Privacy | No external requests; no transcript storage; clear workspace | Privacy notice and cleared workspace |
-| English/Chinese | Switch both directions, reopen with preference | Chinese desktop |
+| Five interface languages | Select English, Chinese, Japanese, French, and Spanish; detect region preferences; reload saved preference | Desktop and mobile language states |
 | Responsive layout | Desktop 1440px and mobile 390px; assert horizontal fit | Contact sheet of actual browser captures |
 | Accessibility basics | Dialog escape/focus return; keyboard navigation | Focus state and dialog |
 
@@ -31,3 +31,13 @@ Date: 2026-11-19. Local validation used Windows and the installed Google Chrome 
 - Manual exploration covered pinning, note edits, comparison mode, language changes, downloading, and navigation between the workbench and handoff. Browser tests additionally cover the complete settings cycles and keyboard dialog behavior.
 
 Screenshots: `docs/assets/demo.png` and `docs/assets/demo.zh-CN.png`. No real user conversation was used in validation.
+
+## Version 1.1.0 coverage
+
+Added coverage for literal custom redaction, content-free rule reports, invalid rules, rule-file protection, per-conversation drafts, cancelled candidate archives, changed-message filtering, and search hits beyond the first 12,000 characters.
+
+Every supported language has a complete nonblank dictionary, and language selection tests cover browser detection, stored preferences, mobile layout, actual cleanup controls, and dialog focus. Only the language preference is stored; conversations, custom values, and drafts remain in memory.
+
+The visual reference supplied for this iteration was a saved local VelaMost HTML page. It was rendered with scripts disabled and remote requests blocked. The adaptation uses ThreadPack's own code and identity: blue and white surfaces, centered typography, floating illustration cards, a rounded header, and a grid workspace. Reference scripts and third-party page assets are not distributed with ThreadPack.
+
+Release validation: 66 core/CLI/localization/preview tests and 22 browser tests passed. The browser suite covers all five languages at 390px, real downloads, offline single-file operation, cancelled imports, and preserved drafts. The production web and CLI builds succeeded; the locked dependency audit reported no vulnerabilities. Visual review covered the empty landing page, populated workbench, mobile workspace, handoff, custom rules, and a settled export dialog. No observed horizontal overflow or overlapping controls remained in the reviewed states.

@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const release = join(root, 'release');
+const release = join(root, 'release', `v${version}`);
 mkdirSync(release, { recursive: true });
 const html = `ThreadPack-${version}.html`;
 const cli = `threadpack-${version}.mjs`;

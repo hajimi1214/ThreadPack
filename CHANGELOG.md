@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-11-19
+
+- Add English, Simplified Chinese, Japanese, French, and Spanish interfaces with language detection and an accessible language menu.
+- Refresh the interface with a blue and white palette, centered hero, floating illustration cards, and a grid workspace inspired by the supplied visual reference.
+- Add custom literal redaction in the browser and CLI (`--redact-file`), including handoff notes; keep custom values out of reports and diagnostics.
+- Preserve separate handoff drafts for each conversation while an archive remains open.
+- Filter changed messages, show cleanup categories, and display search matches from the middle of long messages.
+- Bind worker operations to explicit archive references so cancelled imports cannot change the file being cleaned.
+- Reduce duplicate CI runs, group dependency updates, and keep release artifacts in version-specific directories.
+
 ## 1.0.0 — 2026-11-19
 
 Initial stable release.

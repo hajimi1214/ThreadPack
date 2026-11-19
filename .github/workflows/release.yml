@@ -8,7 +8,7 @@ on:
       tag:
         description: Existing version tag to publish
         required: true
-        default: v1.0.0
+        default: v1.1.0
 
 permissions:
   contents: write
@@ -49,11 +49,11 @@ jobs:
         run: |
           VERSION="v$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
           if gh release view "$VERSION" > /dev/null 2>&1; then
-            gh release upload "$VERSION" release/* --clobber
+            gh release upload "$VERSION" "release/$VERSION/"* --clobber
           else
             if [ -f "docs/releases/$VERSION.md" ]; then
-              gh release create "$VERSION" release/* --verify-tag --title "ThreadPack $VERSION" --notes-file "docs/releases/$VERSION.md"
+              gh release create "$VERSION" "release/$VERSION/"* --verify-tag --title "ThreadPack $VERSION" --notes-file "docs/releases/$VERSION.md"
             else
-              gh release create "$VERSION" release/* --verify-tag --title "ThreadPack $VERSION" --generate-notes
+              gh release create "$VERSION" "release/$VERSION/"* --verify-tag --title "ThreadPack $VERSION" --generate-notes
             fi
           fi
