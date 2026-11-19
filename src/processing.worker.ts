@@ -2,7 +2,10 @@
 import { parseInput, cleanConversation } from './core';
 import type { ParsedArchive, CleanOptions } from './core';
 
-let archive: ParsedArchive | null = null;
+// A parse can finish after the interface has cancelled that import. Keep the
+// accepted archive and one candidate separate so a late result cannot change
+// which conversation a later clean request reads.
+const archives = new Map<number, ParsedArchive>();
 const size = (text: string) => new TextEncoder().encode(text).byteLength;
 
 function preview(text: string): string {
@@ -12,13 +15,24 @@ function preview(text: string): string {
     : readable;
 }
 
-self.onmessage = (event: MessageEvent<{ id: number; type: 'parse' | 'clean' | 'clear'; text?: string; filename?: string; conversationId?: string; options?: CleanOptions }>) => {
+self.onmessage = (event: MessageEvent<{ id: number; type: 'parse' | 'clean' | 'clear'; archiveId?: number; keepArchiveId?: number | null; text?: string; filename?: string; conversationId?: string; options?: CleanOptions }>) => {
   const { id, type } = event.data;
   try {
-    if (type === 'clear') { archive = null; self.postMessage({ id, data: null }); return; }
+    if (type === 'clear') { archives.clear(); self.postMessage({ id, data: null }); return; }
+    const { archiveId } = event.data;
+    if (typeof archiveId !== 'number' || !Number.isSafeInteger(archiveId) || archiveId < 1) {
+      throw new Error('A valid archive reference is required. Import the conversation again.');
+    }
     if (type === 'parse') {
-      archive = parseInput(event.data.text ?? '', event.data.filename ?? 'pasted.txt');
+      const archive = parseInput(event.data.text ?? '', event.data.filename ?? 'pasted.txt');
+      // Parse first: an invalid replacement must leave the accepted archive
+      // available. Successful imports retain at most that archive and this one.
+      for (const cachedId of archives.keys()) {
+        if (cachedId !== event.data.keepArchiveId) archives.delete(cachedId);
+      }
+      archives.set(archiveId, archive);
       self.postMessage({ id, data: {
+        archiveId,
         format: archive.format,
         warnings: archive.warnings,
         sourceBytes: archive.sourceBytes,
@@ -26,6 +40,7 @@ self.onmessage = (event: MessageEvent<{ id: number; type: 'parse' | 'clean' | 'c
       } });
       return;
     }
+    const archive = archives.get(archiveId);
     const selected = archive?.conversations.find(c => c.id === event.data.conversationId);
     if (!selected || !event.data.options) throw new Error('Import a conversation before cleaning it.');
     const result = cleanConversation(selected, event.data.options);

@@ -8,14 +8,14 @@ import type { CleanOptions, CleanResult, Conversation, Role } from './core';
 import { createDemo } from './demo';
 import { dictionary } from './i18n';
 import type { Lang, TranslationKey } from './i18n';
+import { useConversationDrafts } from './hooks/useConversationDrafts';
 
 interface ArchiveInfo {
-  format: string; warnings: string[]; sourceBytes: number;
+  archiveId: number; format: string; warnings: string[]; sourceBytes: number;
   conversations: { id: string; title: string; source: string; messageCount: number }[];
 }
 interface Processed { original: Conversation; originalSizes: Record<string, number>; result: CleanResult }
-interface Notes { goal: string; decisions: string; constraints: string; nextSteps: string }
-const emptyNotes: Notes = { goal: '', decisions: '', constraints: '', nextSteps: '' };
+type Notes = ReturnType<typeof useConversationDrafts>['notes'];
 const MAX_BYTES = 100 * 1024 * 1024;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
@@ -93,10 +93,7 @@ export default function App() {
   const [filter, setFilter] = useState<Role | 'all'>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [pins, setPins] = useState<string[]>([]);
-  const [notes, setNotes] = useState<Notes>(emptyNotes);
-  const [recent, setRecent] = useState(8);
-  const [budget, setBudget] = useState(12000);
+  const { pins, notes, recent, budget, setPins, setNotes, setRecent, setBudget, clearDrafts } = useConversationDrafts(selected);
   const [pasteText, setPasteText] = useState('');
   const [toast, setToast] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -105,6 +102,7 @@ export default function App() {
   const requestId = useRef(0);
   const pending = useRef(new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>());
   const importGeneration = useRef(0);
+  const activeArchiveId = useRef<number | null>(null);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
 
   const request = useCallback(<T,>(message: Record<string, unknown>): Promise<T> => {
@@ -142,7 +140,7 @@ export default function App() {
     if (!archive || !selected) return;
     let active = true;
     setBusy(true);
-    request<Processed>({ type: 'clean', conversationId: selected, options }).then(data => {
+    request<Processed>({ type: 'clean', archiveId: archive.archiveId, conversationId: selected, options }).then(data => {
       if (active) { setProcessed(data); setBusy(false); }
     }).catch(err => { if (active && err.message !== 'Cancelled') { setError(err.message); setBusy(false); } });
     return () => { active = false; };
@@ -154,11 +152,12 @@ export default function App() {
     if (byteLength(text) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
     setImporting(true); setError('');
     try {
-      const result = await request<ArchiveInfo>({ type: 'parse', text, filename: name });
+      const result = await request<ArchiveInfo>({ type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current, text, filename: name });
       if (generation !== importGeneration.current) return;
       if (!result.conversations.length) throw new Error(t.noConversation);
+      activeArchiveId.current = result.archiveId;
       setArchive(result); setSelected(result.conversations[0].id); setProcessed(null);
-      setFilename(name); setDemo(isDemo); setPins([]); setQuery(''); setFilter('all'); setMode('cleaned'); setNotes(emptyNotes); setView('workbench'); setDialog(null); setPasteText('');
+      setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setView('workbench'); setDialog(null); setPasteText('');
     } catch (err) { if (generation === importGeneration.current) setError(err instanceof Error ? err.message : t.errorTitle); }
     finally { if (generation === importGeneration.current) setImporting(false); }
   }
@@ -175,9 +174,10 @@ export default function App() {
     }
   }
   function clear() {
-    ++importGeneration.current; stopWorker(); setArchive(null); setProcessed(null); setSelected(''); setFilename(''); setPins([]); setNotes(emptyNotes); setQuery(''); setPasteText(''); setError(''); setBusy(false); setImporting(false); setDemo(false); setView('workbench'); setToast(t.cleared);
+    activeArchiveId.current = null;
+    ++importGeneration.current; stopWorker(); setArchive(null); setProcessed(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText(''); setError(''); setBusy(false); setImporting(false); setDemo(false); setView('workbench'); setToast(t.cleared);
   }
-  function selectConversation(id: string) { setSelected(id); setPins([]); setNotes(emptyNotes); setProcessed(null); setError(''); }
+  function selectConversation(id: string) { setSelected(id); setProcessed(null); setError(''); }
   function toggle(key: keyof CleanOptions) { setOptions(previous => ({ ...previous, [key]: !previous[key] })); }
   function togglePin(id: string) { setPins(previous => previous.includes(id) ? previous.filter(p => p !== id) : [...previous, id]); }
 
@@ -276,7 +276,7 @@ export default function App() {
         </section>
       </div>}
 
-      {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p></div></section><section className="handoff-preview panel"><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div><pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
+      {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p></div></section><section className="handoff-preview panel"><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div><pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
 
       {archive && <section className="export-bar"><div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary" disabled={working || !handoffText} onClick={() => void copyHandoff()}><Clipboard size={15} />{t.copy}</button><button className="button primary" disabled={working || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => setView('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 
