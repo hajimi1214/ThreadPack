@@ -3,7 +3,7 @@ import type { TranslationKey } from '../i18n';
 const ja: Record<TranslationKey, string> = {
   tagline: 'ノイズを減らし、文脈を残す。',
   workbench: 'ワークスペース', handoff: '引き継ぎパック', help: '使い方', local: 'すべての処理はこの端末内で完結します',
-  heroLabel: '次の会話へ、ここからつなぐ', heroTitle: '文脈をまとめて、\n作業の続きを。',
+  heroLabel: '文脈を引き継ぎ、新たな一歩へ', heroTitle: 'すべての会話に、\n明確な次の一歩を。',
   heroDescription: '長くなった AI との会話を整理し、新しい会話へ引き継ぎます。アカウントも API キーも不要。必要なのは会話ファイルだけです。',
   import: 'ファイルを開く', demo: 'デモを試す', paste: '貼り付け', clear: '内容を消去',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',

@@ -1,7 +1,7 @@
 import type { TranslationKey } from '../i18n';
 const zh: Record<TranslationKey, string> = {
   tagline: '去掉噪声，带上上下文。', workbench: '工作台', handoff: '交接包', help: '使用说明', local: '所有处理均在本机完成',
-  heroLabel: '让下一段对话接得上', heroTitle: '打包上下文，\n接着把事情做完。',
+  heroLabel: '带着上下文，轻装再出发', heroTitle: '让每段对话，\n都有清晰的下一步。',
   heroDescription: '把臃肿的 AI 对话整理成干净的记录，给新会话一个有用的起点。无需登录，无需 API Key。',
   import: '导入文件', demo: '试用演示', paste: '粘贴文本', clear: '清空工作区',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',

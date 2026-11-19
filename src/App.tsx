@@ -246,9 +246,15 @@ export default function App() {
     <main className={archive ? 'loaded' : ''}>
       <section className="hero">
         <div className="hero-copy"><div className="eyebrow"><span />{t.heroLabel}</div><h1>{view === 'handoff' ? t.handoffTitle : t.heroTitle.split('\n').map((line, i) => <span key={line}>{line}{i === 0 && <br />}</span>)}</h1><p>{view === 'handoff' ? t.handoffSub : t.heroDescription}</p></div>
-        <div className="hero-art" aria-hidden="true"><div className="art-grid" /><div className="art-page back"><span /><span /><span /><span /><span /></div><div className="art-page front"><span className="art-mini"><Package size={17} />THREADPACK</span><i /><i /><i /><div className="art-line"><Check size={13} /><span /></div><div className="art-line"><Check size={13} /><span /></div><b>{t.ready} <ArrowUpRight size={15} /></b></div><div className="art-chip"><ShieldCheck size={14} />{t.privacy}</div><span className="art-star">✳</span></div>
+        <div className="hero-art" aria-hidden="true">
+          <div className="reference-card reference-card-code"><div className="decoration-dots"><i /><i /><i /><span>conversation.jsonl</span></div><div className="decoration-code"><span>{'{ "role": "user",'}</span><span>{'  "content": "…" }'}</span><span className="code-muted">{'{ "role": "assistant",'}</span><span className="code-muted">{'  "content": "…" }'}</span></div><div className="decoration-footer"><FileJson size={12} /><ArrowRight size={12} /><FileText size={12} /><span>.md</span></div></div>
+          <div className="reference-card reference-card-chart"><div className="decoration-chart-title"><Layers size={13} /><span>THREADPACK</span></div><div className="decoration-bars">{[37, 63, 48, 87, 61, 33, 20].map((height, index) => <i key={index} style={{ height: String(height) + '%' }} />)}</div><div className="decoration-baseline" /></div>
+          <div className="reference-card reference-card-shield"><span><ShieldCheck size={21} /></span><div><strong>{t.privacy}</strong><small>{t.local}</small></div><Check size={14} /></div>
+          <div className="reference-orbit"><Globe2 size={27} strokeWidth={1.3} /><strong>05</strong><span>EN · 中文 · 日本語<br />FR · ES</span></div>
+        </div>
       </section>
 
+      <div className="workbench-surface"><div className="workspace-kicker"><span /><strong>{view === 'handoff' ? t.handoff : t.workbench}</strong><span>{t.privacy}</span></div>
       <div className="privacy-strip"><span><LockKeyhole size={13} /><strong>{t.local}</strong></span><span className="privacy-formats">{t.supported}</span></div>
 
       {error && <div className="error-banner" role="alert"><div><strong>{t.errorTitle}</strong><p>{error}</p></div><button className="icon-button" aria-label={t.close} onClick={() => setError('')}><X size={17} /></button></div>}
@@ -296,6 +302,7 @@ export default function App() {
       {archive && <section className="export-bar"><div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary" disabled={working || !handoffText} onClick={() => void copyHandoff()}><Clipboard size={15} />{t.copy}</button><button className="button primary" disabled={working || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => setView('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 
       {!archive && !importing && <section className="empty-state"><div className="empty-symbol"><Layers size={26} strokeWidth={1.2} /><span><ArrowRight size={12} /></span></div><h2>{t.emptyTitle}</h2><p>{t.emptyBody}</p><div className="empty-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></section>}
+      </div>
     </main>
 
     <footer className="site-footer"><span className="footer-brand"><Package size={15} />ThreadPack <span>·</span> {t.footer}</span><span><span className="status-dot" />{t.privacy}<span className="footer-separator">/</span>MIT License</span></footer>

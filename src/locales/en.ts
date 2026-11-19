@@ -1,7 +1,7 @@
 const en = {
   tagline: 'LESS NOISE. MORE CONTEXT.',
   workbench: 'Workbench', handoff: 'Handoff builder', help: 'How it works', local: 'All processing stays on this device',
-  heroLabel: 'YOUR NEXT CONVERSATION STARTS HERE', heroTitle: 'Pack the context.\nKeep the momentum.',
+  heroLabel: 'A fresh start. With your context.', heroTitle: 'Every conversation.\nA clearer next step.',
   heroDescription: 'Turn a heavy AI conversation into a clean transcript and a useful head start. No account. No API key. Just your files.',
   import: 'Import file', demo: 'Try the demo', paste: 'Paste text', clear: 'Clear workspace',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
