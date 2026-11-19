@@ -2,6 +2,8 @@
 
 ThreadPack processes imported conversations locally. The production browser app has no upload endpoint, telemetry, external model requests, or account system. Source files are read into memory; exports are downloaded as new files. The CLI also writes a new output and rejects input/output aliases.
 
+The hosted application registers a Service Worker to cache only its public application shell: root/index HTML, its manifest, and installation icons. It does not cache imported files, previews, notes, custom redaction values, API routes, blob downloads, or cross-origin requests. The standalone `file://` HTML does not register a Service Worker. An update reloads only after an explicit action in that tab; download needed work before updating because in-memory conversations are not restored.
+
 ## Redaction is an aid
 
 Detection uses explicit rules. Unusual secrets, personal identifiers, encoded credentials, vendor formats introduced after a release, and secrets in unsupported blocks may be missed. False positives are also possible. Inspect the cleaned preview and any handoff notes before sharing. ThreadPack is not a replacement for a dedicated repository secret scanner or a security review.

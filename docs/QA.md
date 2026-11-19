@@ -41,3 +41,13 @@ Every supported language has a complete nonblank dictionary, and language select
 The visual reference supplied for this iteration was a saved local VelaMost HTML page. It was rendered with scripts disabled and remote requests blocked. The adaptation uses ThreadPack's own code and identity: blue and white surfaces, centered typography, floating illustration cards, a rounded header, and a grid workspace. Reference scripts and third-party page assets are not distributed with ThreadPack.
 
 Release validation: 66 core/CLI/localization/preview tests and 22 browser tests passed. The browser suite covers all five languages at 390px, real downloads, offline single-file operation, cancelled imports, and preserved drafts. The production web and CLI builds succeeded; the locked dependency audit reported no vulnerabilities. Visual review covered the empty landing page, populated workbench, mobile workspace, handoff, custom rules, and a settled export dialog. No observed horizontal overflow or overlapping controls remained in the reviewed states.
+
+## Version 1.2.0 coverage
+
+- 86 core, CLI, Worker RPC, Web Streams, preview, localization, and Service Worker tests passed.
+- 31 browser tests passed with two workers, matching CI concurrency. They cover compact desktop/mobile layout, full original search, 30-message transport, complete export across pages, stream progress and cancellation, scroll resets, offline PWA reload, and the standalone HTML.
+- Rapid recipe changes were repeated to verify that stale revisions cannot overwrite the current UI. A simulated handoff failure verifies that old notes are cleared and copy/download remain disabled until a new result succeeds.
+- The production web and CLI build and the locked dependency audit passed.
+- Visual checks covered the desktop workspace, collapsed and expanded mobile settings, and the handoff. Tool text, privacy reminders, pin controls, and changed-message filters use stronger contrast.
+
+Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTURE.md). README screenshots use a 1440 × 900 viewport so they show the same persistent export controls a desktop user sees.

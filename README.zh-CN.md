@@ -14,7 +14,7 @@
 
 [在线应用](https://hajimi1214.github.io/ThreadPack/) · [下载发布版本](https://github.com/hajimi1214/ThreadPack/releases/latest) · [English](README.md)
 
-[核心 API](docs/API.md) · [需求调研](docs/RESEARCH.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
+[核心 API](docs/API.md) · [架构与性能](docs/ARCHITECTURE.md) · [需求调研](docs/RESEARCH.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
 </div>
 
@@ -23,6 +23,10 @@
 ThreadPack 在本地处理 AI 对话导出文件，无需上传到其他服务。它可以按设置移除图片数据、裁剪和合并工具输出，执行规则脱敏，并导出可检查的记录，或包含用户笔记和选定消息的交接包。
 
 浏览器产物是一个自包含 HTML 文件。命令行与网页共用解析、清理和导出引擎。两种方式均不需要账号、API Key、后端或大模型。
+
+导入后直接进入紧凑工作台，首屏显示对话，导出操作保持可见；手机端按需展开清理设置。全文搜索覆盖原始与打包后的完整对话，也能找到预览未显示的中间文字。
+
+文件通过 Web Streams 在 Web Worker 后台读取，提供进度与取消操作。界面只接收当前页最多 30 条消息；完整导出在后台生成，再通过缓冲区转移到页面。参见[实测数据](docs/ARCHITECTURE.md#measured-comparison)。
 
 界面支持 **简体中文、English、日本語、Français 和 Español**。通过顶部语言菜单切换；首次打开会参考浏览器语言，手动选择后会记住偏好。界面切换不会翻译对话内容；规范化导出的标题、标记与诊断信息仍使用英文。
 
@@ -59,6 +63,8 @@ ThreadPack 在本地处理 AI 对话导出文件，无需上传到其他服务�
 ### 浏览器应用
 
 直接使用[在线应用](https://hajimi1214.github.io/ThreadPack/)，或从[最新发布版本](https://github.com/hajimi1214/ThreadPack/releases/latest)下载离线 HTML 后用浏览器打开。下载版无需联网或启动本地服务器即可处理文件。
+
+在线应用也支持安装为 PWA。在支持的浏览器中点击“安装应用”或使用浏览器的安装菜单。首次成功访问后，可以离线打开。缓存仅包含公开网页资源，不包含对话、笔记、脱敏规则或导出文件。更新需要主动点击，便于你在重载前下载内存中的工作成果。
 
 从源码运行需要 **Node.js 20.19 或更高版本**：
 

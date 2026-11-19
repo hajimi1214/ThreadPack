@@ -14,7 +14,7 @@ Inspect, clean, and export AI conversation files using a local browser applicati
 
 [Live application](https://hajimi1214.github.io/ThreadPack/) · [Download release](https://github.com/hajimi1214/ThreadPack/releases/latest) · [简体中文](README.zh-CN.md)
 
-[Core API](docs/API.md) · [Research](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Core API](docs/API.md) · [Architecture and performance](docs/ARCHITECTURE.md) · [Research](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -23,6 +23,10 @@ Inspect, clean, and export AI conversation files using a local browser applicati
 ThreadPack processes exported AI conversations without uploading them to another service. It removes selected image payloads and tool-output bulk, applies rule-based redaction, and exports a reviewable transcript or a handoff containing user-written notes and selected messages.
 
 The browser application runs from a single self-contained HTML file. The command-line interface uses the same parsing, cleaning, and export engine. Neither interface requires an account, API key, backend, or model.
+
+Importing opens a compact workbench with the conversation in the first screen and persistent export actions. Mobile cleanup settings expand on demand. Full-text search covers both original and packed conversations, including text omitted from display previews.
+
+Files are read with Web Streams inside a Web Worker, with progress and cancellation. Only the current 30-message page crosses into the interface; complete exports are built in the worker and transferred as buffers. See the [measured comparison](docs/ARCHITECTURE.md#measured-comparison).
 
 The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
 
@@ -59,6 +63,8 @@ Switching conversations in the same archive preserves each conversation's notes,
 ### Browser application
 
 Use the [hosted application](https://hajimi1214.github.io/ThreadPack/), or download the offline HTML from the [latest release](https://github.com/hajimi1214/ThreadPack/releases/latest) and open it directly in a browser. The downloaded application can process files without an internet connection or local server.
+
+The hosted application is also an installable PWA. In a supporting browser, use **Install app** or the browser's installation menu. After a successful first visit, the application shell is available offline. Only public application files are cached; conversations, notes, redaction rules, and downloaded exports are excluded. Updates require an explicit action so you can download your in-memory work before reloading.
 
 To run from source, install **Node.js 20.19 or newer**:
 

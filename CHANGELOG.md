@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — 2026-11-19
+
+- Open imported files in a compact workbench, keep export actions visible, and collapse mobile cleanup settings until needed.
+- Increase contrast and readability of tool output, privacy reminders, and message controls.
+- Read local files through Web Streams in a Web Worker, with progress and cancellation.
+- Keep complete archives and cleanup results in the worker; return at most 30 bounded previews per query.
+- Search complete original and packed text, reset scroll position on pagination, and build full exports in the worker using transferable ArrayBuffers.
+- Add installable PWA support that caches only public application resources, plus explicit update controls that do not reload other tabs.
+- Fix stale cleanup revisions and prevent failed handoff generation from leaving an old document available for download.
+
 ## 1.1.0 — 2026-11-19
 
 - Add English, Simplified Chinese, Japanese, French, and Spanish interfaces with language detection and an accessible language menu.
