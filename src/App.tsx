@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, FileJson, FileText, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import ProcessorWorker from './processing.worker?worker&inline';
-import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, DEFAULT_OPTIONS } from './core';
+import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, DEFAULT_OPTIONS, validateCustomSecrets } from './core';
 import type { CleanOptions, CleanResult, Conversation, Role } from './core';
 import { createDemo } from './demo';
-import { dictionary } from './i18n';
+import { dictionary, htmlLanguage, resolveLanguage, SUPPORTED_LANGUAGES } from './i18n';
 import type { Lang, TranslationKey } from './i18n';
 import { useConversationDrafts } from './hooks/useConversationDrafts';
+import MessageCard from './components/MessageCard';
+import { APP_VERSION } from './version';
+import { searchPattern } from './preview';
 
 interface ArchiveInfo {
   archiveId: number; format: string; warnings: string[]; sourceBytes: number;
@@ -28,7 +31,7 @@ function Toggle({ title, hint, icon: Icon, checked, onChange }: { title: string;
   </button>;
 }
 
-function Dialog({ children, close, label }: { children: ReactNode; close: () => void; label: string }) {
+function Dialog({ children, close, label, closeLabel }: { children: ReactNode; close: () => void; label: string; closeLabel: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -50,33 +53,13 @@ function Dialog({ children, close, label }: { children: ReactNode; close: () => 
   }, []);
   return <div className="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
     <div ref={ref} className="dialog" role="dialog" aria-modal="true" aria-label={label}>
-      <button className="icon-button dialog-close" aria-label={label === '使用说明' ? '关闭' : 'Close'} onClick={close}><X size={20} /></button>{children}
+      <button className="icon-button dialog-close" aria-label={closeLabel} onClick={close}><X size={20} /></button>{children}
     </div>
   </div>;
 }
 
-function MessageCard({ message, index, size, pinned, onPin, changes, t }: {
-  message: Conversation['messages'][number]; index: number; size: number; pinned: boolean; onPin: () => void;
-  changes: CleanResult['changes']; t: Record<TranslationKey, string>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const safePreview = message.content.replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=_-]+/gi, '[Embedded image payload · hidden in preview]');
-  const limit = expanded ? 12000 : 1100;
-  const content = safePreview.length > limit ? `${safePreview.slice(0, limit)}\n…` : safePreview;
-  const changeCount = changes.filter(c => c.messageId === message.id).reduce((n, c) => n + c.count, 0);
-  const RoleIcon = message.role === 'tool' ? Terminal : message.role === 'assistant' ? Sparkles : message.role === 'system' ? ShieldCheck : null;
-  return <article className={`message-card role-${message.role} ${pinned ? 'is-pinned' : ''}`}>
-    <div className="message-heading">
-      <div className="message-role"><span className="role-avatar">{RoleIcon ? <RoleIcon size={13} /> : <span>U</span>}</span><strong>{t[message.role]}</strong><span className="message-index">{String(index + 1).padStart(2, '0')}</span></div>
-      <div className="message-meta">{changeCount > 0 && <span className="changed-dot" title={`${changeCount} changes`}>−{changeCount}</span>}<span>{bytes(size)}</span><button className={`pin-button ${pinned ? 'active' : ''}`} aria-label={pinned ? t.unpin : t.pin} aria-pressed={pinned} onClick={onPin} title={pinned ? t.unpin : t.pin}><Pin size={14} /></button></div>
-    </div>
-    <pre className="message-content">{content || '—'}</pre>
-    {safePreview.length > 1100 && <button className="text-button expand-button" onClick={() => setExpanded(!expanded)}>{expanded ? t.collapse : t.expand}<ChevronDown size={13} className={expanded ? 'rotate' : ''} /></button>}
-  </article>;
-}
-
 export default function App() {
-  const [lang, setLang] = useState<Lang>(() => { try { return localStorage.getItem('threadpack-language') === 'zh' ? 'zh' : 'en'; } catch { return 'en'; } });
+  const [lang, setLang] = useState<Lang>(() => { try { return resolveLanguage(localStorage.getItem('threadpack-language'), navigator.languages); } catch { return resolveLanguage(null, navigator.languages); } });
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
   const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | null>(null);
@@ -92,6 +75,9 @@ export default function App() {
   const [mode, setMode] = useState<'cleaned' | 'original'>('cleaned');
   const [filter, setFilter] = useState<Role | 'all'>('all');
   const [query, setQuery] = useState('');
+  const [changedOnly, setChangedOnly] = useState(false);
+  const [customText, setCustomText] = useState('');
+  const [customError, setCustomError] = useState('');
   const [page, setPage] = useState(0);
   const { pins, notes, recent, budget, setPins, setNotes, setRecent, setBudget, clearDrafts } = useConversationDrafts(selected);
   const [pasteText, setPasteText] = useState('');
@@ -132,9 +118,9 @@ export default function App() {
     pending.current.clear();
   }, []);
   useEffect(() => stopWorker, [stopWorker]);
-  useEffect(() => { document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'; try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
+  useEffect(() => { document.documentElement.lang = htmlLanguage(lang); try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 3200); return () => clearTimeout(id); }, [toast]);
-  useEffect(() => { setPage(0); }, [filter, query, selected, mode]);
+  useEffect(() => { setPage(0); }, [filter, query, selected, mode, changedOnly]);
 
   useEffect(() => {
     if (!archive || !selected) return;
@@ -157,6 +143,7 @@ export default function App() {
       if (!result.conversations.length) throw new Error(t.noConversation);
       activeArchiveId.current = result.archiveId;
       setArchive(result); setSelected(result.conversations[0].id); setProcessed(null);
+      setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
       setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setView('workbench'); setDialog(null); setPasteText('');
     } catch (err) { if (generation === importGeneration.current) setError(err instanceof Error ? err.message : t.errorTitle); }
     finally { if (generation === importGeneration.current) setImporting(false); }
@@ -175,18 +162,27 @@ export default function App() {
   }
   function clear() {
     activeArchiveId.current = null;
+    setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
     ++importGeneration.current; stopWorker(); setArchive(null); setProcessed(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText(''); setError(''); setBusy(false); setImporting(false); setDemo(false); setView('workbench'); setToast(t.cleared);
   }
   function selectConversation(id: string) { setSelected(id); setProcessed(null); setError(''); }
   function toggle(key: keyof CleanOptions) { setOptions(previous => ({ ...previous, [key]: !previous[key] })); }
   function togglePin(id: string) { setPins(previous => previous.includes(id) ? previous.filter(p => p !== id) : [...previous, id]); }
+  function applyCustomRules() {
+    try {
+      const values = validateCustomSecrets(customText.split(/\r?\n/).filter(value => value.trim()));
+      setOptions(previous => ({ ...previous, customSecrets: values })); setCustomError('');
+    } catch { setCustomError(t.customInvalid); }
+  }
+  function clearCustomRules() { setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); }
+  function resetRecipe() { setOptions({ ...DEFAULT_OPTIONS }); setCustomText(''); setCustomError(''); }
 
   const handoffText = useMemo(() => {
     if (!processed) return '';
     const keys = ['goal', 'decisions', 'constraints', 'nextSteps'] as const;
     // Scan notes together for stable aliases, with a separate namespace from the transcript.
     const cleanedNotes = cleanConversation({ id: 'notes', title: '', source: 'notes', messages: keys.map(key => ({ id: key, role: 'user' as const, content: notes[key] })) }, { ...options, trimToolOutputs: false, deduplicate: false });
-    const safeNotes = Object.fromEntries(cleanedNotes.conversation.messages.map(m => [m.id, m.content.replace(/\[(SECRET|EMAIL)_(\d+)\]/g, '[NOTE_$1_$2]')])) as unknown as Notes;
+    const safeNotes = Object.fromEntries(cleanedNotes.conversation.messages.map(m => [m.id, m.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]')])) as unknown as Notes;
     return buildHandoff(processed.result.conversation, { ...safeNotes, pinnedIds: pins, recentCount: recent, maxCharacters: budget });
   }, [processed, notes, pins, recent, budget, options]);
 
@@ -200,7 +196,11 @@ export default function App() {
     const c = processed.result.conversation;
     if (format === 'markdown') download(buildTranscript(c), 'threadpack-transcript.md', 'text/markdown;charset=utf-8');
     else if (format === 'jsonl') download(buildJsonl(c), 'threadpack-transcript.jsonl', 'application/x-ndjson;charset=utf-8');
-    else download(JSON.stringify({ tool: 'ThreadPack', version: '1.0.0', format: archive?.format, messageCount: c.messages.length, stats: processed.result.stats, options, scope: 'UTF-8 normalized message text; excludes source metadata. No message text or file paths are included in this report.' }, null, 2), 'threadpack-report.json', 'application/json;charset=utf-8');
+    else download(JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive?.format, messageCount: c.messages.length, stats: processed.result.stats, options: {
+      stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit,
+      deduplicate: options.deduplicate, redact: options.redact, redactEmails: options.redactEmails,
+      customRuleCount: options.customSecrets?.length ?? 0,
+    }, scope: 'UTF-8 normalized message text; excludes source metadata. No message text, file paths, or custom redaction values are included in this report.' }, null, 2), 'threadpack-report.json', 'application/json;charset=utf-8');
     setDialog(null);
   }
   async function copyHandoff() {
@@ -208,31 +208,45 @@ export default function App() {
     catch { setToast(t.clipboardError); }
   }
 
+  const changesByMessage = useMemo(() => {
+    const indexed = new Map<string, CleanResult['changes']>();
+    for (const change of processed?.result.changes ?? []) {
+      const group = indexed.get(change.messageId);
+      if (group) group.push(change); else indexed.set(change.messageId, [change]);
+    }
+    return indexed;
+  }, [processed]);
   const messages = processed ? (mode === 'cleaned' ? processed.result.conversation.messages : processed.original.messages) : [];
-  const visible = messages.map((message, index) => ({ message, index })).filter(({ message }) => (filter === 'all' || message.role === filter) && (!query || message.content.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
+  const visible = useMemo(() => {
+    const pattern = searchPattern(query);
+    return messages.map((message, index) => ({ message, index })).filter(({ message }) =>
+      (filter === 'all' || message.role === filter) && (!changedOnly || changesByMessage.has(message.id)) &&
+      (!pattern || pattern.test(message.content)));
+  }, [messages, filter, changedOnly, changesByMessage, query]);
   const pageCount = Math.max(1, Math.ceil(visible.length / 30));
   const safePage = Math.min(page, pageCount - 1);
   const stats = processed?.result.stats;
   const reduction = stats && stats.beforeBytes ? Math.max(0, 100 * (1 - stats.afterBytes / stats.beforeBytes)) : 0;
   const working = busy || importing;
-  const changeRows: { key: 'imagesRemoved' | 'outputsTrimmed' | 'duplicatesRemoved' | 'secretsRedacted' | 'emailsRedacted'; icon: LucideIcon }[] = [
+  const changeRows: { key: 'imagesRemoved' | 'outputsTrimmed' | 'duplicatesRemoved' | 'secretsRedacted' | 'emailsRedacted' | 'customRedacted'; icon: LucideIcon }[] = [
     { key: 'imagesRemoved', icon: ImageMinus }, { key: 'outputsTrimmed', icon: Terminal }, { key: 'duplicatesRemoved', icon: Copy }, { key: 'secretsRedacted', icon: ShieldCheck }, { key: 'emailsRedacted', icon: Mail },
+    { key: 'customRedacted', icon: LockKeyhole },
   ];
 
   return <div className="app-shell" onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
     <header className="site-header">
-      <a className="brand" href="#" onClick={e => { e.preventDefault(); setView('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><Package size={21} strokeWidth={1.7} /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v1.0</span></span></a>
-      <nav className="main-nav" aria-label={lang === 'zh' ? '主导航' : 'Main navigation'}>
+      <a className="brand" href="#" onClick={e => { e.preventDefault(); setView('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><Package size={21} strokeWidth={1.7} /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
+      <nav className="main-nav" aria-label={t.workbench}>
         <button className={view === 'workbench' ? 'selected' : ''} onClick={() => setView('workbench')}>{t.workbench}</button>
         <button className={view === 'handoff' ? 'selected' : ''} onClick={() => setView('handoff')} disabled={!processed}>{t.handoff}{pins.length > 0 && <span className="nav-count">{pins.length}</span>}</button>
       </nav>
-      <div className="header-actions"><button className="help-button" onClick={() => setDialog('help')}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><button className="language-button" aria-label="Switch language / 切换语言" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>{lang === 'en' ? '中文' : 'EN'}</button></div>
+      <div className="header-actions"><button className="help-button" aria-label={t.help} onClick={() => setDialog('help')}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
     </header>
 
     <main className={archive ? 'loaded' : ''}>
       <section className="hero">
         <div className="hero-copy"><div className="eyebrow"><span />{t.heroLabel}</div><h1>{view === 'handoff' ? t.handoffTitle : t.heroTitle.split('\n').map((line, i) => <span key={line}>{line}{i === 0 && <br />}</span>)}</h1><p>{view === 'handoff' ? t.handoffSub : t.heroDescription}</p></div>
-        <div className="hero-art" aria-hidden="true"><div className="art-grid" /><div className="art-page back"><span /><span /><span /><span /><span /></div><div className="art-page front"><span className="art-mini"><Package size={17} />THREADPACK</span><i /><i /><i /><div className="art-line"><Check size={13} /><span /></div><div className="art-line"><Check size={13} /><span /></div><b>ready for what’s next <ArrowUpRight size={15} /></b></div><div className="art-chip"><ShieldCheck size={14} /> 100% local</div><span className="art-star">✳</span></div>
+        <div className="hero-art" aria-hidden="true"><div className="art-grid" /><div className="art-page back"><span /><span /><span /><span /><span /></div><div className="art-page front"><span className="art-mini"><Package size={17} />THREADPACK</span><i /><i /><i /><div className="art-line"><Check size={13} /><span /></div><div className="art-line"><Check size={13} /><span /></div><b>{t.ready} <ArrowUpRight size={15} /></b></div><div className="art-chip"><ShieldCheck size={14} />{t.privacy}</div><span className="art-star">✳</span></div>
       </section>
 
       <div className="privacy-strip"><span><LockKeyhole size={13} /><strong>{t.local}</strong></span><span className="privacy-formats">{t.supported}</span></div>
@@ -251,28 +265,29 @@ export default function App() {
       {archive && <section className="metrics" aria-label={t.payloadHint}>
         <div className="metric"><div className="metric-title">{t.sourceSize}<FileText size={14} /></div><strong>{stats ? bytes(stats.beforeBytes) : '—'}</strong><small>{t.payloadHint}</small></div>
         <div className="metric"><div className="metric-title">{t.cleanSize}<Package size={14} /></div><strong>{stats ? bytes(stats.afterBytes) : '—'}</strong><div className="mini-bars" aria-hidden="true">{Array.from({ length: 24 }, (_, i) => <i key={i} className={stats && i < Math.max(1, Math.ceil(24 * stats.afterBytes / Math.max(stats.beforeBytes, stats.afterBytes, 1))) ? 'filled' : ''} />)}</div></div>
-        <div className="metric metric-saved"><div className="metric-title">{t.saved}<ArrowDownToLine size={14} /></div><strong>{stats ? reduction.toFixed(1) : '—'}<span>%</span></strong><small>{stats ? `${bytes(stats.removedBytes)} ${lang === 'zh' ? '已减去' : 'removed'}` : '—'}</small></div>
+        <div className="metric metric-saved"><div className="metric-title">{t.saved}<ArrowDownToLine size={14} /></div><strong>{stats ? reduction.toFixed(1) : '—'}<span>%</span></strong><small>{stats ? `${bytes(stats.removedBytes)} ${t.removed}` : '—'}</small></div>
         <div className="metric"><div className="metric-title">{t.messages}<Layers size={14} /></div><strong>{currentConversation?.messageCount.toLocaleString() ?? '—'}</strong><small>{pins.length} {t.pinned}</small></div>
       </section>}
 
       {archive && view === 'workbench' && <div className="workspace-grid">
-        <aside className="recipe-panel panel"><div className="panel-heading"><div><h2>{t.recipe}</h2><p>{t.recipeSub}</p></div><button className="icon-button muted" title={t.reset} aria-label={t.reset} onClick={() => setOptions({ ...DEFAULT_OPTIONS })}><RotateCcw size={15} /></button></div>
+        <aside className="recipe-panel panel"><div className="panel-heading"><div><h2>{t.recipe}</h2><p>{t.recipeSub}</p></div><button className="icon-button muted" title={t.reset} aria-label={t.reset} onClick={resetRecipe}><RotateCcw size={15} /></button></div>
           <div className="recipe-controls"><Toggle title={t.stripImages} hint={t.stripImagesHint} icon={ImageMinus} checked={options.stripImages} onChange={() => toggle('stripImages')} /><Toggle title={t.trimTools} hint={t.trimToolsHint} icon={Terminal} checked={options.trimToolOutputs} onChange={() => toggle('trimToolOutputs')} />
             {options.trimToolOutputs && <div className="range-control"><div><label htmlFor="tool-limit">{t.toolLimit}</label><output htmlFor="tool-limit">{options.toolLimit.toLocaleString()}</output></div><input id="tool-limit" type="range" min="500" max="12000" step="500" value={options.toolLimit} onChange={e => setOptions(o => ({ ...o, toolLimit: Number(e.target.value) }))} /><div className="range-labels"><span>500</span><span>12,000</span></div></div>}
             <Toggle title={t.dedup} hint={t.dedupHint} icon={Copy} checked={options.deduplicate} onChange={() => toggle('deduplicate')} /><div className="recipe-divider" /><Toggle title={t.redact} hint={t.redactHint} icon={ShieldCheck} checked={options.redact} onChange={() => toggle('redact')} /><Toggle title={t.emails} hint={t.emailsHint} icon={Mail} checked={options.redactEmails} onChange={() => toggle('redactEmails')} />
+            <details className="custom-rules"><summary><LockKeyhole size={14} />{t.customRules}<span>{options.customSecrets?.length ?? 0}</span></summary><p>{t.customHint}</p><label htmlFor="custom-values">{t.customValues}</label><textarea id="custom-values" rows={4} maxLength={51000} autoComplete="off" spellCheck={false} value={customText} placeholder={'internal.example.test\ncustomer-reference-123'} onChange={e => { setCustomText(e.target.value); setCustomError(''); }} />{customError && <p className="custom-error" role="alert">{customError}</p>}<div className="custom-rule-actions"><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button><button className="text-button" onClick={clearCustomRules}>{t.clearCustom}</button></div></details>
           </div>
           <div className="privacy-card"><ShieldCheck size={21} strokeWidth={1.4} /><strong>{t.privacyTitle}</strong><p>{t.privacyDescription}</p><span>{t.reviewNote}</span></div>
         </aside>
         <section className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{t.previewSub}</p></div><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div>
-          <div className="preview-toolbar"><div className="role-filter">{(['all', 'user', 'assistant', 'tool'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><label className="search-box"><Search size={14} /><input type="search" value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label></div>
+          <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
           <div className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !visible.length && <p className="no-results">{t.noResults}</p>}
-            {visible.slice(safePage * 30, safePage * 30 + 30).map(({ message, index }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} size={mode === 'original' ? processed?.originalSizes[message.id] ?? 0 : byteLength(message.content)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} changes={mode === 'cleaned' ? processed?.result.changes ?? [] : []} t={t} />)}
+            {visible.slice(safePage * 30, safePage * 30 + 30).map(({ message, index }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(mode === 'original' ? processed?.originalSizes[message.id] ?? 0 : byteLength(message.content))} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} changes={changesByMessage.get(message.id) ?? []} query={query} t={t} />)}
           </div>
           {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(p => p - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(p => p + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
-          <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => row.key !== 'emailsRedacted' || options.redactEmails).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
+          <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
         </section>
       </div>}
 
@@ -287,8 +302,8 @@ export default function App() {
     {toast && <div className="toast" role="status"><Check size={15} />{toast}</div>}
     {dragging && <div className="drag-overlay"><div><Upload size={44} /><h2>{t.drop}</h2><p>{t.dropHint}</p></div></div>}
 
-    {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div></Dialog>}
-    {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
-    {dialog === 'export' && <Dialog close={() => setDialog(null)} label={t.export}><div className="dialog-eyebrow"><Package size={18} />{t.ready}</div><h2>{t.exportTitle}</h2><p className="dialog-subtitle">{t.exportSub}</p><div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }] as const).map(({ format, title, hint, icon: Icon, ext }) => <button key={format} onClick={() => exportFile(format)}><span className="format-icon"><Icon size={21} strokeWidth={1.5} /></span><span><strong>{t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div><p className="export-disclaimer">{t.reviewNote}</p><p className="export-disclaimer">{t.exportWarning}</p></Dialog>}
+    {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div></Dialog>}
+    {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
+    {dialog === 'export' && <Dialog close={() => setDialog(null)} label={t.export} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />{t.ready}</div><h2>{t.exportTitle}</h2><p className="dialog-subtitle">{t.exportSub}</p><div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }] as const).map(({ format, title, hint, icon: Icon, ext }) => <button key={format} onClick={() => exportFile(format)}><span className="format-icon"><Icon size={21} strokeWidth={1.5} /></span><span><strong>{t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div><p className="export-disclaimer">{t.reviewNote}</p><p className="export-disclaimer">{t.exportWarning}</p></Dialog>}
   </div>;
 }

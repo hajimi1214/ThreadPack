@@ -238,14 +238,14 @@ test('paste, malformed JSON, clearing, language, and help keyboard focus all wor
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   await expect(help).toBeFocused();
-  await page.getByRole('button', { name: 'Switch language / 切换语言' }).click();
+  await page.getByRole('combobox', { name: 'Language / 语言', exact: true }).selectOption('zh');
   await expect(page.getByRole('button', { name: '试用演示', exact: true })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await page.getByRole('button', { name: '使用说明', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '使用说明', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: '使用说明', exact: true })).toBeFocused();
-  await page.getByRole('button', { name: 'Switch language / 切换语言' }).click();
+  await page.getByRole('combobox', { name: 'Language / 语言', exact: true }).selectOption('en');
 
   await page.getByRole('button', { name: 'Paste text', exact: true }).click();
   const paste = page.getByRole('dialog', { name: 'Paste text', exact: true });
