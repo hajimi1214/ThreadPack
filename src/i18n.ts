@@ -1,106 +1,27 @@
-export type Lang = 'en' | 'zh';
-const en = {
-  tagline: 'LESS NOISE. MORE CONTEXT.',
-  workbench: 'Workbench', handoff: 'Handoff builder', help: 'How it works', local: 'All processing stays on this device',
-  heroLabel: 'YOUR NEXT CONVERSATION STARTS HERE', heroTitle: 'Pack the context.\nKeep the momentum.',
-  heroDescription: 'Turn a heavy AI conversation into a clean transcript and a useful head start. No account. No API key. Just your files.',
-  import: 'Import file', demo: 'Try the demo', paste: 'Paste text', clear: 'Clear workspace',
-  supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
-  drop: 'Drop a conversation here', dropHint: 'or choose a file · .jsonl, .json, .md, .txt · up to 100 MiB',
-  sample: 'Demo conversation', fileLabel: 'YOUR CONVERSATION', changeFile: 'Change file', conversations: 'Conversation',
-  sourceSize: 'Original text', cleanSize: 'Packed text', saved: 'Lighter by', messages: 'Messages', payloadHint: 'UTF-8 message text, excluding export metadata',
-  recipe: 'Cleanup recipe', recipeSub: 'Keep the signal. Tune the rest.', reset: 'Reset',
-  stripImages: 'Remove embedded images', stripImagesHint: 'Replace base64 payloads with a marker',
-  trimTools: 'Clip long tool outputs', trimToolsHint: 'Keep the beginning and the end', toolLimit: 'Characters per tool output',
-  dedup: 'Collapse repeat outputs', dedupHint: 'Keep the first exact tool result',
-  redact: 'Redact common secrets', redactHint: 'API keys, bearer tokens & private keys',
-  emails: 'Redact email addresses', emailsHint: 'Use consistent, readable aliases',
-  privacyTitle: 'Your conversation stays yours.', privacyDescription: 'No uploads, analytics, or cloud processing. Conversation text is kept in memory until you clear or close this tab.',
-  reviewNote: 'Rule-based redaction can miss secrets. Review every export before sharing.',
-  preview: 'Transcript preview', previewSub: 'Pin the messages your next chat needs.', cleaned: 'Packed', original: 'Original',
-  search: 'Search messages…', all: 'All', user: 'User', assistant: 'Assistant', tool: 'Tool', system: 'System',
-  noResults: 'No messages match this filter.', pin: 'Pin for handoff', unpin: 'Unpin message', pinned: 'pinned',
-  expand: 'Show more', collapse: 'Show less', prev: 'Previous', next: 'Next',
-  originalWarning: 'Original preview may contain sensitive data. Images and very long text are shortened; search covers this preview only.',
-  changes: 'CHANGES AT A GLANCE', imagesRemoved: 'images removed', outputsTrimmed: 'outputs clipped', duplicatesRemoved: 'repeats collapsed', secretsRedacted: 'secrets redacted', emailsRedacted: 'emails redacted',
-  export: 'Export transcript', buildHandoff: 'Build a handoff', ready: 'READY TO GO', exportHint: 'A new copy. Your original file stays intact.',
-  handoffTitle: 'Give your next chat a head start.', handoffSub: 'Add what matters. We attach your pinned messages and recent exchanges.',
-  notes: 'The important parts', goal: 'Goal', goalHint: 'What are you trying to achieve?',
-  decisions: 'Decisions & completed work', decisionsHint: 'What has been decided or already done?',
-  constraints: 'Constraints', constraintsHint: 'What must the next assistant keep in mind?',
-  nextSteps: 'Next steps', nextStepsHint: 'What should happen next?',
-  recent: 'Recent messages', budget: 'Handoff text budget', pinsHint: 'Pin any message in the workbench to include it here.',
-  draftHint: 'Notes, pins, and handoff settings stay with each conversation while this archive is open. Clearing, replacing, or closing it removes these drafts.',
-  handoffPreview: 'Handoff preview', copy: 'Copy text', copied: 'Copied', downloadHandoff: 'Download handoff',
-  handoffNote: 'Built from your notes and message excerpts. No AI summarization. Verify the contents before continuing work.',
-  exportTitle: 'Take your conversation with you.', exportSub: 'Exports contain the currently selected conversation, with your cleanup recipe applied.',
-  markdown: 'Markdown transcript', markdownHint: 'Readable conversation for people and AI chats',
-  jsonl: 'Normalized JSONL', jsonlHint: 'One message per line, for your own tools',
-  report: 'Cleanup report', reportHint: 'Counts and settings only. No message text.',
-  exportWarning: 'Normalized exports are not native session files and cannot be used to resume an agent directly.',
-  close: 'Close', cancel: 'Cancel', pasteTitle: 'Start with what you have.', pasteHint: 'Paste a conversation, a log, or a supported JSON export.', parseText: 'Open text',
-  helpTitle: 'A lighter way to carry context.',
-  help1Title: '01 / Bring a conversation', help1: 'Drop a Codex or Claude Code JSONL file, ChatGPT or Claude JSON export, or ordinary text. Choose a conversation if the archive contains several.',
-  help2Title: '02 / Clean and review', help2: 'Remove image payloads, clip tool noise, collapse repeats, and mask common secrets. Compare with the original and pin important messages.',
-  help3Title: '03 / Carry the important parts', help3: 'Write a few handoff notes, then copy or download your pack for a fresh chat. No model is called and no semantic summary is generated.',
-  helpPrivacy: 'Privacy by design', helpPrivacyText: 'No remote resources, network-based AI, or conversation storage. Your browser and its extensions still have access to the page. Clear the workspace or close the tab when finished.',
-  helpLimits: 'Know the boundaries', helpLimitsText: 'Text exports cannot preserve the visual information inside removed images. Redaction is a heuristic and may miss credentials. Review warnings and output. This tool does not repair or overwrite native session files.',
-  processing: 'Packing your conversation…', errorTitle: 'Could not open this conversation', tooLarge: 'This file exceeds the 100 MiB limit. Split it into smaller exports first.',
-  emptyPaste: 'Paste some text first.', cleared: 'Workspace cleared', downloaded: 'Export downloaded', clipboardError: 'Clipboard is unavailable here. Use the download button instead.',
-  warnings: 'Import notes', emptyTitle: 'Great work deserves a good handoff.', emptyBody: 'Import a conversation or try our synthetic demo to see what you can leave behind.',
-  demoBadge: 'SYNTHETIC DEMO', back: 'Back to workbench', characters: 'characters', noConversation: 'Import a conversation first.',
-  privacy: 'Local by design', footer: 'Built for a fresh start.', off: 'off', on: 'on',
-} as const;
+import en from './locales/en';
+import zh from './locales/zh';
+import ja from './locales/ja';
+import fr from './locales/fr';
+import es from './locales/es';
+
+export type Lang = 'en' | 'zh' | 'ja' | 'fr' | 'es';
 export type TranslationKey = keyof typeof en;
-const zh: Record<TranslationKey, string> = {
-  tagline: '去掉噪声，带上上下文。', workbench: '工作台', handoff: '交接包', help: '使用说明', local: '所有处理均在本机完成',
-  heroLabel: '让下一段对话接得上', heroTitle: '打包上下文，\n接着把事情做完。',
-  heroDescription: '把臃肿的 AI 对话整理成干净的记录，给新会话一个有用的起点。无需登录，无需 API Key。',
-  import: '导入文件', demo: '试用演示', paste: '粘贴文本', clear: '清空工作区',
-  supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
-  drop: '把对话文件拖到这里', dropHint: '或点击选择 · .jsonl、.json、.md、.txt · 最大 100 MiB',
-  sample: '演示对话', fileLabel: '你的对话', changeFile: '更换文件', conversations: '选择对话',
-  sourceSize: '原始文本', cleanSize: '打包后文本', saved: '减少体积', messages: '消息条数', payloadHint: '统计 UTF-8 消息文本，不含导出元数据',
-  recipe: '清理设置', recipeSub: '保留有用的，整理其余内容。', reset: '重置',
-  stripImages: '移除内嵌图片', stripImagesHint: '把 base64 数据替换为说明标记',
-  trimTools: '裁剪过长工具输出', trimToolsHint: '保留开头和结尾', toolLimit: '单条工具输出字符数',
-  dedup: '合并重复工具输出', dedupHint: '完整保留第一次出现的结果',
-  redact: '隐藏常见密钥', redactHint: 'API Key、Bearer Token 和私钥',
-  emails: '隐藏邮箱地址', emailsHint: '用一致的别名保留对应关系',
-  privacyTitle: '你的对话，留在你的设备。', privacyDescription: '无上传、无统计追踪、无云端处理。对话文本仅存于内存，清空或关闭页面即可释放。',
-  reviewNote: '规则脱敏可能遗漏密钥，分享前请检查导出内容。',
-  preview: '对话预览', previewSub: '固定新会话需要记住的消息。', cleaned: '打包后', original: '原始内容',
-  search: '搜索消息…', all: '全部', user: '用户', assistant: '助手', tool: '工具', system: '系统',
-  noResults: '没有符合筛选条件的消息。', pin: '固定到交接包', unpin: '取消固定', pinned: '条已固定',
-  expand: '展开', collapse: '收起', prev: '上一页', next: '下一页',
-  originalWarning: '原始预览可能包含敏感信息。图片与超长文本在显示时缩短，搜索仅覆盖预览内容。',
-  changes: '本次清理', imagesRemoved: '张图片已移除', outputsTrimmed: '条输出已裁剪', duplicatesRemoved: '条重复已合并', secretsRedacted: '处密钥已隐藏', emailsRedacted: '处邮箱已隐藏',
-  export: '导出对话', buildHandoff: '生成交接包', ready: '可以出发了', exportHint: '导出新副本，原始文件不受影响。',
-  handoffTitle: '让新会话顺利接手。', handoffSub: '写下重要的事，再带上固定消息和最近的对话。',
-  notes: '重要的事情', goal: '目标', goalHint: '你要完成什么？',
-  decisions: '已决定与已完成', decisionsHint: '做过哪些决定？已经完成了什么？',
-  constraints: '约束条件', constraintsHint: '下一位助手必须遵守什么？',
-  nextSteps: '下一步', nextStepsHint: '接下来应该做什么？',
-  recent: '保留最近消息', budget: '交接包文本预算', pinsHint: '在工作台固定消息，就会把它带到这里。',
-  draftHint: '切换会话时会保留各自的笔记、固定消息与交接设置。清空、更换档案或关闭页面后，这些内存草稿会被移除。',
-  handoffPreview: '交接包预览', copy: '复制文本', copied: '已复制', downloadHandoff: '下载交接包',
-  handoffNote: '根据你的笔记与消息摘录生成，未使用 AI 总结。继续工作前请核对内容。',
-  exportTitle: '带走这段有用的对话。', exportSub: '导出当前选中的对话，应用你设置的清理规则。',
-  markdown: 'Markdown 对话', markdownHint: '适合阅读、归档或粘贴到 AI 对话',
-  jsonl: '标准化 JSONL', jsonlHint: '每行一条消息，便于其他工具处理',
-  report: '清理报告', reportHint: '仅含数量与设置，不包含消息正文',
-  exportWarning: '标准化导出不是原生会话文件，不能直接用于恢复代理会话。',
-  close: '关闭', cancel: '取消', pasteTitle: '从已有的内容开始。', pasteHint: '粘贴一段对话、日志或支持的 JSON 导出。', parseText: '打开文本',
-  helpTitle: '轻一点，接着聊。',
-  help1Title: '01 / 带来一段对话', help1: '导入 Codex 或 Claude Code 的 JSONL、ChatGPT 或 Claude 的 JSON，或普通文本。多会话档案可以切换查看。',
-  help2Title: '02 / 清理并检查', help2: '移除图片数据、裁剪工具输出、合并重复项、隐藏常见密钥。与原始内容对比，固定重要消息。',
-  help3Title: '03 / 带走重要内容', help3: '补充几条交接笔记，然后复制或下载交接包，交给新会话。全程不调用模型，也不做语义摘要。',
-  helpPrivacy: '本地处理', helpPrivacyText: '不使用远程资源、在线 AI 或对话存储。浏览器及其扩展仍可访问页面。完成后请清空工作区或关闭标签页。',
-  helpLimits: '使用边界', helpLimitsText: '文本导出无法保留被移除图片里的视觉信息。脱敏规则可能漏检。请检查提示与结果。本工具不会修复或覆盖原生会话文件。',
-  processing: '正在整理你的对话…', errorTitle: '未能打开这段对话', tooLarge: '文件超过 100 MiB，请先拆分为较小的导出文件。',
-  emptyPaste: '请先粘贴一些文本。', cleared: '工作区已清空', downloaded: '文件已下载', clipboardError: '此环境无法使用剪贴板，请点击下载。',
-  warnings: '导入提示', emptyTitle: '认真做过的事，值得好好交接。', emptyBody: '导入你的对话，或用合成演示看看哪些内容可以减轻。',
-  demoBadge: '合成演示数据', back: '返回工作台', characters: '字符', noConversation: '请先导入一段对话。',
-  privacy: '本地优先', footer: '为下一段对话准备。', off: '关', on: '开',
-};
-export function dictionary(lang: Lang): Record<TranslationKey, string> { return lang === 'zh' ? zh : en; }
+export const SUPPORTED_LANGUAGES: { code: Lang; name: string; htmlLang: string }[] = [
+  { code: 'en', name: 'English', htmlLang: 'en' },
+  { code: 'zh', name: '简体中文', htmlLang: 'zh-CN' },
+  { code: 'ja', name: '日本語', htmlLang: 'ja' },
+  { code: 'fr', name: 'Français', htmlLang: 'fr' },
+  { code: 'es', name: 'Español', htmlLang: 'es' },
+];
+const dictionaries: Record<Lang, Record<TranslationKey, string>> = { en, zh, ja, fr, es };
+export const isLanguage = (value: string | null): value is Lang => SUPPORTED_LANGUAGES.some(language => language.code === value);
+export function dictionary(lang: Lang): Record<TranslationKey, string> { return dictionaries[lang]; }
+export function htmlLanguage(lang: Lang): string { return SUPPORTED_LANGUAGES.find(language => language.code === lang)!.htmlLang; }
+export function resolveLanguage(preference: string | null, browserLanguages: readonly string[] = []): Lang {
+  if (isLanguage(preference)) return preference;
+  for (const value of browserLanguages) {
+    const base = value.toLowerCase().split('-')[0];
+    if (isLanguage(base)) return base;
+  }
+  return 'en';
+}
