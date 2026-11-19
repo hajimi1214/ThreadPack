@@ -1,24 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, Download, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import ProcessorWorker from './processing.worker?worker&inline';
-import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, DEFAULT_OPTIONS, validateCustomSecrets } from './core';
-import type { CleanOptions, CleanResult, Conversation, Role } from './core';
+import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
+import type { CleanOptions, Role } from './core';
 import { createDemo } from './demo';
 import { dictionary, htmlLanguage, resolveLanguage, SUPPORTED_LANGUAGES } from './i18n';
 import type { Lang, TranslationKey } from './i18n';
 import { useConversationDrafts } from './hooks/useConversationDrafts';
+import { useWorkerClient } from './hooks/useWorkerClient';
 import MessageCard from './components/MessageCard';
 import { APP_VERSION } from './version';
-import { searchPattern } from './preview';
+import { startPwa, applyUpdate } from './pwa';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, HandoffResult, ImportProgress } from './worker/types';
 
-interface ArchiveInfo {
-  archiveId: number; format: string; warnings: string[]; sourceBytes: number;
-  conversations: { id: string; title: string; source: string; messageCount: number }[];
+interface InstallPrompt extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
-interface Processed { original: Conversation; originalSizes: Record<string, number>; result: CleanResult }
-type Notes = ReturnType<typeof useConversationDrafts>['notes'];
 const MAX_BYTES = 100 * 1024 * 1024;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
@@ -63,9 +62,16 @@ export default function App() {
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
   const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | null>(null);
-  const [archive, setArchive] = useState<ArchiveInfo | null>(null);
+  const [archive, setArchive] = useState<ParseInfo | null>(null);
   const [selected, setSelected] = useState('');
-  const [processed, setProcessed] = useState<Processed | null>(null);
+  const [processed, setProcessed] = useState<(CleanSummary & { generation: number; optionsKey: string }) | null>(null);
+  const [preview, setPreview] = useState<QueryResult | null>(null);
+  const [querying, setQuerying] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [handoffText, setHandoffText] = useState('');
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [filename, setFilename] = useState('');
   const [demo, setDemo] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,6 +81,7 @@ export default function App() {
   const [mode, setMode] = useState<'cleaned' | 'original'>('cleaned');
   const [filter, setFilter] = useState<Role | 'all'>('all');
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [changedOnly, setChangedOnly] = useState(false);
   const [customText, setCustomText] = useState('');
   const [customError, setCustomError] = useState('');
@@ -83,41 +90,25 @@ export default function App() {
   const [pasteText, setPasteText] = useState('');
   const [toast, setToast] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
+  const [updateReady, setUpdateReady] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const worker = useRef<Worker | null>(null);
-  const requestId = useRef(0);
-  const pending = useRef(new Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void }>());
+  const messageList = useRef<HTMLDivElement>(null);
+  const { request, stop: stopWorker } = useWorkerClient();
   const importGeneration = useRef(0);
   const activeArchiveId = useRef<number | null>(null);
+  const cleanupGeneration = useRef(0);
+  const optionsKey = JSON.stringify(options);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
 
-  const request = useCallback(<T,>(message: Record<string, unknown>): Promise<T> => {
-    if (!worker.current) {
-      worker.current = new ProcessorWorker();
-      worker.current.onmessage = event => {
-        const entry = pending.current.get(event.data.id);
-        if (!entry) return;
-        pending.current.delete(event.data.id);
-        if (event.data.error) entry.reject(new Error(event.data.error)); else entry.resolve(event.data.data);
-      };
-      worker.current.onerror = () => {
-        for (const entry of pending.current.values()) entry.reject(new Error('The local worker stopped. Try a smaller file.'));
-        pending.current.clear(); worker.current?.terminate(); worker.current = null;
-      };
-    }
-    return new Promise<T>((resolve, reject) => {
-      const id = ++requestId.current;
-      pending.current.set(id, { resolve: value => resolve(value as T), reject });
-      worker.current!.postMessage({ ...message, id });
-    });
+  useEffect(() => {
+    const stop = startPwa(() => setUpdateReady(true));
+    const beforeInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPrompt); };
+    const installed = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', beforeInstall);
+    window.addEventListener('appinstalled', installed);
+    return () => { stop(); window.removeEventListener('beforeinstallprompt', beforeInstall); window.removeEventListener('appinstalled', installed); };
   }, []);
-
-  const stopWorker = useCallback(() => {
-    worker.current?.terminate(); worker.current = null;
-    for (const entry of pending.current.values()) entry.reject(new Error('Cancelled'));
-    pending.current.clear();
-  }, []);
-  useEffect(() => stopWorker, [stopWorker]);
   useEffect(() => { document.documentElement.lang = htmlLanguage(lang); try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 3200); return () => clearTimeout(id); }, [toast]);
   useEffect(() => { setPage(0); }, [filter, query, selected, mode, changedOnly]);
@@ -125,47 +116,66 @@ export default function App() {
   useEffect(() => {
     if (!archive || !selected) return;
     let active = true;
+    const generation = ++cleanupGeneration.current;
     setBusy(true);
-    request<Processed>({ type: 'clean', archiveId: archive.archiveId, conversationId: selected, options }).then(data => {
-      if (active) { setProcessed(data); setBusy(false); }
+    setProcessed(null); setPreview(null);
+    request<CleanSummary>({ type: 'clean', archiveId: archive.archiveId, conversationId: selected, options }).then(data => {
+      if (active && generation === cleanupGeneration.current) { setProcessed({ ...data, generation, optionsKey }); setBusy(false); }
     }).catch(err => { if (active && err.message !== 'Cancelled') { setError(err.message); setBusy(false); } });
     return () => { active = false; };
-  }, [archive, selected, options, request]);
+  }, [archive, selected, options, optionsKey, request]);
 
-  async function openText(text: string, name: string, isDemo = false, readGeneration?: number) {
-    const generation = readGeneration ?? ++importGeneration.current;
-    if (generation !== importGeneration.current) return;
-    if (byteLength(text) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
-    setImporting(true); setError('');
+  useEffect(() => {
+    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) return;
+    let active = true;
+    setQuerying(true);
+    request<QueryResult>({ type: 'query', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
+      mode, query: deferredQuery, role: filter, changedOnly, page, pageSize: 30 }).then(data => {
+      if (active && processed.generation === cleanupGeneration.current) { setPreview(data); setQuerying(false); messageList.current?.scrollTo({ top: 0 }); }
+    }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setPreview(null); setQuerying(false); } });
+    return () => { active = false; };
+  }, [archive, processed, selected, busy, optionsKey, mode, deferredQuery, filter, changedOnly, page, request]);
+
+  useEffect(() => {
+    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffBusy(false); return; }
+    let active = true;
+    setHandoffText('');
+    setHandoffBusy(true);
+    request<HandoffResult>({ type: 'handoff', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
+      notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget }).then(data => {
+      if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffBusy(false); }
+    }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setHandoffText(''); setHandoffBusy(false); } });
+    return () => { active = false; };
+  }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, budget, request]);
+
+  async function importArchive(name: string, content: { text?: string; file?: File }, isDemo = false) {
+    const generation = ++importGeneration.current;
+    if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
+    setImporting(true); setImportProgress(null); setError('');
     try {
-      const result = await request<ArchiveInfo>({ type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current, text, filename: name });
+      const result = await request<ParseInfo>({ type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current,
+        ...content, filename: name }, progress => { if (generation === importGeneration.current) setImportProgress(progress); });
       if (generation !== importGeneration.current) return;
       if (!result.conversations.length) throw new Error(t.noConversation);
       activeArchiveId.current = result.archiveId;
-      setArchive(result); setSelected(result.conversations[0].id); setProcessed(null);
+      setArchive(result); setSelected(result.conversations[0].id); setProcessed(null); setPreview(null);
       setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
-      setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setView('workbench'); setDialog(null); setPasteText('');
-    } catch (err) { if (generation === importGeneration.current) setError(err instanceof Error ? err.message : t.errorTitle); }
-    finally { if (generation === importGeneration.current) setImporting(false); }
+      setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setPage(0);
+      setSettingsOpen(false); setView('workbench'); setDialog(null); setPasteText(''); window.scrollTo({ top: 0 });
+    } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setError(err instanceof Error ? err.message : t.errorTitle); }
+    finally { if (generation === importGeneration.current) { setImporting(false); setImportProgress(null); } }
   }
-  async function openFile(file: File) {
-    const generation = ++importGeneration.current;
-    if (file.size > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
-    setImporting(true); setError('');
-    try {
-      const text = await file.text();
-      if (generation !== importGeneration.current) return;
-      await openText(text, file.name, false, generation);
-    } catch {
-      if (generation === importGeneration.current) { setError(t.errorTitle); setImporting(false); }
-    }
-  }
+  const openText = (text: string, name: string, isDemo = false) => importArchive(name, { text }, isDemo);
+  const openFile = (file: File) => importArchive(file.name, { file });
+
   function clear() {
-    activeArchiveId.current = null;
+    activeArchiveId.current = null; ++importGeneration.current; ++cleanupGeneration.current; stopWorker();
     setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
-    ++importGeneration.current; stopWorker(); setArchive(null); setProcessed(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText(''); setError(''); setBusy(false); setImporting(false); setDemo(false); setView('workbench'); setToast(t.cleared);
+    setArchive(null); setProcessed(null); setPreview(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText('');
+    setError(''); setBusy(false); setImporting(false); setImportProgress(null); setQuerying(false); setExporting(false); setHandoffBusy(false);
+    setHandoffText(''); setDemo(false); setView('workbench'); setSettingsOpen(false); setToast(t.cleared);
   }
-  function selectConversation(id: string) { setSelected(id); setProcessed(null); setError(''); }
+  function selectConversation(id: string) { setSelected(id); setProcessed(null); setPreview(null); setError(''); }
   function toggle(key: keyof CleanOptions) { setOptions(previous => ({ ...previous, [key]: !previous[key] })); }
   function togglePin(id: string) { setPins(previous => previous.includes(id) ? previous.filter(p => p !== id) : [...previous, id]); }
   function applyCustomRules() {
@@ -177,73 +187,55 @@ export default function App() {
   function clearCustomRules() { setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); }
   function resetRecipe() { setOptions({ ...DEFAULT_OPTIONS }); setCustomText(''); setCustomError(''); }
 
-  const handoffText = useMemo(() => {
-    if (!processed) return '';
-    const keys = ['goal', 'decisions', 'constraints', 'nextSteps'] as const;
-    // Scan notes together for stable aliases, with a separate namespace from the transcript.
-    const cleanedNotes = cleanConversation({ id: 'notes', title: '', source: 'notes', messages: keys.map(key => ({ id: key, role: 'user' as const, content: notes[key] })) }, { ...options, trimToolOutputs: false, deduplicate: false });
-    const safeNotes = Object.fromEntries(cleanedNotes.conversation.messages.map(m => [m.id, m.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]')])) as unknown as Notes;
-    return buildHandoff(processed.result.conversation, { ...safeNotes, pinnedIds: pins, recentCount: recent, maxCharacters: budget });
-  }, [processed, notes, pins, recent, budget, options]);
-
-  function download(text: string, name: string, type: string) {
-    const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+  function download(content: BlobPart, name: string, type: string) {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; document.body.append(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500); setToast(t.downloaded);
   }
-  function exportFile(format: 'markdown' | 'jsonl' | 'report') {
-    if (!processed || busy || importing) return;
-    const c = processed.result.conversation;
-    if (format === 'markdown') download(buildTranscript(c), 'threadpack-transcript.md', 'text/markdown;charset=utf-8');
-    else if (format === 'jsonl') download(buildJsonl(c), 'threadpack-transcript.jsonl', 'application/x-ndjson;charset=utf-8');
-    else download(JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive?.format, messageCount: c.messages.length, stats: processed.result.stats, options: {
-      stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit,
-      deduplicate: options.deduplicate, redact: options.redact, redactEmails: options.redactEmails,
-      customRuleCount: options.customSecrets?.length ?? 0,
-    }, scope: 'UTF-8 normalized message text; excludes source metadata. No message text, file paths, or custom redaction values are included in this report.' }, null, 2), 'threadpack-report.json', 'application/json;charset=utf-8');
-    setDialog(null);
+  async function exportFile(format: 'markdown' | 'jsonl' | 'report') {
+    if (!archive || !processed || working) return;
+    const generation = importGeneration.current;
+    setExporting(true);
+    try {
+      const result = await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format });
+      if (generation !== importGeneration.current) return;
+      download(result.buffer, result.filename, result.mimeType); setDialog(null);
+    } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') { setError(t.exportFailed); setDialog(null); } }
+    finally { if (generation === importGeneration.current) setExporting(false); }
   }
   async function copyHandoff() {
     try { if (!navigator.clipboard) throw new Error(); await navigator.clipboard.writeText(handoffText); setToast(t.copied); }
     catch { setToast(t.clipboardError); }
   }
+  async function installApp() {
+    if (!installPrompt) return;
+    try { await installPrompt.prompt(); await installPrompt.userChoice; } catch { /* Installation is optional. */ }
+    setInstallPrompt(null);
+  }
 
-  const changesByMessage = useMemo(() => {
-    const indexed = new Map<string, CleanResult['changes']>();
-    for (const change of processed?.result.changes ?? []) {
-      const group = indexed.get(change.messageId);
-      if (group) group.push(change); else indexed.set(change.messageId, [change]);
-    }
-    return indexed;
-  }, [processed]);
-  const messages = processed ? (mode === 'cleaned' ? processed.result.conversation.messages : processed.original.messages) : [];
-  const visible = useMemo(() => {
-    const pattern = searchPattern(query);
-    return messages.map((message, index) => ({ message, index })).filter(({ message }) =>
-      (filter === 'all' || message.role === filter) && (!changedOnly || changesByMessage.has(message.id)) &&
-      (!pattern || pattern.test(message.content)));
-  }, [messages, filter, changedOnly, changesByMessage, query]);
-  const pageCount = Math.max(1, Math.ceil(visible.length / 30));
-  const safePage = Math.min(page, pageCount - 1);
-  const stats = processed?.result.stats;
+  const visible = preview?.items ?? [];
+  const pageCount = preview?.pageCount ?? 1;
+  const safePage = preview?.page ?? 0;
+  const stats = processed?.stats;
   const reduction = stats && stats.beforeBytes ? Math.max(0, 100 * (1 - stats.afterBytes / stats.beforeBytes)) : 0;
-  const working = busy || importing;
+  const working = busy || importing || querying || deferredQuery !== query || exporting || !!processed && processed.optionsKey !== optionsKey;
   const changeRows: { key: 'imagesRemoved' | 'outputsTrimmed' | 'duplicatesRemoved' | 'secretsRedacted' | 'emailsRedacted' | 'customRedacted'; icon: LucideIcon }[] = [
-    { key: 'imagesRemoved', icon: ImageMinus }, { key: 'outputsTrimmed', icon: Terminal }, { key: 'duplicatesRemoved', icon: Copy }, { key: 'secretsRedacted', icon: ShieldCheck }, { key: 'emailsRedacted', icon: Mail },
-    { key: 'customRedacted', icon: LockKeyhole },
+    { key: 'imagesRemoved', icon: ImageMinus }, { key: 'outputsTrimmed', icon: Terminal }, { key: 'duplicatesRemoved', icon: Copy },
+    { key: 'secretsRedacted', icon: ShieldCheck }, { key: 'emailsRedacted', icon: Mail }, { key: 'customRedacted', icon: LockKeyhole },
   ];
 
-  return <div className="app-shell" onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
+  return <div className={`app-shell ${archive ? 'has-archive' : ''}`} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
     <header className="site-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); setView('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><Package size={21} strokeWidth={1.7} /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
       <nav className="main-nav" aria-label={t.workbench}>
         <button className={view === 'workbench' ? 'selected' : ''} onClick={() => setView('workbench')}>{t.workbench}</button>
         <button className={view === 'handoff' ? 'selected' : ''} onClick={() => setView('handoff')} disabled={!processed}>{t.handoff}{pins.length > 0 && <span className="nav-count">{pins.length}</span>}</button>
       </nav>
-      <div className="header-actions"><button className="help-button" aria-label={t.help} onClick={() => setDialog('help')}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
+      <div className="header-actions">{installPrompt && <button className="install-button" onClick={() => void installApp()}><Download size={14} />{t.installApp}</button>}<button className="help-button" aria-label={t.help} onClick={() => setDialog('help')}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
     </header>
 
     <main className={archive ? 'loaded' : ''}>
+      {updateReady && <div className="update-notice" role="status"><p>{t.updateReady}</p><button className="button secondary small" onClick={applyUpdate}>{t.updateApp}</button><button className="icon-button" aria-label={t.close} onClick={() => setUpdateReady(false)}><X size={16} /></button></div>}
       <section className="hero">
         <div className="hero-copy"><div className="eyebrow"><span />{t.heroLabel}</div><h1>{view === 'handoff' ? t.handoffTitle : t.heroTitle.split('\n').map((line, i) => <span key={line}>{line}{i === 0 && <br />}</span>)}</h1><p>{view === 'handoff' ? t.handoffSub : t.heroDescription}</p></div>
         <div className="hero-art" aria-hidden="true">
@@ -264,7 +256,7 @@ export default function App() {
         {!archive ? <><button className="drop-target" disabled={importing} onClick={() => input.current?.click()}><span className="upload-icon"><Upload size={23} strokeWidth={1.6} /></span><span><strong>{t.drop}</strong><small>{t.dropHint}</small></span></button><div className="import-alternatives"><button className="button secondary" disabled={importing} onClick={() => void openText(createDemo(), 'checkout-session.jsonl', true)}><Sparkles size={15} />{t.demo}</button><button className="text-button" onClick={() => setDialog('paste')}><Clipboard size={14} />{t.paste}</button></div></> : <><div className="file-summary"><span className="file-icon"><FileText size={23} strokeWidth={1.5} /></span><div className="file-details"><div className="overline">{t.fileLabel}{demo && <span className="demo-badge">{t.demoBadge}</span>}</div><strong title={filename}>{filename}</strong><small>{archive.format} <span>·</span> {bytes(archive.sourceBytes)}</small></div></div><div className="file-controls">{archive.conversations.length > 1 && <div className="select-wrap"><select aria-label={t.conversations} value={selected} onChange={e => selectConversation(e.target.value)}>{archive.conversations.map((c, i) => <option key={c.id} value={c.id}>{i + 1}. {c.title.slice(0, 100)}</option>)}</select><ChevronDown size={14} /></div>}<button className="button secondary small" onClick={() => input.current?.click()}><Upload size={14} />{t.changeFile}</button><button className="icon-button muted" aria-label={t.clear} title={t.clear} onClick={clear}><Trash2 size={16} /></button></div></>}
       </section>
 
-      {importing && <div className="import-loading" role="status"><LoaderCircle size={19} className="spin" />{t.processing}</div>}
+      {importing && <div className="import-loading" role="status"><div className="import-progress"><strong><LoaderCircle size={17} className="spin" />{importProgress && importProgress.loaded < importProgress.total ? t.readingFile : t.parsingFile}</strong>{importProgress && <><progress max={Math.max(1, importProgress.total)} value={importProgress.loaded} /><small>{bytes(importProgress.loaded)} / {bytes(importProgress.total)}</small></>}</div><button className="button secondary small" onClick={clear}>{t.cancelImport}</button></div>}
 
       {archive?.warnings.length ? <details className="warnings"><summary>{t.warnings} <span>{archive.warnings.length}</span></summary><ul>{archive.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></details> : null}
 
@@ -276,7 +268,8 @@ export default function App() {
       </section>}
 
       {archive && view === 'workbench' && <div className="workspace-grid">
-        <aside className="recipe-panel panel"><div className="panel-heading"><div><h2>{t.recipe}</h2><p>{t.recipeSub}</p></div><button className="icon-button muted" title={t.reset} aria-label={t.reset} onClick={resetRecipe}><RotateCcw size={15} /></button></div>
+        <button className="settings-toggle button secondary" aria-label={t.recipe} aria-expanded={settingsOpen} aria-controls="cleanup-settings" onClick={() => setSettingsOpen(value => !value)}><Settings2 size={16} />{t.recipe}<ChevronDown size={14} className={settingsOpen ? 'rotate' : ''} /></button>
+        <aside id="cleanup-settings" className={`recipe-panel panel ${settingsOpen ? 'settings-open' : ''}`}><div className="panel-heading"><div><h2>{t.recipe}</h2><p>{t.recipeSub}</p></div><button className="icon-button muted" title={t.reset} aria-label={t.reset} onClick={resetRecipe}><RotateCcw size={15} /></button></div>
           <div className="recipe-controls"><Toggle title={t.stripImages} hint={t.stripImagesHint} icon={ImageMinus} checked={options.stripImages} onChange={() => toggle('stripImages')} /><Toggle title={t.trimTools} hint={t.trimToolsHint} icon={Terminal} checked={options.trimToolOutputs} onChange={() => toggle('trimToolOutputs')} />
             {options.trimToolOutputs && <div className="range-control"><div><label htmlFor="tool-limit">{t.toolLimit}</label><output htmlFor="tool-limit">{options.toolLimit.toLocaleString()}</output></div><input id="tool-limit" type="range" min="500" max="12000" step="500" value={options.toolLimit} onChange={e => setOptions(o => ({ ...o, toolLimit: Number(e.target.value) }))} /><div className="range-labels"><span>500</span><span>12,000</span></div></div>}
             <Toggle title={t.dedup} hint={t.dedupHint} icon={Copy} checked={options.deduplicate} onChange={() => toggle('deduplicate')} /><div className="recipe-divider" /><Toggle title={t.redact} hint={t.redactHint} icon={ShieldCheck} checked={options.redact} onChange={() => toggle('redact')} /><Toggle title={t.emails} hint={t.emailsHint} icon={Mail} checked={options.redactEmails} onChange={() => toggle('redactEmails')} />
@@ -284,22 +277,22 @@ export default function App() {
           </div>
           <div className="privacy-card"><ShieldCheck size={21} strokeWidth={1.4} /><strong>{t.privacyTitle}</strong><p>{t.privacyDescription}</p><span>{t.reviewNote}</span></div>
         </aside>
-        <section className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{t.previewSub}</p></div><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div>
+        <section className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div>
           <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
-          <div className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
+          <div ref={messageList} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !visible.length && <p className="no-results">{t.noResults}</p>}
-            {visible.slice(safePage * 30, safePage * 30 + 30).map(({ message, index }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(mode === 'original' ? processed?.originalSizes[message.id] ?? 0 : byteLength(message.content))} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} changes={changesByMessage.get(message.id) ?? []} query={query} t={t} />)}
+            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
           </div>
-          {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(p => p - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(p => p + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
+          {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(safePage + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
           <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
         </section>
       </div>}
 
       {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p></div></section><section className="handoff-preview panel"><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div><pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
 
-      {archive && <section className="export-bar"><div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary" disabled={working || !handoffText} onClick={() => void copyHandoff()}><Clipboard size={15} />{t.copy}</button><button className="button primary" disabled={working || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => setView('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
+      {archive && <section className="export-bar"><div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary" disabled={working || handoffBusy || !handoffText} onClick={() => void copyHandoff()}><Clipboard size={15} />{t.copy}</button><button className="button primary" disabled={working || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => setView('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 
       {!archive && !importing && <section className="empty-state"><div className="empty-symbol"><Layers size={26} strokeWidth={1.2} /><span><ArrowRight size={12} /></span></div><h2>{t.emptyTitle}</h2><p>{t.emptyBody}</p><div className="empty-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></section>}
       </div>
@@ -311,6 +304,6 @@ export default function App() {
 
     {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div></Dialog>}
     {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
-    {dialog === 'export' && <Dialog close={() => setDialog(null)} label={t.export} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />{t.ready}</div><h2>{t.exportTitle}</h2><p className="dialog-subtitle">{t.exportSub}</p><div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }] as const).map(({ format, title, hint, icon: Icon, ext }) => <button key={format} onClick={() => exportFile(format)}><span className="format-icon"><Icon size={21} strokeWidth={1.5} /></span><span><strong>{t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div><p className="export-disclaimer">{t.reviewNote}</p><p className="export-disclaimer">{t.exportWarning}</p></Dialog>}
+    {dialog === 'export' && <Dialog close={() => setDialog(null)} label={t.export} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />{t.ready}</div><h2>{t.exportTitle}</h2><p className="dialog-subtitle">{t.exportSub}</p><div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }] as const).map(({ format, title, hint, icon: Icon, ext }) => <button key={format} disabled={exporting} onClick={() => void exportFile(format)}><span className="format-icon"><Icon size={21} strokeWidth={1.5} /></span><span><strong>{t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div><p className="export-disclaimer">{t.reviewNote}</p><p className="export-disclaimer">{t.exportWarning}</p></Dialog>}
   </div>;
 }

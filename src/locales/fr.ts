@@ -72,7 +72,7 @@ const fr: Record<TranslationKey, string> = {
   collapse: 'Afficher moins',
   prev: 'Précédent',
   next: 'Suivant',
-  originalWarning: 'L’aperçu original peut contenir des données sensibles. Les images et les textes très longs sont abrégés ; la recherche porte uniquement sur cet aperçu.',
+  originalWarning: "Le contenu d’origine peut contenir des données sensibles. La recherche porte sur toute la conversation ; seuls les aperçus des textes longs et des images sont abrégés.",
   changes: 'LES MODIFICATIONS EN BREF',
   imagesRemoved: 'images retirées',
   outputsTrimmed: 'sorties raccourcies',
@@ -146,6 +146,15 @@ const fr: Record<TranslationKey, string> = {
   footer: 'Pour repartir sur de bonnes bases.',
   off: 'désactivé',
   on: 'activé',
+  cancelImport: "Annuler et effacer",
+  readingFile: "Lecture du fichier",
+  parsingFile: "Analyse de la conversation",
+  exportFailed: "Échec de l’export. Veuillez réessayer.",
+  installApp: "Installer l’application",
+  updateReady: "Une nouvelle version est disponible. Enregistrez votre travail avant la mise à jour : les conversations en mémoire seront effacées.",
+  updateApp: "Mettre à jour et recharger",
+  resultCount: "messages correspondants",
+
 };
 
 export default fr;

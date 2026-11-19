@@ -9,9 +9,9 @@ const changeLabels = {
   secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted',
 } as const;
 
-export default function MessageCard({ message, index, sizeLabel, pinned, onPin, changes, query, t }: {
+export default function MessageCard({ message, index, sizeLabel, pinned, onPin, changes, query, sourceShortened = false, t }: {
   message: Conversation['messages'][number]; index: number; sizeLabel: string; pinned: boolean; onPin: () => void;
-  changes: CleanResult['changes']; query: string; t: Record<TranslationKey, string>;
+  changes: CleanResult['changes']; query: string; sourceShortened?: boolean; t: Record<TranslationKey, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const preview = messagePreview(message.content, query, expanded);
@@ -27,6 +27,6 @@ export default function MessageCard({ message, index, sizeLabel, pinned, onPin, 
     {preview.contextual && <span className="search-match-label">{t.searchMatch}</span>}
     <pre className="message-content">{match >= 0 ? <>{preview.text.slice(0, match)}<mark>{preview.text.slice(match, match + query.length)}</mark>{preview.text.slice(match + query.length)}</> : preview.text || '—'}</pre>
     {preview.expandable && <button className="text-button expand-button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? t.collapse : t.expand}<ChevronDown size={13} className={expanded ? 'rotate' : ''} /></button>}
-    {preview.shortened && expanded && <small className="preview-footnote">{t.previewShortened}</small>}
+    {(preview.shortened || sourceShortened) && expanded && <small className="preview-footnote">{t.previewShortened}</small>}
   </article>;
 }

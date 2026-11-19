@@ -28,7 +28,7 @@ const ja: Record<TranslationKey, string> = {
   search: 'メッセージを検索…', all: 'すべて', user: 'ユーザー', assistant: 'アシスタント', tool: 'ツール', system: 'システム',
   noResults: '条件に一致するメッセージはありません。', pin: '引き継ぎ用にピン留め', unpin: 'ピン留めを解除', pinned: '件をピン留め',
   expand: '続きを表示', collapse: '折りたたむ', prev: '前へ', next: '次へ',
-  originalWarning: '元の内容には機密情報が含まれている可能性があります。画像と非常に長い文章は表示を短縮しており、検索対象もプレビュー内のみです。',
+  originalWarning: "元の内容には機密情報が含まれる場合があります。検索は会話全体が対象です。長文と埋め込み画像はプレビューのみ短縮します。",
   changes: '変更内容', imagesRemoved: '枚の画像を削除', outputsTrimmed: '件の出力を短縮', duplicatesRemoved: '件の重複を整理', secretsRedacted: '件の認証情報を非表示', emailsRedacted: '件のメールアドレスを非表示',
   export: '会話を書き出す', buildHandoff: '引き継ぎを作成', ready: '引き継ぎの準備完了', exportHint: '新しいコピーを作成します。元のファイルは変更しません。',
   handoffTitle: '次の会話へ、スムーズに引き継ぐ。', handoffSub: '重要な点をメモすると、ピン留めしたメッセージと最近のやり取りを添えてまとめます。',
@@ -57,6 +57,15 @@ const ja: Record<TranslationKey, string> = {
   warnings: '読み込み時の注意', emptyTitle: '積み重ねた作業を、次へつなごう。', emptyBody: '会話を読み込むか、架空のデモデータで整理の効果をお試しください。',
   demoBadge: '架空のデモデータ', back: '作業に戻る', characters: '文字', noConversation: '先に会話を読み込んでください。',
   privacy: '端末内で完結', footer: '新しい会話の、よい出発点に。', off: 'オフ', on: 'オン',
+  cancelImport: "中止して消去",
+  readingFile: "ファイルを読み込み中",
+  parsingFile: "会話を解析中",
+  exportFailed: "書き出せませんでした。もう一度お試しください。",
+  installApp: "アプリを追加",
+  updateReady: "新しいバージョンがあります。更新するとメモリ内の会話が消去されるため、先に必要な内容を保存してください。",
+  updateApp: "更新して再読み込み",
+  resultCount: "件の一致するメッセージ",
+
 };
 
 export default ja;

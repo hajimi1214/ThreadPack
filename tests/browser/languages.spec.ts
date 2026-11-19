@@ -42,8 +42,9 @@ for (const language of SUPPORTED_LANGUAGES) {
     await page.getByRole('button', { name: t.demo, exact: true }).click();
     await idle(page);
     await expect(page.locator('.demo-badge')).toHaveText(t.demoBadge);
-    await expect(page.getByRole('heading', { name: t.recipe, exact: true })).toBeVisible();
     const imageSwitch = page.getByRole('switch', { name: t.stripImages, exact: true });
+    if (!(await imageSwitch.isVisible())) await page.locator('.settings-toggle').click();
+    await expect(page.getByRole('heading', { name: t.recipe, exact: true })).toBeVisible();
     await expect(imageSwitch).toBeVisible();
     await expect(imageSwitch).toHaveAttribute('aria-checked', 'true');
     const imagesRemoved = page.locator('.changes-list > span').filter({ hasText: t.imagesRemoved }).locator('strong');

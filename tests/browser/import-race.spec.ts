@@ -1,20 +1,26 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-// Fault injection delays one local File read. Inputs and actions still use the real UI.
-test('clearing during a file read cancels it, and the last selected file wins', async ({ page }) => {
+// Delay dispatch of one File to the real worker. UI actions and structured File payloads remain real.
+test('clearing during a file import cancels it, and the last selected file wins', async ({ page }) => {
   await page.addInitScript(() => {
-    const read = File.prototype.text;
-    const state = window as unknown as { threadpackReadCompleted: number };
-    state.threadpackReadCompleted = 0;
-    File.prototype.text = async function () {
-      if (this.name.startsWith('slow-')) {
-        await new Promise(resolve => setTimeout(resolve, 250));
-        const result = await read.call(this);
-        state.threadpackReadCompleted++;
-        return result;
+    const NativeWorker = window.Worker;
+    const state = window as unknown as { threadpackDispatchCompleted: number };
+    state.threadpackDispatchCompleted = 0;
+    window.Worker = class extends NativeWorker {
+      private stopped = false;
+      override postMessage(message: unknown, transferOrOptions?: Transferable[] | StructuredSerializeOptions) {
+        const request = message as { type?: string; file?: File; filename?: string };
+        if (request.type === 'parse' && (request.file?.name ?? request.filename ?? '').startsWith('slow-')) {
+          setTimeout(() => {
+            if (!this.stopped) super.postMessage(message, transferOrOptions as StructuredSerializeOptions);
+            state.threadpackDispatchCompleted++;
+          }, 250);
+          return;
+        }
+        super.postMessage(message, transferOrOptions as StructuredSerializeOptions);
       }
-      return read.call(this);
+      override terminate() { this.stopped = true; super.terminate(); }
     };
   });
   await page.goto('/');
@@ -23,7 +29,7 @@ test('clearing during a file read cancels it, and the last selected file wins', 
   const input = page.getByLabel('Import file', { exact: true });
   await input.setInputFiles({ name: 'slow-private.txt', mimeType: 'text/plain', buffer: Buffer.from('PRIVATE_TEXT_MUST_STAY_CLEARED') });
   await page.getByRole('button', { name: 'Clear workspace', exact: true }).click();
-  await page.waitForFunction(() => (window as unknown as { threadpackReadCompleted: number }).threadpackReadCompleted === 1);
+  await page.waitForFunction(() => (window as unknown as { threadpackDispatchCompleted: number }).threadpackDispatchCompleted === 1);
   await expect(page.locator('.metrics')).not.toBeVisible();
   await expect(page.getByRole('button', { name: 'Try the demo', exact: true })).toBeVisible();
   await expect(page.getByRole('alert')).not.toBeVisible();
@@ -31,7 +37,7 @@ test('clearing during a file read cancels it, and the last selected file wins', 
   await input.setInputFiles({ name: 'slow-first.txt', mimeType: 'text/plain', buffer: Buffer.from('FIRST_SLOW_CONVERSATION') });
   await input.setInputFiles({ name: 'last-selected.txt', mimeType: 'text/plain', buffer: Buffer.from('LAST_SELECTED_CONVERSATION') });
   await expect(page.locator('.messages-list')).toContainText('LAST_SELECTED_CONVERSATION');
-  await page.waitForFunction(() => (window as unknown as { threadpackReadCompleted: number }).threadpackReadCompleted === 2);
+  await page.waitForFunction(() => (window as unknown as { threadpackDispatchCompleted: number }).threadpackDispatchCompleted === 2);
   await expect(page.locator('.messages-list')).toContainText('LAST_SELECTED_CONVERSATION');
   await expect(page.locator('.messages-list')).not.toContainText('FIRST_SLOW_CONVERSATION');
 });

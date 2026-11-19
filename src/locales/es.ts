@@ -72,7 +72,7 @@ const es: Record<TranslationKey, string> = {
   collapse: 'Mostrar menos',
   prev: 'Anterior',
   next: 'Siguiente',
-  originalWarning: 'La vista original puede contener datos sensibles. Las imágenes y los textos muy largos se abrevian; la búsqueda solo abarca esta vista previa.',
+  originalWarning: "El original puede contener datos sensibles. La búsqueda abarca toda la conversación; los textos largos y las imágenes solo se acortan en la vista previa.",
   changes: 'LOS CAMBIOS DE UN VISTAZO',
   imagesRemoved: 'imágenes eliminadas',
   outputsTrimmed: 'salidas recortadas',
@@ -146,6 +146,15 @@ const es: Record<TranslationKey, string> = {
   footer: 'Para empezar con una buena base.',
   off: 'desactivado',
   on: 'activado',
+  cancelImport: "Cancelar y borrar",
+  readingFile: "Leyendo el archivo",
+  parsingFile: "Analizando la conversación",
+  exportFailed: "No se pudo exportar. Inténtalo de nuevo.",
+  installApp: "Instalar aplicación",
+  updateReady: "Hay una nueva versión. Guarda tu trabajo antes de actualizar: las conversaciones en memoria se borrarán.",
+  updateApp: "Actualizar y recargar",
+  resultCount: "mensajes coincidentes",
+
 };
 
 export default es;

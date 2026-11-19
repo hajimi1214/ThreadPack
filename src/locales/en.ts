@@ -26,7 +26,7 @@ const en = {
   search: 'Search messages…', all: 'All', user: 'User', assistant: 'Assistant', tool: 'Tool', system: 'System',
   noResults: 'No messages match this filter.', pin: 'Pin for handoff', unpin: 'Unpin message', pinned: 'pinned',
   expand: 'Show more', collapse: 'Show less', prev: 'Previous', next: 'Next',
-  originalWarning: 'Original preview may contain sensitive data. Images and very long text are shortened; search covers this preview only.',
+  originalWarning: "Original content may contain sensitive data. Search covers the full conversation; very long text and embedded images are shortened only in previews.",
   changes: 'CHANGES AT A GLANCE', imagesRemoved: 'images removed', outputsTrimmed: 'outputs clipped', duplicatesRemoved: 'repeats collapsed', secretsRedacted: 'secrets redacted', emailsRedacted: 'emails redacted',
   export: 'Export transcript', buildHandoff: 'Build a handoff', ready: 'READY TO GO', exportHint: 'A new copy. Your original file stays intact.',
   handoffTitle: 'Give your next chat a head start.', handoffSub: 'Add what matters. We attach your pinned messages and recent exchanges.',
@@ -56,5 +56,14 @@ const en = {
   demoBadge: 'SYNTHETIC DEMO', back: 'Back to workbench', characters: 'characters', noConversation: 'Import a conversation first.',
   privacy: 'Local by design', footer: 'Built for a fresh start.', off: 'off', on: 'on',
   removed: 'removed',
+
+  cancelImport: "Cancel and clear",
+  readingFile: "Reading file",
+  parsingFile: "Parsing conversation",
+  exportFailed: "Export failed. Please try again.",
+  installApp: "Install app",
+  updateReady: "A new version is ready. Download your work before updating; in-memory conversations will be cleared.",
+  updateApp: "Update and reload",
+  resultCount: "matching messages",
 } as const;
 export default en;

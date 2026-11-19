@@ -276,6 +276,7 @@ test('390px viewport keeps the workbench and handoff controls within the page', 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
   await ready(page);
+  if (!(await page.getByRole('switch', { name: 'Remove embedded images' }).isVisible())) await page.locator('.settings-toggle').click();
   await expect(page.getByRole('switch', { name: 'Remove embedded images' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();

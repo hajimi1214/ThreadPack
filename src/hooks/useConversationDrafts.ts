@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { SetStateAction } from 'react';
 
 export interface HandoffNotes {
@@ -23,7 +23,8 @@ const freshDraft = (): ConversationDraft => ({
 /** Drafts live only in this mounted workspace; importing or clearing resets them. */
 export function useConversationDrafts(conversationId: string) {
   const [drafts, setDrafts] = useState<Map<string, ConversationDraft>>(() => new Map());
-  const draft = drafts.get(conversationId) ?? freshDraft();
+  const emptyDraft = useMemo(freshDraft, [conversationId]);
+  const draft = drafts.get(conversationId) ?? emptyDraft;
   const update = useCallback(<K extends keyof ConversationDraft>(key: K, action: SetStateAction<ConversationDraft[K]>) => {
     if (!conversationId) return;
     setDrafts(previous => {

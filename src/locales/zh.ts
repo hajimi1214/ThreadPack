@@ -26,7 +26,7 @@ const zh: Record<TranslationKey, string> = {
   search: '搜索消息…', all: '全部', user: '用户', assistant: '助手', tool: '工具', system: '系统',
   noResults: '没有符合筛选条件的消息。', pin: '固定到交接包', unpin: '取消固定', pinned: '条已固定',
   expand: '展开', collapse: '收起', prev: '上一页', next: '下一页',
-  originalWarning: '原始预览可能包含敏感信息。图片与超长文本在显示时缩短，搜索仅覆盖预览内容。',
+  originalWarning: "原始内容可能包含敏感信息。搜索覆盖完整对话，超长文本和内嵌图片仅在预览时缩短。",
   changes: '本次清理', imagesRemoved: '张图片已移除', outputsTrimmed: '条输出已裁剪', duplicatesRemoved: '条重复已合并', secretsRedacted: '处密钥已隐藏', emailsRedacted: '处邮箱已隐藏',
   export: '导出对话', buildHandoff: '生成交接包', ready: '可以出发了', exportHint: '导出新副本，原始文件不受影响。',
   handoffTitle: '让新会话顺利接手。', handoffSub: '写下重要的事，再带上固定消息和最近的对话。',
@@ -56,5 +56,14 @@ const zh: Record<TranslationKey, string> = {
   demoBadge: '合成演示数据', back: '返回工作台', characters: '字符', noConversation: '请先导入一段对话。',
   privacy: '本地优先', footer: '为下一段对话准备。', off: '关', on: '开',
   removed: '已减去',
+  cancelImport: "取消并清空",
+  readingFile: "正在读取文件",
+  parsingFile: "正在解析对话",
+  exportFailed: "导出失败，请重试。",
+  installApp: "安装应用",
+  updateReady: "新版本已就绪。更新前请下载需要保留的内容；更新会清空内存中的对话。",
+  updateApp: "更新并重新加载",
+  resultCount: "条符合条件的消息",
+
 };
 export default zh;

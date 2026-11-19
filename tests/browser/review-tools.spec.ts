@@ -200,3 +200,36 @@ test('search reveals a match beyond the normal expansion limit and clearing it r
   await expect(body).not.toContainText(needle);
   await expect(page.getByText('Search match', { exact: true })).not.toBeVisible();
 });
+
+test('rapid recipe changes settle on the current cleanup result without a stale-preview error', async ({ page }) => {
+  const privateValue = 'Maple restricted project 629';
+  await importMessages(page, [
+    { role: 'user', content: `CUSTOM_TARGET: ${privateValue}. CONTACT=synthetic-user@example.test` },
+    { role: 'assistant', content: 'API_KEY="synthetic_rule_value_123456"' },
+  ]);
+  await applyCustom(page, privateValue);
+  const secrets = page.getByRole('switch', { name: 'Redact common secrets', exact: true });
+  const emails = page.getByRole('switch', { name: 'Redact email addresses', exact: true });
+  // Do not wait for the worker between edits: this reproduces overlapping revisions
+  // through normal controls while the final report must reflect the last settings.
+  await secrets.click();
+  await emails.click();
+  await secrets.click();
+  await emails.click();
+  await secrets.click();
+  await emails.click();
+  await expect(secrets).toHaveAttribute('aria-checked', 'false');
+  await expect(emails).toHaveAttribute('aria-checked', 'true');
+  await idle(page);
+  await expect(page.locator('.messages-list')).toContainText('[CUSTOM_1]');
+  await expect(page.locator('.messages-list')).toContainText('[EMAIL_1]');
+  await expect(page.getByRole('alert')).not.toBeVisible();
+  const report = JSON.parse(await exportText(page, 'Cleanup report'));
+  expect(report.options.redact).toBe(false);
+  expect(report.options.redactEmails).toBe(true);
+  expect(report.options.customRuleCount).toBe(1);
+  expect(report.stats.customRedacted).toBe(1);
+  expect(report.stats.emailsRedacted).toBe(1);
+  expect(report.stats.secretsRedacted).toBe(0);
+  await expect(page.getByRole('alert')).not.toBeVisible();
+});
