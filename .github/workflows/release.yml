@@ -1,0 +1,59 @@
+name: Publish Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify version tag
+        env:
+          RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          VERSION="v$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          test "$RELEASE_REF" = "$VERSION" || { echo "Version tag must match package.json"; exit 1; }
+          git fetch --no-tags origin "refs/tags/$VERSION:refs/tags/$VERSION"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$VERSION")" || { echo "Release must build the version tag commit"; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Package release
+        run: node scripts/package-release.mjs
+      - name: Publish artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION="v$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            gh release upload "$VERSION" release/* --clobber
+          else
+            if [ -f "docs/releases/$VERSION.md" ]; then
+              gh release create "$VERSION" release/* --verify-tag --title "ThreadPack $VERSION" --notes-file "docs/releases/$VERSION.md"
+            else
+              gh release create "$VERSION" release/* --verify-tag --title "ThreadPack $VERSION" --generate-notes
+            fi
+          fi

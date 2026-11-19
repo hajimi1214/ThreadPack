@@ -1,33 +1,40 @@
 name: Bug report
-description: Report a parser, cleaning, export, or interface problem using synthetic data.
+description: Report a reproducible parsing, cleanup, export, or interface issue.
+labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Please do not attach real transcripts, credentials, private images, or personal data. Security-sensitive reports should follow SECURITY.md.
+      value: "Provide a small synthetic example. Do not attach private conversations, real credentials, or unredacted screenshots."
+  - type: input
+    id: version
+    attributes:
+      label: ThreadPack version
+      placeholder: v1.0.0
+    validations:
+      required: true
   - type: input
     id: environment
     attributes:
       label: Environment
-      description: ThreadPack version, browser or Node version, and operating system.
-    validations:
-      required: true
-  - type: input
-    id: source
-    attributes:
-      label: Source format
-      description: Source tool/version and file type, for example Claude Code JSONL.
+      description: Browser or Node.js version, OS, and web or CLI usage.
     validations:
       required: true
   - type: textarea
-    id: reproduction
+    id: reproduce
     attributes:
-      label: Steps and synthetic input
-      description: The smallest fake input and actions that reproduce the problem.
+      label: Steps to reproduce
+      description: Include the source export format and selected cleanup settings.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected and actual result
+      label: Expected and actual behavior
     validations:
       required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Minimal synthetic input
+      description: Replace all real content and secrets with invented values.
+      render: text

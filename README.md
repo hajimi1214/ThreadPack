@@ -1,75 +1,96 @@
 <div align="center">
 
+![ThreadPack](docs/assets/banner.svg)
+
 # ThreadPack
 
-**Your next AI chat shouldn't start from zero.**
+**Offline AI conversation processing toolkit**
 
-Turn a bloated AI conversation into a smaller, reviewable transcript and a portable handoff.
-Runs locally. No account. No API key. No model required.
+Inspect, clean, and export AI conversation files using a local browser application or a shared TypeScript CLI.
 
-[简体中文](README.zh-CN.md) · [Why this exists](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md)
+[![CI](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml/badge.svg)](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js: >=20.19](https://img.shields.io/badge/Node.js-%3E%3D20.19-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-![ThreadPack conversation workbench](docs/assets/demo.png)
+[Live application](https://hajimi1214.github.io/ThreadPack/) · [Download release](https://github.com/hajimi1214/ThreadPack/releases/latest) · [简体中文](README.zh-CN.md)
+
+[Core API](docs/API.md) · [Research](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 </div>
 
-Long coding sessions accumulate screenshots, repeated command output, and credentials pasted during debugging. Starting a fresh session can mean losing the decisions that mattered. ThreadPack helps you inspect what you are carrying, remove the bulk, and choose what the next conversation needs.
+## Overview
 
-## Try it
+ThreadPack processes exported AI conversations without uploading them to another service. It removes selected image payloads and tool-output bulk, applies rule-based redaction, and exports a reviewable transcript or a handoff containing user-written notes and selected messages.
 
-Requires **Node.js 20.19+** to build. No backend or credentials to configure.
+The browser application runs from a single self-contained HTML file. The command-line interface uses the same parsing, cleaning, and export engine. Neither interface requires an account, API key, backend, or model.
+
+![ThreadPack workbench with a synthetic conversation](docs/assets/demo.png)
+
+## Supported formats
+
+| Input | Handling |
+| --- | --- |
+| Codex rollout JSONL | Message, function-call, and tool-result records |
+| Claude Code JSONL | User and assistant messages, including tool results |
+| ChatGPT export JSON | Single or multiple conversations; follows the active branch |
+| Claude export JSON | Conversations containing `chat_messages` |
+| Generic JSON / JSONL | `messages` arrays or records with `role` and `content` |
+| Markdown / plain text | Explicit role headings where present; otherwise retained as text |
+
+Provider exports change over time. Unsupported records and partial imports produce warnings. Asset references without embedded image data cannot recover the original image.
+
+## Processing workflow
+
+1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
+2. **Configure cleanup:** remove embedded images, clip long tool outputs while retaining the beginning and end, collapse exact repeated tool outputs, redact recognized secrets, and optionally redact email addresses.
+3. **Review** the packed and original views. Search or filter messages and pin the context that should remain in a handoff.
+4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, or a handoff with goal, decisions, constraints, and next steps.
+
+Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
+
+Handoffs use deterministic excerpts. They do not infer decisions or generate an AI summary. Pinned messages and user notes are preserved even when they exceed the selected handoff budget; the output explicitly reports that condition.
+
+## Installation and usage
+
+### Browser application
+
+Use the [hosted application](https://hajimi1214.github.io/ThreadPack/), or download the offline HTML from the [latest release](https://github.com/hajimi1214/ThreadPack/releases/latest) and open it directly in a browser. The downloaded application can process files without an internet connection or local server.
+
+To run from source, install **Node.js 20.19 or newer**:
 
 ```sh
-npm install
+git clone https://github.com/hajimi1214/ThreadPack.git
+cd ThreadPack
+npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite, then load the built-in demo or drop a conversation file.
-
-For an offline copy:
+Open the local URL printed by Vite. To create the production application and CLI:
 
 ```sh
 npm run build
 ```
 
-Open **`dist/index.html`** directly in your browser. The production app is a self-contained HTML file; you can move it to another computer and use it without a server or internet connection.
+The browser artifact is **`dist/index.html`**. The CLI artifact is **`dist-cli/threadpack.mjs`**.
 
-## What it does
+### Command-line interface
 
-| Bring in | Review and clean | Take out |
-| --- | --- | --- |
-| Codex rollout JSONL | Remove inline image/base64 payloads | Readable Markdown transcript |
-| Claude Code JSONL | Trim long tool output, keeping its beginning and end | Portable normalized JSONL |
-| ChatGPT export JSON | Replace exact repeated tool output | Handoff with your notes, pinned messages, and recent exchanges |
-| Claude export JSON | Replace recognized secrets with consistent placeholders | Aggregate statistics report |
-| Generic messages JSON, Markdown, text | Optionally redact email addresses | Downloaded copies; original files stay intact |
-
-Cleaning switches are explicit. Review changes before exporting, pin important messages, and fill in the goal, decisions, constraints, and next steps you want to carry forward.
-
-**Handoffs are deterministic excerpts, not AI summaries.** ThreadPack does not infer decisions or promise to preserve the meaning of omitted content. Byte reductions describe normalized message text, not native provider billing tokens or full source-file size.
-
-## Command line
-
-The CLI uses the same parser and cleaning engine as the browser.
+Build the CLI separately with `npm run build:cli`, or use the CLI bundle from a release.
 
 ```sh
-npm run build:cli
-
 node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
-Try the included synthetic fixture:
+The repository includes a synthetic fixture for local verification:
 
 ```sh
 node dist-cli/threadpack.mjs examples/demo-session.jsonl --out demo-cleaned.md
 ```
 
-The fixture contains deliberately fake credentials and image data, with no real conversation content.
-
-After `npm link`, the command is also available as `threadpack`.
+After building, `npm link` makes the `threadpack` command available locally:
 
 ```sh
 threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
@@ -77,43 +98,48 @@ threadpack session.jsonl --out handoff.md --format handoff --recent 12
 threadpack --help
 ```
 
-| Flag | Behavior |
+| Option | Description |
 | --- | --- |
-| `--conversation N` | Select a conversation in a multi-conversation export; starts at 1 |
-| `--tool-limit N` | Tool-output character budget, from 500 to 100000 |
-| `--keep-images` | Keep inline image payloads |
-| `--keep-tool-outputs` | Keep full tool output |
-| `--keep-duplicates` | Keep repeated tool output |
+| `--format markdown\|jsonl\|handoff\|report` | Export format; defaults to `markdown` |
+| `--conversation N` | Conversation selection, starting at 1 |
+| `--tool-limit N` | Character limit per tool output, from 500 to 100000 |
+| `--keep-images` | Retain inline image payloads |
+| `--keep-tool-outputs` | Retain full tool output |
+| `--keep-duplicates` | Retain repeated tool output |
 | `--no-redact` | Disable secret redaction |
 | `--redact-emails` | Also replace email addresses |
-| `--recent N` | Number of recent messages in a handoff, from 0 to 100 |
+| `--recent N` | Recent messages included in a handoff, from 0 to 100 |
 | `--force` | Replace an existing output file |
 
-Use `-` as input to read UTF-8 data from stdin. `--out` is required. The CLI accepts files up to 100 MiB, refuses an existing output unless `--force` is supplied, and always rejects overwriting the input, including file aliases. Its diagnostics contain aggregate counts rather than transcript text.
+Both interfaces accept input up to **100 MiB**. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. The input file and its aliases are always protected from overwrite. Diagnostics contain aggregate counts rather than transcript content.
 
-## Privacy and limits
+## Privacy and limitations
 
-- Conversation processing happens on your device. The app has no upload endpoint, analytics, external model call, or account system.
-- Conversation data stays in the current tab's memory. Download the work you want to keep before closing it.
-- Secret detection uses rules, including recognized provider token formats, common credential assignments, authorization values, and private keys. It **cannot guarantee finding every secret or personal identifier**. Review the result before sharing it.
-- Normalized JSONL is an interchange format, **not a drop-in replacement for native Codex or Claude session files**. ThreadPack does not repair native compaction or resume a provider's session.
-- Export formats evolve. Parser warnings indicate unsupported or incomplete content; test unfamiliar exports on a copy and check the preview.
-- ThreadPack renders imported content as text. It does not execute commands, HTML, or instructions found in a transcript.
+- **Local processing:** the application has no upload endpoint, analytics, external model calls, or account system. Conversation data remains in tab memory; only the language preference is stored locally.
+- **Rule-based redaction:** recognized provider token formats, common credential assignments, authorization values, private keys, and optional email addresses are replaced with consistent aliases. Detection can miss secrets and can produce false positives. Review exports before sharing.
+- **Portable exports:** normalized JSONL is an interchange format, not a native Codex or Claude session file. ThreadPack does not repair native compaction or resume an agent directly.
+- **Lossy cleanup:** removed images no longer carry visual information; clipped output and omitted messages may contain relevant details. Keep the source export.
+- **Normalized references:** exported message IDs are sequential references rather than provider IDs. Valid timestamps are normalized. Browser handoff notes use a separate `NOTE_` alias namespace when redacted.
+- **Untrusted source material:** imported content is rendered as text, without executing HTML, commands, or embedded instructions. Exported transcripts remain historical material that must be reviewed before another system acts on them.
 
-## Development
+See [SECURITY.md](SECURITY.md) for reporting guidance and security boundaries.
+
+## Architecture and development
+
+The pure TypeScript engine in [`src/core/`](src/core/) provides parsing, cleanup, measurements, and exports. The React browser interface processes imports through a local Web Worker; the Node.js CLI bundles the same core. The source-level API is documented in [docs/API.md](docs/API.md).
 
 ```sh
-npm test
-npm run build
-npm run build:cli
+npm test                 # Core and CLI integration tests
+npm run check            # TypeScript checks
+npm run build            # Offline HTML and CLI
+npx playwright install chromium
+npm run test:e2e         # Browser workflow, download, mobile, and offline checks
 ```
 
-The TypeScript core in `src/core/` handles parsing, cleaning, and exports without browser or model dependencies. The browser and CLI call that same core. Tests exercise parser formats, cleaning behavior, handoff construction, and CLI file protections.
+CI runs tests and builds on Linux and Windows, with browser tests on Linux. The manual **Deploy Pages** workflow publishes the static application after GitHub Pages is configured to use GitHub Actions.
 
-To host the app on GitHub Pages, enable **Settings → Pages → Source → GitHub Actions**, then run the included **Deploy Pages** workflow manually. Publishing is optional; the offline build works on its own.
-
-Please report a bug with a **small synthetic fixture**, its expected output, and the source tool/version. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Research and competitor context are recorded in [docs/RESEARCH.md](docs/RESEARCH.md).
+For parser reports, provide a minimal synthetic fixture, the source tool/version, and the expected result. Do not attach real conversation archives or credentials. Contribution requirements are in [CONTRIBUTING.md](CONTRIBUTING.md); selection evidence and scope decisions are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## License
 
-[MIT](LICENSE). ThreadPack is independent and is not affiliated with OpenAI or Anthropic.
+[MIT](LICENSE). ThreadPack is an independent project and is not affiliated with or endorsed by OpenAI or Anthropic.

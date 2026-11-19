@@ -1,75 +1,96 @@
 <div align="center">
 
+![ThreadPack](docs/assets/banner.svg)
+
 # ThreadPack
 
-**换一个 AI 会话，不必把工作从头讲一遍。**
+**本地 AI 对话处理工具**
 
-把臃肿的 AI 对话整理成可检查的精简记录和交接包。
-本地运行，无需账号、API Key 或大模型。
+通过浏览器应用或共用核心引擎的 TypeScript CLI，检查、清理和导出 AI 对话文件。
 
-[English](README.md) · [需求调研](docs/RESEARCH.md) · [参与贡献](CONTRIBUTING.md)
+[![CI](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml/badge.svg)](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml)
+[![许可证：MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js: >=20.19](https://img.shields.io/badge/Node.js-%3E%3D20.19-5FA04E?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-![ThreadPack 对话工作台](docs/assets/demo.zh-CN.png)
+[在线应用](https://hajimi1214.github.io/ThreadPack/) · [下载发布版本](https://github.com/hajimi1214/ThreadPack/releases/latest) · [English](README.md)
+
+[核心 API](docs/API.md) · [需求调研](docs/RESEARCH.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
 </div>
 
-长时间使用 AI 编程，记录里会积累大量截图、重复命令输出和调试时粘贴的凭据。换新会话又容易丢掉关键决定。ThreadPack 帮你看清记录里装了什么，清理占空间的内容，并选择真正需要带到下一轮的上下文。
+## 项目概述
 
-## 立即运行
+ThreadPack 在本地处理 AI 对话导出文件，无需上传到其他服务。它可以按设置移除图片数据、裁剪和合并工具输出，执行规则脱敏，并导出可检查的记录，或包含用户笔记和选定消息的交接包。
 
-构建需要 **Node.js 20.19+**。无需配置后端或任何密钥。
+浏览器产物是一个自包含 HTML 文件。命令行与网页共用解析、清理和导出引擎。两种方式均不需要账号、API Key、后端或大模型。
+
+![ThreadPack 工作台与合成对话示例](docs/assets/demo.zh-CN.png)
+
+## 支持的格式
+
+| 输入 | 处理方式 |
+| --- | --- |
+| Codex rollout JSONL | 消息、函数调用和工具结果记录 |
+| Claude Code JSONL | 用户与助手消息，包含工具结果 |
+| ChatGPT 导出 JSON | 单会话或多会话档案，沿当前分支提取 |
+| Claude 导出 JSON | 包含 `chat_messages` 的会话 |
+| 通用 JSON / JSONL | `messages` 数组，或具有 `role` 和 `content` 的记录 |
+| Markdown / 纯文本 | 按显式角色标题分段；没有标题时保留为文本 |
+
+服务商导出结构可能变化。不支持的记录和不完整导入会产生警告。仅有资源引用、没有内嵌图片数据的记录，无法恢复原始图片。
+
+## 处理流程
+
+1. **导入：**选择本地文件、粘贴文字，或加载内置合成演示。多会话档案可以切换会话。
+2. **设置清理：**移除内嵌图片，裁剪过长工具输出并保留头尾，合并完全重复的工具输出，隐藏可识别的秘密，并按需对邮箱脱敏。
+3. **检查：**切换原始与打包后视图，搜索或筛选消息，固定需要带入交接包的上下文。
+4. **导出：**选择 Markdown、规范化 JSONL、汇总清理报告，或包含目标、决定、约束与下一步的交接包。
+
+原始文件不会被修改。界面统计 UTF-8 消息文本的字节数及变化数量，不包含导出元数据，也不代表服务商的 token 用量或计费。
+
+交接包使用确定性摘录，不推断决定，不生成 AI 摘要。用户笔记和固定消息会完整保留；超出所选预算时，输出会明确提示。
+
+## 安装与使用
+
+### 浏览器应用
+
+直接使用[在线应用](https://hajimi1214.github.io/ThreadPack/)，或从[最新发布版本](https://github.com/hajimi1214/ThreadPack/releases/latest)下载离线 HTML 后用浏览器打开。下载版无需联网或启动本地服务器即可处理文件。
+
+从源码运行需要 **Node.js 20.19 或更高版本**：
 
 ```sh
-npm install
+git clone https://github.com/hajimi1214/ThreadPack.git
+cd ThreadPack
+npm ci
 npm run dev
 ```
 
-打开 Vite 输出的本地地址，点击内置示例，或拖入自己的对话文件。
-
-生成可离线使用的版本：
+打开 Vite 输出的本地地址。生成生产网页和 CLI：
 
 ```sh
 npm run build
 ```
 
-直接用浏览器打开 **`dist/index.html`**。产物是一个自包含 HTML 文件，可以复制到另一台电脑使用，不需要服务器或网络。
+网页产物为 **`dist/index.html`**，命令行产物为 **`dist-cli/threadpack.mjs`**。
 
-## 能做什么
+### 命令行
 
-| 导入 | 检查与清理 | 导出 |
-| --- | --- | --- |
-| Codex rollout JSONL | 移除内嵌图片和 base64 数据 | 易读的 Markdown 对话 |
-| Claude Code JSONL | 裁剪过长工具输出，保留头尾 | 规范化 JSONL |
-| ChatGPT 导出 JSON | 替换完全重复的工具输出 | 包含手写笔记、置顶消息和近期对话的交接包 |
-| Claude 导出 JSON | 用一致的占位符替换可识别的秘密 | 仅含汇总统计的报告 |
-| 通用 messages JSON、Markdown、纯文本 | 可选邮箱脱敏 | 下载新副本，保留原始文件 |
-
-每项清理都有明确开关。导出前检查结果，置顶关键消息，补充你想保留的目标、决定、约束和下一步。
-
-**交接包是确定性摘录，不是 AI 摘要。** ThreadPack 不会猜测你的决定，也不保证被省略内容的语义仍然保留。体积变化统计针对规范化的消息文字，不等于原始文件大小或服务商计费 token。
-
-## 命令行
-
-命令行与网页共用同一套解析和清理引擎。
+可使用 `npm run build:cli` 单独构建 CLI，也可以使用发布版本中的命令行文件。
 
 ```sh
-npm run build:cli
-
 node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
-仓库包含可直接试用的合成样例：
+仓库提供了可用于本地验证的合成样例：
 
 ```sh
 node dist-cli/threadpack.mjs examples/demo-session.jsonl --out demo-cleaned.md
 ```
 
-样例中的凭据和图片数据均为人为构造，不包含真实会话。
-
-执行 `npm link` 后，也可以直接使用 `threadpack` 命令。
+构建后执行 `npm link`，即可在本机使用 `threadpack` 命令：
 
 ```sh
 threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
@@ -77,44 +98,48 @@ threadpack session.jsonl --out handoff.md --format handoff --recent 12
 threadpack --help
 ```
 
-| 参数 | 作用 |
+| 参数 | 说明 |
 | --- | --- |
-| `--conversation N` | 在多会话导出中选择一个会话，从 1 开始 |
-| `--tool-limit N` | 单条工具输出的字符预算，范围 500–100000 |
+| `--format markdown\|jsonl\|handoff\|report` | 导出格式，默认 `markdown` |
+| `--conversation N` | 选择会话，从 1 开始 |
+| `--tool-limit N` | 单条工具输出的字符上限，范围 500–100000 |
 | `--keep-images` | 保留内嵌图片数据 |
 | `--keep-tool-outputs` | 保留完整工具输出 |
 | `--keep-duplicates` | 保留重复工具输出 |
 | `--no-redact` | 关闭秘密脱敏 |
-| `--redact-emails` | 同时对邮箱地址脱敏 |
-| `--recent N` | 交接包附带的近期消息数，范围 0–100 |
+| `--redact-emails` | 同时替换邮箱地址 |
+| `--recent N` | 交接包中的近期消息数，范围 0–100 |
 | `--force` | 替换已存在的输出文件 |
 
-输入写成 `-` 可从 stdin 读取 UTF-8 文本，必须指定 `--out`。CLI 最多接收 100 MiB；默认不覆盖已有输出，只有显式传入 `--force` 才允许替换。即使指定该参数，也始终拒绝覆盖输入文件及其别名。诊断信息只输出汇总数量，不打印对话原文。
+网页和 CLI 的输入上限均为 **100 MiB**。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入文件及其别名始终受覆盖保护。终端诊断只输出汇总数量，不打印对话原文。
 
-## 隐私与边界
+## 隐私与限制
 
-- 对话在本机处理，没有上传接口、分析埋点、外部模型调用或账号系统。
-- 对话数据只保存在当前标签页内存中，需要保留的结果请在关闭前下载。
-- 脱敏使用规则，覆盖部分已知服务商 token、常见凭据赋值、授权值和私钥。**不能保证识别所有秘密和个人信息**，分享前仍需检查。
-- 规范化 JSONL 是交换格式，**不能直接替代 Codex 或 Claude 的原生会话文件**。本工具不修复原生上下文压缩，也不恢复服务商会话。
-- 导出结构可能随版本变化。解析警告意味着存在不支持或不完整的内容；首次处理陌生格式时请使用副本并检查预览。
-- 导入内容只作为文字展示，不执行其中的命令、HTML 或指令。
-- 导出使用顺序消息编号和规范化时间戳，不保留服务商的原生记录 ID。交接笔记中的脱敏别名使用独立的 `NOTE_` 前缀。
+- **本地处理：**没有上传接口、分析埋点、外部模型调用或账号系统。对话仅保存在标签页内存中，只有语言偏好写入本地存储。
+- **规则脱敏：**对部分已知服务商 token、常见凭据赋值、授权值、私钥及可选邮箱地址使用一致别名。可能漏检或误判，分享前应检查导出结果。
+- **交换格式：**规范化 JSONL 不是 Codex 或 Claude 的原生会话文件，不能直接恢复代理会话；ThreadPack 不修复原生上下文压缩。
+- **有损清理：**移除图片后不再保留其视觉信息；裁剪和省略的内容可能仍有价值，应保留原始导出文件。
+- **规范化引用：**导出消息使用顺序编号，不保留服务商原生 ID；合法时间戳会被规范化。网页交接笔记脱敏时使用独立的 `NOTE_` 别名前缀。
+- **不可信来源：**导入内容作为文本展示，不执行其中的 HTML、命令或指令。导出的记录仍然是历史材料，交给其他系统执行前需要核对。
 
-## 开发与部署
+安全边界与漏洞反馈方式见 [SECURITY.md](SECURITY.md)。
+
+## 架构与开发
+
+[`src/core/`](src/core/) 是纯 TypeScript 引擎，负责解析、清理、测量和导出。React 网页通过本地 Web Worker 处理导入；Node.js CLI 打包同一核心。源码级接口见 [docs/API.md](docs/API.md)。
 
 ```sh
-npm test
-npm run build
-npm run build:cli
+npm test                 # 核心和 CLI 集成测试
+npm run check            # TypeScript 检查
+npm run build            # 离线 HTML 和 CLI
+npx playwright install chromium
+npm run test:e2e         # 浏览器流程、下载、移动端和离线检查
 ```
 
-`src/core/` 是不依赖浏览器或模型的 TypeScript 核心，负责解析、清理和导出。网页与 CLI 共用它。测试覆盖导出格式、清理行为、交接包和 CLI 的文件保护。
+CI 在 Linux 和 Windows 上运行测试与构建，并在 Linux 上运行浏览器测试。仓库提供手动触发的 **Deploy Pages** 工作流，需要先将 GitHub Pages 来源设置为 GitHub Actions。
 
-部署到 GitHub Pages：在仓库 **Settings → Pages → Source** 中选择 **GitHub Actions**，再手动运行仓库自带的 **Deploy Pages** 工作流。不部署也能使用离线构建产物。
-
-反馈 bug 时请提供**最小合成样例**、预期结果和来源工具版本，不要提交真实日志或秘密。参见 [贡献指南](CONTRIBUTING.md)、[安全说明](SECURITY.md) 和[选题调研](docs/RESEARCH.md)。
+反馈格式问题时，请提供最小合成样例、来源工具版本和预期结果，不要上传真实会话或凭据。贡献要求见 [CONTRIBUTING.md](CONTRIBUTING.md)，选题证据与范围决策见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
 ## 许可证
 
-[MIT](LICENSE)。本项目独立开发，与 OpenAI、Anthropic 无隶属关系。
+[MIT](LICENSE)。ThreadPack 为独立项目，与 OpenAI、Anthropic 无隶属或官方认可关系。
