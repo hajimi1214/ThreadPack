@@ -1,0 +1,38 @@
+{
+  "name": "threadpack",
+  "version": "1.0.0",
+  "description": "An offline workbench for cleaning AI conversations and carrying context into your next chat.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20.19.0" },
+  "bin": { "threadpack": "dist-cli/threadpack.mjs" },
+  "files": ["dist-cli", "dist", "README.md", "README.zh-CN.md", "LICENSE"],
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && npm run build:cli",
+    "build:web": "tsc --noEmit && vite build",
+    "build:cli": "node scripts/build-cli.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "check": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "~5.7.3",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.2.0"
+  }
+}

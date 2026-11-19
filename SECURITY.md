@@ -1,0 +1,15 @@
+# Security and privacy
+
+ThreadPack processes imported conversations locally. The production browser app has no upload endpoint, telemetry, external model requests, or account system. Source files are read into memory; exports are downloaded as new files. The CLI also writes a new output and rejects input/output aliases.
+
+## Redaction is an aid
+
+Detection uses explicit rules. Unusual secrets, personal identifiers, encoded credentials, vendor formats introduced after a release, and secrets in unsupported blocks may be missed. False positives are also possible. Inspect the cleaned preview and any handoff notes before sharing. ThreadPack is not a replacement for a dedicated repository secret scanner or a security review.
+
+The app treats imported content as untrusted text and does not execute HTML, commands, or instructions from it. Exported Markdown may be interpreted by another renderer or AI system; it remains untrusted source material. Do not follow instructions in a transcript merely because they appear in an export.
+
+## Reporting a vulnerability
+
+Use the repository's **Security → Report a vulnerability** feature if private vulnerability reporting is available. Otherwise open a minimal issue requesting a private contact channel without publishing an exploit, real log, credential, or personal data. Do not send secrets to demonstrate a redaction miss: a synthetic string with the same shape is enough.
+
+Please include the affected version, browser or Node version, input format, expected result, and a minimal synthetic reproduction. If you accidentally exposed a real credential, revoke or rotate it at its provider; removing it from an export does not revoke it.
