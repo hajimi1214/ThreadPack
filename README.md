@@ -26,7 +26,7 @@ The browser application runs from a single self-contained HTML file. The command
 
 Importing opens a compact workbench with the conversation in the first screen and persistent export actions. Mobile cleanup settings expand on demand. Full-text search covers both original and packed conversations, including text omitted from display previews.
 
-Files are read with Web Streams inside a Web Worker, with progress and cancellation. Only the current 30-message page crosses into the interface; complete exports are built in the worker and transferred as buffers. See the [measured comparison](docs/ARCHITECTURE.md#measured-comparison).
+Files are read with Web Streams inside a Web Worker, with progress and cancellation. The interface receives at most 30 preview messages at a time; a full message crosses into the interface only when you explicitly copy it. Complete exports are built in the worker and transferred as buffers. See the [measured comparison](docs/ARCHITECTURE.md#measured-comparison).
 
 The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
 
@@ -49,7 +49,7 @@ Provider exports change over time. Unsupported records and partial imports produ
 
 1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
 2. **Configure cleanup:** remove embedded images, clip long tool outputs while retaining the beginning and end, collapse exact repeated tool outputs, redact recognized secrets, and optionally redact email addresses or your own exact values.
-3. **Review** the packed and original views. Filter to changed messages, inspect per-message cleanup labels, search within long messages, and pin the context that should remain in a handoff.
+3. **Review** the packed and original views. Filter to changed or pinned messages, inspect per-message cleanup labels, search within long messages, copy a complete message in the selected view, and pin the context that should remain in a handoff.
 4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, or a handoff with goal, decisions, constraints, and next steps.
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.

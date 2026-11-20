@@ -99,6 +99,7 @@ test('pinned-only filtering combines with existing filters and validates supplie
   const none = await preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: ['missing-id'] });
   assert.equal(none.total, 0);
   await assert.rejects(preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: [42 as unknown as string] }), /filters/);
+  await assert.rejects(preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: ['one', 'two', 'three', 'four'] }), /filters/);
 });
 
 test('copy-message returns the complete body in the requested mode and rejects stale or unknown references', async () => {
@@ -192,6 +193,10 @@ test('exports distinguish conversations by ordinal without including source titl
   assert.equal(firstExport.filename, 'threadpack-transcript-1.md');
   assert.equal(secondExport.filename, 'threadpack-transcript-2.md');
   assert.doesNotMatch(secondExport.filename, /private|conversation|two|source|path/i);
+  const jsonl = await engine.handle({ id: next(), type: 'export', archiveId: 1, conversationId: second.conversation.id, revision: second.revision, format: 'jsonl' });
+  const report = await engine.handle({ id: next(), type: 'export', archiveId: 1, conversationId: second.conversation.id, revision: second.revision, format: 'report' });
+  assert.equal(jsonl.filename, 'threadpack-transcript-2.jsonl');
+  assert.equal(report.filename, 'threadpack-report-2.json');
 });
 
 test('handoff cleans notes with separate aliases and retains pinned full text from the worker', async () => {

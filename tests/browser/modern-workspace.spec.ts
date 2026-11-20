@@ -128,6 +128,30 @@ test('pagination resets the transcript scroll and sends at most thirty preview i
   expect(captured.cleanContainedMessages.every(value => !value)).toBe(true);
 });
 
+test('switching conversations restores each conversation’s reading position', async ({ page }) => {
+  const archive = [
+    { id: 'alpha', title: 'Alpha', messages: Array.from({ length: 36 }, (_, i) => ({ role: 'user', content: `ALPHA_${i + 1}: ${'context line. '.repeat(25)}` })) },
+    { id: 'beta', title: 'Beta', messages: Array.from({ length: 36 }, (_, i) => ({ role: 'assistant', content: `BETA_${i + 1}: ${'context line. '.repeat(25)}` })) },
+  ];
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'positions.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(archive)),
+  });
+  await ready(page);
+  const list = page.locator('.messages-list');
+  await list.evaluate(element => { element.scrollTop = 260; element.dispatchEvent(new Event('scroll')); });
+  await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(200);
+
+  const conversations = page.getByRole('combobox', { name: 'Conversation', exact: true });
+  await conversations.selectOption({ label: '2. Beta' });
+  await expect(page.locator('.messages-list')).toContainText('BETA_1');
+  await list.evaluate(element => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')); });
+  await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(150);
+
+  await conversations.selectOption({ label: '1. Alpha' });
+  await expect(page.locator('.messages-list')).toContainText('ALPHA_1');
+  await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(200);
+});
+
 test('original-mode search finds text forty thousand characters into worker-owned content', async ({ page }) => {
   const needle = 'ORIGINAL_FULLTEXT_NEEDLE_47';
   await upload(page, [{ role: 'tool', content: `HEAD\n${'x'.repeat(40000)}\n${needle}\n${'z'.repeat(12000)}\nTAIL` }]);

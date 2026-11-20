@@ -177,7 +177,7 @@ export class WorkerEngine {
   }
 
   private query(original: Conversation, cache: CleanCache, request: QueryRequest): QueryResult {
-    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || typeof request.changedOnly !== 'boolean' || typeof request.pinnedOnly !== 'boolean' || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string' || id.length > 500) || request.pinnedIds.length > 10000 || request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
+    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || typeof request.changedOnly !== 'boolean' || typeof request.pinnedOnly !== 'boolean' || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string' || id.length > 500) || request.pinnedIds.length > original.messages.length || request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
       throw new Error('Valid preview filters and a page number are required.');
     }
     const conversation = request.mode === 'original' ? original : cache.result.conversation;

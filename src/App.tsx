@@ -14,7 +14,7 @@ import { isRedactionDraftDirty } from './redaction-draft';
 import MessageCard from './components/MessageCard';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
-import type { ParseInfo, CleanSummary, QueryResult, ExportResult, HandoffResult, ImportProgress } from './worker/types';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, HandoffResult, ImportProgress, CopyMessageResult } from './worker/types';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
@@ -22,6 +22,7 @@ interface InstallPrompt extends Event {
 }
 type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean };
 const MAX_BYTES = 100 * 1024 * 1024;
+const NO_PIN_FILTER: string[] = [];
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
 
@@ -85,6 +86,7 @@ export default function App() {
   const [options, setOptions] = useState<CleanOptions>({ ...DEFAULT_OPTIONS });
   const [mode, setMode] = useState<'cleaned' | 'original'>('cleaned');
   const [filter, setFilter] = useState<Role | 'all'>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const [changedOnly, setChangedOnly] = useState(false);
@@ -103,7 +105,6 @@ export default function App() {
   const goalInput = useRef<HTMLTextAreaElement>(null);
   const customRules = useRef<HTMLDetailsElement>(null);
   const readingPositions = useRef(new Map<string, number>());
-  const previousQuery = useRef('');
   const { request, stop: stopWorker } = useWorkerClient();
   const importGeneration = useRef(0);
   const activeArchiveId = useRef<number | null>(null);
@@ -111,6 +112,8 @@ export default function App() {
   const optionsKey = JSON.stringify(options);
   const customDirty = isRedactionDraftDirty(customText, options.customSecrets);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
+  const queryPinnedIds = pinnedOnly ? pins : NO_PIN_FILTER;
+  const readingPositionKey = archive ? JSON.stringify([archive.archiveId, selected, mode, deferredQuery, filter, changedOnly, pinnedOnly, pinnedOnly ? [...pins].sort() : [], page]) : '';
 
   useEffect(() => {
     const stop = startPwa(() => setUpdateReady(true));
@@ -122,13 +125,13 @@ export default function App() {
   }, []);
   useEffect(() => { document.documentElement.lang = htmlLanguage(lang); try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 3200); return () => clearTimeout(id); }, [toast]);
-  useEffect(() => { setPage(0); }, [filter, query, selected, mode, changedOnly]);
+  useEffect(() => { setPage(0); }, [filter, query, selected, mode, changedOnly, pinnedOnly]);
   useLayoutEffect(() => {
     if (!archive) return;
     window.scrollTo({ top: 0 });
     if (view === 'handoff') goalInput.current?.focus({ preventScroll: true });
     else {
-      if (messageList.current) messageList.current.scrollTop = readingPositions.current.get(`${archive.archiveId}:${selected}`) ?? 0;
+      if (messageList.current) messageList.current.scrollTop = readingPositions.current.get(readingPositionKey) ?? 0;
       previewPanel.current?.focus({ preventScroll: true });
     }
   }, [view, archive, selected]);
@@ -150,20 +153,17 @@ export default function App() {
     if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) return;
     let active = true;
     setQuerying(true);
-    const queryKey = JSON.stringify([archive.archiveId, selected, mode, deferredQuery, filter, changedOnly, page]);
     request<QueryResult>({ type: 'query', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-      mode, query: deferredQuery, role: filter, changedOnly, page, pageSize: 30 }).then(data => {
+      mode, query: deferredQuery, role: filter, changedOnly, pinnedOnly, pinnedIds: queryPinnedIds, page, pageSize: 30 }).then(data => {
       if (active && processed.generation === cleanupGeneration.current) {
-        if (previousQuery.current !== queryKey) readingPositions.current.set(`${archive.archiveId}:${selected}`, 0);
-        previousQuery.current = queryKey;
         setPreview(data); setQuerying(false);
       }
     }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setPreview(null); setQuerying(false); } });
     return () => { active = false; };
-  }, [archive, processed, selected, busy, optionsKey, mode, deferredQuery, filter, changedOnly, page, request]);
+  }, [archive, processed, selected, busy, optionsKey, mode, deferredQuery, filter, changedOnly, pinnedOnly, queryPinnedIds, page, request]);
   useLayoutEffect(() => {
-    if (archive && preview && messageList.current) messageList.current.scrollTop = readingPositions.current.get(`${archive.archiveId}:${selected}`) ?? 0;
-  }, [preview, archive, selected]);
+    if (archive && preview && messageList.current) messageList.current.scrollTop = readingPositions.current.get(readingPositionKey) ?? 0;
+  }, [preview, archive, selected, readingPositionKey]);
 
   useEffect(() => {
     if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffBusy(false); return; }
@@ -188,8 +188,8 @@ export default function App() {
       if (!result.conversations.length) throw new Error(t.noConversation);
       activeArchiveId.current = result.archiveId;
       setArchive(result); setSelected(result.conversations[0].id); setProcessed(null); setPreview(null);
-      readingPositions.current.clear(); previousQuery.current = '';
-      setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
+      readingPositions.current.clear();
+      setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
       setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setPage(0);
       setSettingsOpen(false); setView('workbench'); setDialog(null); setPasteText(''); window.scrollTo({ top: 0 });
     } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setError(err instanceof Error ? err.message : t.errorTitle); }
@@ -204,11 +204,11 @@ export default function App() {
 
   function clearWorkspace() {
     activeArchiveId.current = null; ++importGeneration.current; ++cleanupGeneration.current; stopWorker();
-    setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false);
+    setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
     setArchive(null); setProcessed(null); setPreview(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText('');
     setError(''); setBusy(false); setImporting(false); setImportProgress(null); setQuerying(false); setExporting(false); setHandoffBusy(false);
     setHandoffText(''); setDemo(false); setView('workbench'); setSettingsOpen(false); setToast(t.cleared);
-    readingPositions.current.clear(); previousQuery.current = '';
+    readingPositions.current.clear();
   }
   function clear() { if (hasNotes && !importing) setPendingAction({ kind: 'clear' }); else clearWorkspace(); }
   function discardNotes() {
@@ -217,7 +217,7 @@ export default function App() {
     else if (action) void performImport(action.name, action.content, action.isDemo);
   }
   function navigate(next: 'workbench' | 'handoff') {
-    if (archive && messageList.current) readingPositions.current.set(`${archive.archiveId}:${selected}`, messageList.current.scrollTop);
+    if (archive && messageList.current) rememberReadingPosition(readingPositionKey, messageList.current.scrollTop);
     setView(next);
   }
   function finishSettings() {
@@ -226,10 +226,15 @@ export default function App() {
   }
   function selectConversation(id: string) {
     setSelected(id); setProcessed(null); setPreview(null); setError('');
-    setQuery(''); setFilter('all'); setChangedOnly(false); setPage(0);
+    setQuery(''); setFilter('all'); setChangedOnly(false); setPinnedOnly(false); setPage(0);
   }
   function toggle(key: keyof CleanOptions) { setOptions(previous => ({ ...previous, [key]: !previous[key] })); }
   function togglePin(id: string) { setPins(previous => previous.includes(id) ? previous.filter(p => p !== id) : [...previous, id]); }
+  function rememberReadingPosition(key: string, top: number) {
+    readingPositions.current.delete(key);
+    readingPositions.current.set(key, top);
+    while (readingPositions.current.size > 200) readingPositions.current.delete(readingPositions.current.keys().next().value!);
+  }
   function applyCustomRules() {
     try {
       const values = validateCustomSecrets(customText.split(/\r?\n/).filter(value => value.trim()));
@@ -263,6 +268,20 @@ export default function App() {
     if (customDirty) return;
     try { if (!navigator.clipboard) throw new Error(); await navigator.clipboard.writeText(handoffText); setToast(t.copied); }
     catch { setToast(t.clipboardError); }
+  }
+  async function copyMessage(messageId: string) {
+    if (!archive || !processed || working || customDirty || processed.optionsKey !== optionsKey) return;
+    const generation = importGeneration.current;
+    try {
+      const result = await request<CopyMessageResult>({ type: 'copy-message', archiveId: archive.archiveId, conversationId: selected,
+        revision: processed.revision, messageId, mode });
+      if (generation !== importGeneration.current) return;
+      if (!navigator.clipboard) throw new Error();
+      await navigator.clipboard.writeText(result.text);
+      if (generation === importGeneration.current) setToast(t.copiedMessage);
+    } catch (err) {
+      if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setToast(t.clipboardError);
+    }
   }
   async function installApp() {
     if (!installPrompt) return;
@@ -339,12 +358,12 @@ export default function App() {
         <button className="settings-toggle button secondary" aria-label={t.recipe} aria-expanded={settingsOpen} aria-controls="cleanup-settings" onClick={() => setSettingsOpen(value => !value)}><Settings2 size={16} />{t.recipe}<ChevronDown size={14} className={settingsOpen ? 'rotate' : ''} /></button>
         {!isCompact && cleanupPanel}
         <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div>
-          <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool', 'system'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label></div>
+          <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool', 'system'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button><button className={`changed-filter ${pinnedOnly ? 'active' : ''}`} aria-pressed={pinnedOnly} onClick={() => setPinnedOnly(value => !value)}><Pin size={11} />{t.pinnedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
-          <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) readingPositions.current.set(`${archive.archiveId}:${selected}`, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
+          <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !visible.length && <p className="no-results">{t.noResults}</p>}
-            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
+            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => void copyMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
           </div>
           {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(safePage + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
           <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>

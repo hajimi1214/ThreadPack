@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Pin, ShieldCheck, Sparkles, Terminal } from 'lucide-react';
+import { ChevronDown, Copy, Pin, ShieldCheck, Sparkles, Terminal } from 'lucide-react';
 import type { CleanResult, Conversation } from '../core';
 import type { TranslationKey } from '../i18n';
 import { messagePreview, searchPattern } from '../preview';
@@ -9,8 +9,8 @@ const changeLabels = {
   secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted',
 } as const;
 
-export default function MessageCard({ message, index, sizeLabel, pinned, onPin, changes, query, sourceShortened = false, t }: {
-  message: Conversation['messages'][number]; index: number; sizeLabel: string; pinned: boolean; onPin: () => void;
+export default function MessageCard({ message, index, sizeLabel, pinned, onPin, onCopy, copyDisabled = false, changes, query, sourceShortened = false, t }: {
+  message: Conversation['messages'][number]; index: number; sizeLabel: string; pinned: boolean; onPin: () => void; onCopy: () => void; copyDisabled?: boolean;
   changes: CleanResult['changes']; query: string; sourceShortened?: boolean; t: Record<TranslationKey, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -21,7 +21,7 @@ export default function MessageCard({ message, index, sizeLabel, pinned, onPin, 
   return <article className={`message-card role-${message.role} ${pinned ? 'is-pinned' : ''}`}>
     <div className="message-heading">
       <div className="message-role"><span className="role-avatar">{RoleIcon ? <RoleIcon size={13} /> : <span>U</span>}</span><strong>{t[message.role]}</strong><span className="message-index">{String(index + 1).padStart(2, '0')}</span></div>
-      <div className="message-meta">{changeCount > 0 && <span className="changed-dot" title={`${changeCount} ${t.changeCount}`}>{changeCount} {t.changeCount}</span>}<span>{sizeLabel}</span><button className={`pin-button ${pinned ? 'active' : ''}`} aria-label={pinned ? t.unpin : t.pin} aria-pressed={pinned} onClick={onPin} title={pinned ? t.unpin : t.pin}><Pin size={14} /></button></div>
+      <div className="message-meta">{changeCount > 0 && <span className="changed-dot" title={`${changeCount} ${t.changeCount}`}>{changeCount} {t.changeCount}</span>}<span>{sizeLabel}</span><button className="message-copy-button" aria-label={t.copyMessage} title={t.copyMessage} disabled={copyDisabled} onClick={onCopy}><Copy size={14} /></button><button className={`pin-button ${pinned ? 'active' : ''}`} aria-label={pinned ? t.unpin : t.pin} aria-pressed={pinned} onClick={onPin} title={pinned ? t.unpin : t.pin}><Pin size={14} /></button></div>
     </div>
     {changes.length > 0 && <div className="message-change-labels">{changes.map((change, n) => <span key={`${change.kind}-${n}`}>{change.count} {t[changeLabels[change.kind]]}</span>)}</div>}
     {preview.contextual && <span className="search-match-label">{t.searchMatch}</span>}

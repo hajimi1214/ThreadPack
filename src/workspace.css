@@ -42,6 +42,9 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
 .message-role > strong { font-size: 12px; color: #3d506b; }
 .message-meta { color: #52637b; font-size: 11px; }
 .pin-button { color: #536983; width: 32px; height: 32px; }
+.message-copy-button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 5px; background: transparent; color: #536983; }
+.message-copy-button:hover, .message-copy-button:focus-visible { background: #edf3ff; color: #315ca6; }
+.message-copy-button:focus-visible, .pin-button:focus-visible { outline: 2px solid #7aa1eb; outline-offset: 1px; }
 .message-change-labels > span { color: #416598; font-size: 10px; }
 .preview-footnote, .expand-button { font-size: 11px; color: #536d91; }
 .preview-footnote { line-height: 1.6; }

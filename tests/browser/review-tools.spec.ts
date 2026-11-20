@@ -178,6 +178,40 @@ test('changed-only review combines with role and search filters and uses the sam
   await expect(page.locator('.messages-list')).not.toContainText(privateValue);
 });
 
+test('pinned-only review composes with role filters and copies the complete message in the active mode', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const longText = `FULL_COPY_START\n${'complete transcript content. '.repeat(700)}\nFULL_COPY_END`;
+  await importMessages(page, [
+    { role: 'user', content: longText },
+    { role: 'assistant', content: 'PINNED_ASSISTANT: keep this decision.' },
+    { role: 'tool', content: 'UNPINNED_TOOL: omit from this review.' },
+  ]);
+
+  const userCard = page.locator('.message-card').filter({ hasText: 'FULL_COPY_START' });
+  await userCard.getByRole('button', { name: 'Pin for handoff', exact: true }).click();
+  const assistantCard = page.locator('.message-card').filter({ hasText: 'PINNED_ASSISTANT' });
+  await assistantCard.getByRole('button', { name: 'Pin for handoff', exact: true }).click();
+  const pinnedOnly = page.getByRole('button', { name: 'Pinned only', exact: true });
+  await pinnedOnly.click();
+  await expect(page.locator('.message-card')).toHaveCount(2);
+  await page.locator('.role-filter').getByRole('button', { name: 'Assistant', exact: true }).click();
+  await expect(page.locator('.message-card')).toHaveCount(1);
+  await expect(page.locator('.message-card')).toContainText('PINNED_ASSISTANT');
+  await page.locator('.role-filter').getByRole('button', { name: 'All', exact: true }).click();
+  await expect(page.locator('.message-card')).toHaveCount(2);
+
+  await userCard.getByRole('button', { name: 'Copy full message', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Full message copied' })).toBeVisible();
+  const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboardText.replace(/\r\n/g, '\n')).toBe(longText);
+  expect(clipboardText.length).toBeGreaterThan(12_000);
+
+  await page.getByRole('button', { name: 'Original', exact: true }).click();
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+  await userCard.getByRole('button', { name: 'Copy full message', exact: true }).click();
+  expect((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')).toBe(longText);
+});
+
 test('search reveals a match beyond the normal expansion limit and clearing it restores the initial preview', async ({ page }) => {
   const needle = 'DEEP_NEEDLE_09';
   const longMessage = `LONG_HEAD: ${'ordinary filler '.repeat(1100)}${needle} context near the match. ${'tail '.repeat(200)}`;
