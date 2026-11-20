@@ -6,7 +6,7 @@
 
 **Clean conversation exports. Extract code. Carry context forward.**
 
-Open Codex, Claude Code, ChatGPT, and Claude exports in a local browser application or TypeScript CLI.
+Open Codex, Claude Code, ChatGPT, and Claude exports, including ZIP downloads, in a local browser application or TypeScript CLI.
 
 [![CI](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml/badge.svg)](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -66,7 +66,7 @@ Provider exports change over time. Unsupported records and partial imports produ
 
 ## Processing workflow
 
-1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
+1. **Import** a local file, ZIP export, paste text, or load the included synthetic demo. ThreadPack selects a supported text export inside a ZIP and keeps the compressed input under the 100 MiB limit. Select a conversation if the archive contains several.
 2. **Configure cleanup:** start with a balanced, share-safe, or keep-text recipe, then adjust individual rules. Remove embedded images, clip long tool outputs, collapse exact repeats, and redact recognized secrets, email addresses, or your own exact values.
 3. **Review** the packed and original views. Filter to changed or pinned messages, open a bounded before/after review on any changed message, search within long messages, copy a complete message in the selected view, and pin the context that should remain in a handoff.
 4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, portable context bundle, or a handoff with goal, decisions, constraints, and next steps.
@@ -144,7 +144,7 @@ threadpack --help
 | `--recent N` | Recent messages included in a handoff, from 0 to 100 |
 | `--force` | Replace an existing output file |
 
-Both interfaces accept input up to **100 MiB**. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. The input file and its aliases are always protected from overwrite. Diagnostics contain aggregate counts rather than transcript content.
+The browser accepts local text exports and ZIPs up to **100 MiB**. ZIP imports allow at most 256 entries and 100 MiB of expanded content; unsafe paths and unsupported entries are rejected without exposing archive names. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. The input file and its aliases are always protected from overwrite. Diagnostics contain aggregate counts rather than transcript content.
 
 For values that generic secret detectors cannot recognize, supply `--redact-file redact-values.txt`. The file must be UTF-8 and at most **64 KiB**, with up to **50 nonblank lines**, each containing **3–1000 Unicode characters**. Matching is literal and case-sensitive, not a regular expression. Blank lines are ignored; other leading and trailing spaces remain significant. Repeated values receive stable `[CUSTOM_1]` aliases. These rules remain active with `--no-redact`, which only disables built-in secret recognition.
 
@@ -174,7 +174,7 @@ npx playwright install chromium
 npm run test:e2e         # Browser workflow, download, mobile, and offline checks
 ```
 
-CI runs tests and builds on Linux and Windows, with browser tests on Linux. The manual **Deploy Pages** workflow publishes the static application after GitHub Pages is configured to use GitHub Actions.
+CI runs tests and builds on Linux and Windows, with browser tests on Linux. The **Deploy Pages** workflow publishes the static application automatically after changes reach `main` and GitHub Pages is configured to use GitHub Actions.
 
 For parser reports, provide a minimal synthetic fixture, the source tool/version, and the expected result. Do not attach real conversation archives or credentials. Contribution requirements are in [CONTRIBUTING.md](CONTRIBUTING.md); selection evidence and scope decisions are in [docs/RESEARCH.md](docs/RESEARCH.md).
 

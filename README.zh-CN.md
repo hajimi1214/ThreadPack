@@ -6,7 +6,7 @@
 
 **清理对话文件，提取代码，带走上下文。**
 
-通过浏览器应用或共用核心引擎的 TypeScript CLI，检查、清理和导出 AI 对话文件。
+通过浏览器应用或共用核心引擎的 TypeScript CLI，检查、清理和导出 AI 对话文件，包括 ZIP 下载包。
 
 [![CI](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml/badge.svg)](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml)
 [![许可证：MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -144,7 +144,7 @@ threadpack --help
 | `--recent N` | 交接包中的近期消息数，范围 0–100 |
 | `--force` | 替换已存在的输出文件 |
 
-网页和 CLI 的输入上限均为 **100 MiB**。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入文件及其别名始终受覆盖保护。终端诊断只输出汇总数量，不打印对话原文。
+网页文本和 ZIP 输入上限为 **100 MiB**。ZIP 最多处理 256 个条目，解压后最多 100 MiB；危险路径和不支持的文件不会泄露文件名。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入文件及其别名始终受覆盖保护。终端诊断只输出汇总数量，不打印对话原文。
 
 对于通用规则无法识别的内容，可使用 `--redact-file redact-values.txt`。规则文件必须为 UTF-8，最多 **64 KiB**，包含至多 **50 个非空白行**，每项 **3–1000 个 Unicode 字符**。按字面值区分大小写匹配，不使用正则表达式。纯空白行被忽略，其他行的首尾空格有意义，会保留。重复值使用一致的 `[CUSTOM_1]` 别名；即使传入 `--no-redact`，自定义规则仍然生效，该开关只关闭内置秘密识别。
 
@@ -174,7 +174,7 @@ npx playwright install chromium
 npm run test:e2e         # 浏览器流程、下载、移动端和离线检查
 ```
 
-CI 在 Linux 和 Windows 上运行测试与构建，并在 Linux 上运行浏览器测试。仓库提供手动触发的 **Deploy Pages** 工作流，需要先将 GitHub Pages 来源设置为 GitHub Actions。
+CI 在 Linux 和 Windows 上运行测试与构建，并在 Linux 上运行浏览器测试。**Deploy Pages** 会在 `main` 更新后自动发布，需要先将 GitHub Pages 来源设置为 GitHub Actions。
 
 反馈格式问题时，请提供最小合成样例、来源工具版本和预期结果，不要上传真实会话或凭据。贡献要求见 [CONTRIBUTING.md](CONTRIBUTING.md)，选题证据与范围决策见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 

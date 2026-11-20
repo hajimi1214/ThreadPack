@@ -71,7 +71,7 @@ interface ParsedArchive {
 parseInput(text: string, filename: string): ParsedArchive
 ```
 
-Imports Codex and Claude Code JSONL, ChatGPT and Claude JSON exports, generic messages JSON/JSONL, Markdown, and plain text. A filename extension informs detection; complete JSON and valid pasted JSONL are also recognized from text.
+Imports Codex and Claude Code JSONL, ChatGPT and Claude JSON exports, generic messages JSON/JSONL, Markdown, plain text, and browser ZIP files containing one of those text exports. A filename extension informs detection; complete JSON and valid pasted JSONL are also recognized from text. Browser ZIP imports apply entry-count, expanded-size, and safe-path limits before selecting a supported export.
 
 - ChatGPT imports follow `current_node` and its parent chain. Other branches are not included.
 - Explicit `.json` input must be valid JSON; invalid input throws.

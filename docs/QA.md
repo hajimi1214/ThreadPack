@@ -102,3 +102,10 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - `npm run test:e2e -- --workers=2`: 65 browser tests passed, including the main export dialog bundle download, ZIP inspection, five interface languages, mobile layouts, offline behavior, and existing exports.
 - `npm run build`, `npm audit --omit=dev`, and `npm pack --dry-run` passed. The single-file HTML is 587,000 bytes (176,105 gzip bytes with maximum compression).
 - Portable bundles contain cleaned Markdown, normalized JSONL, aggregate cleanup metadata, a manifest, and cleaned code files. `handoff.md` is included only when handoff notes are nonblank; original-view text and custom redaction values are excluded.
+
+## Version 1.6.0: ZIP imports and global compatibility
+
+- `npm test`: 128 tests passed, including direct ZIP selection, unsafe path rejection, expanded-size limits, and `arrayBuffer()` file fallback.
+- `npm run test:e2e -- --workers=2`: 66 browser tests cover direct ZIP import, five interface languages, mobile layouts, offline behavior, and existing workflows.
+- The PWA manifest includes desktop display fallbacks, categories, and shortcuts. Media-query listeners support both modern and legacy browser APIs.
+- Production web and CLI builds, package dry-run, browser checks, and production dependency audit pass.
