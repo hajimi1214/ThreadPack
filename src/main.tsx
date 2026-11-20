@@ -7,6 +7,7 @@ import './landing.css';
 import './interaction.css';
 import './screen-fit.css';
 import './snippets.css';
+import './code-highlight.css';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,

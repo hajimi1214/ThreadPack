@@ -127,6 +127,15 @@ const ja: Record<TranslationKey, string> = {
   guideChatgpt: "ChatGPT / Claude：ダウンロードした JSON エクスポートを開きます。",
   guideText: "エクスポートファイルがない場合は、テキストや Markdown を貼り付けられます。",
   guideLink: "読み込みガイド",
+  snippetSearch: "コードを検索…",
+  snippetLanguage: "コードの言語",
+  snippetAllLanguages: "すべての言語",
+  snippetNoMatches: "条件に一致するコードがありません。",
+  snippetDownloadZip: "ZIP を保存",
+  snippetZipHint: "すべてのページから、条件に一致するコードブロックを含めます。",
+  snippetZipFailed: "ZIP を作成できませんでした。再試行してください。",
+  snippetWrap: "コードを折り返す",
+  thirdPartyNotices: "オープンソースライセンス",
 
 };
 

@@ -124,6 +124,15 @@ const en = {
   guideChatgpt: "ChatGPT / Claude: open the downloaded JSON export.",
   guideText: "No export file? Paste text or Markdown.",
   guideLink: "Import guide",
+  snippetSearch: "Search code…",
+  snippetLanguage: "Code language",
+  snippetAllLanguages: "All languages",
+  snippetNoMatches: "No code matches these filters.",
+  snippetDownloadZip: "Download ZIP",
+  snippetZipHint: "Includes all matching code blocks across every page.",
+  snippetZipFailed: "Could not create the ZIP. Try again.",
+  snippetWrap: "Wrap code lines",
+  thirdPartyNotices: "Open-source licenses",
 
 } as const;
 export default en;

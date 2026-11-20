@@ -124,6 +124,15 @@ const zh: Record<TranslationKey, string> = {
   guideChatgpt: "ChatGPT / Claude：打开下载的 JSON 导出文件。",
   guideText: "没有导出文件时，可粘贴文本或 Markdown。",
   guideLink: "导入指南",
+  snippetSearch: "搜索代码…",
+  snippetLanguage: "代码语言",
+  snippetAllLanguages: "全部语言",
+  snippetNoMatches: "没有符合筛选条件的代码。",
+  snippetDownloadZip: "下载 ZIP",
+  snippetZipHint: "包含所有分页中符合条件的代码块。",
+  snippetZipFailed: "无法创建 ZIP，请重试。",
+  snippetWrap: "代码自动换行",
+  thirdPartyNotices: "开源许可证",
 
 };
 export default zh;

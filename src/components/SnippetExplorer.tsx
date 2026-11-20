@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, LoaderCircle } from 'lucide-react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
+import { AlertCircle, Archive, Check, ChevronLeft, ChevronRight, Code2, Copy, Download, LoaderCircle, Search, WrapText } from 'lucide-react';
 import type { TranslationKey } from '../i18n';
-import type { CopyMessageResult, ExportResult, SnippetQueryResult } from '../worker/types';
+import type { CopyMessageResult, ExportResult, SnippetArchiveResult, SnippetQueryResult } from '../worker/types';
+import HighlightedCode from './HighlightedCode';
 import type { useWorkerClient } from '../hooks/useWorkerClient';
 
 interface Props {
@@ -16,8 +17,13 @@ export default function SnippetExplorer({ archiveId, conversationId, revision, r
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<SnippetQueryResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const [language, setLanguage] = useState('');
+  const [languages, setLanguages] = useState<{ language: string; count: number }[]>([]);
+  const [wrap, setWrap] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [action, setAction] = useState<{ id: string; kind: 'copy' | 'download'; state: 'pending' | 'success' | 'error' } | null>(null);
+  const [action, setAction] = useState<{ id: string; kind: 'copy' | 'download' | 'zip'; state: 'pending' | 'success' | 'error' } | null>(null);
   const mounted = useRef(false);
   const actionLock = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -26,11 +32,11 @@ export default function SnippetExplorer({ archiveId, conversationId, revision, r
   useEffect(() => {
     let active = true;
     setLoading(true); setFailed(false); setResult(null);
-    request<SnippetQueryResult>({ type: 'query-snippets', archiveId, conversationId, revision, page, pageSize: 20 }).then(data => {
-      if (active) { setResult(data); setLoading(false); }
+    request<SnippetQueryResult>({ type: 'query-snippets', archiveId, conversationId, revision, page, pageSize: 20, query: deferredQuery, language }).then(data => {
+      if (active) { setResult(data); setLanguages(data.languages); setLoading(false); }
     }).catch(() => { if (active) { setFailed(true); setLoading(false); } });
     return () => { active = false; };
-  }, [archiveId, conversationId, revision, page, request]);
+  }, [archiveId, conversationId, revision, page, deferredQuery, language, request]);
   useEffect(() => {
     if (!action || action.state === 'pending') return;
     const timer = setTimeout(() => setAction(null), 2200);
@@ -63,17 +69,36 @@ export default function SnippetExplorer({ archiveId, conversationId, revision, r
       if (mounted.current) { setAction({ id, kind, state: 'error' }); notify(kind === 'copy' ? t.clipboardError : t.snippetExportFailed, 'error'); }
     } finally { actionLock.current = false; }
   }
+  async function exportZip() {
+    if (actionLock.current || loading || deferredQuery !== query || !result?.total) return;
+    actionLock.current = true; setAction({ id: 'archive', kind: 'zip', state: 'pending' });
+    try {
+      const data = await request<SnippetArchiveResult>({ type: 'export-snippets', ...selection, query: deferredQuery, language });
+      if (!mounted.current) return;
+      download(data.buffer, data.filename, data.mimeType);
+      setAction({ id: 'archive', kind: 'zip', state: 'success' });
+    } catch { if (mounted.current) { setAction({ id: 'archive', kind: 'zip', state: 'error' }); notify(t.snippetZipFailed, 'error'); } }
+    finally { actionLock.current = false; }
+  }
+  const pending = action?.state === 'pending';
+  const searching = loading || deferredQuery !== query;
 
   return <div className="snippet-explorer" aria-busy={loading}>
     <div className="dialog-eyebrow"><Code2 size={18} />{t.codeSnippets}</div>
     <h2 ref={heading} tabIndex={-1}>{t.codeSnippets}</h2><p className="dialog-subtitle">{t.codeSnippetsHint}</p>
+    <div className="snippet-toolbar">
+      <label className="snippet-search"><Search size={14} /><input type="search" maxLength={1000} value={query} aria-label={t.snippetSearch} placeholder={t.snippetSearch} disabled={pending} onChange={event => { setQuery(event.target.value); setPage(0); }} /></label>
+      <select className="snippet-language-filter" value={language} aria-label={t.snippetLanguage} disabled={pending} onChange={event => { setLanguage(event.target.value); setPage(0); }}><option value="">{t.snippetAllLanguages}</option>{languages.map(option => <option key={option.language} value={option.language}>{option.language} ({option.count})</option>)}</select>
+      <button className="snippet-wrap" aria-label={t.snippetWrap} title={t.snippetWrap} aria-pressed={wrap} onClick={() => setWrap(value => !value)}><WrapText size={16} /></button>
+      <button className="button primary small snippet-zip" aria-label={t.snippetDownloadZip} title={t.snippetZipHint} aria-busy={pending && action?.kind === 'zip'} disabled={pending || searching || !result?.total} onClick={() => void exportZip()}>{pending && action?.kind === 'zip' ? <LoaderCircle size={14} className="spin" /> : action?.kind === 'zip' && action.state === 'success' ? <Check size={14} /> : <Archive size={14} />}{pending && action?.kind === 'zip' ? t.exporting : t.snippetDownloadZip}</button>
+    </div>
     {loading && <p className="snippet-loading" role="status"><LoaderCircle size={18} className="spin" />{t.processing}</p>}
     {failed && <p role="alert" className="snippet-empty"><AlertCircle size={18} />{t.snippetLoadFailed}</p>}
-    {result && <><div className="snippet-total">{result.total.toLocaleString()} {t.snippetReady}</div>
-      {!result.total && <p className="snippet-empty"><Code2 size={28} />{t.noSnippets}</p>}
+    {result && <><div className="snippet-total">{result.total.toLocaleString()}{(query || language) && ` / ${result.allTotal.toLocaleString()}`} {t.snippetReady}</div>
+      {!result.total && <div className="snippet-empty"><Code2 size={28} /><span>{query || language ? t.snippetNoMatches : t.noSnippets}</span>{(query || language) && <button className="button secondary small" onClick={() => { setQuery(''); setLanguage(''); setPage(0); }}>{t.clearFilters}</button>}</div>}
       <div className="snippet-list">{result.items.map(item => <article className="snippet-card" key={item.id}>
         <div className="snippet-heading"><span className="snippet-language">{item.language || 'text'}</span><span>{t.snippetSource} {item.messageIndex + 1}</span><span>{item.lines.toLocaleString()} {t.snippetLines}</span><span>{item.characters.toLocaleString()} {t.snippetCharacters}</span></div>
-        <pre className="snippet-code">{item.preview || '—'}</pre>
+        <HighlightedCode code={item.preview} language={item.language} wrap={wrap} />
         {item.shortened && <p className="snippet-shortened">{t.snippetPreviewShortened}</p>}
         <div className="snippet-actions">{(['copy', 'download'] as const).map(kind => {
           const current = action?.id === item.id && action.kind === kind ? action.state : null;

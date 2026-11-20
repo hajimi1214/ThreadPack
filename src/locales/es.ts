@@ -222,6 +222,15 @@ const es: Record<TranslationKey, string> = {
   guideChatgpt: "ChatGPT / Claude: abre el archivo JSON exportado que descargaste.",
   guideText: "Si no tienes un archivo de exportación, pega texto o Markdown.",
   guideLink: "Guía de importación",
+  snippetSearch: "Buscar en el código…",
+  snippetLanguage: "Lenguaje del código",
+  snippetAllLanguages: "Todos los lenguajes",
+  snippetNoMatches: "Ningún código coincide con estos filtros.",
+  snippetDownloadZip: "Descargar ZIP",
+  snippetZipHint: "Incluye todos los bloques de código coincidentes de todas las páginas.",
+  snippetZipFailed: "No se pudo crear el ZIP. Inténtalo de nuevo.",
+  snippetWrap: "Ajustar las líneas de código",
+  thirdPartyNotices: "Licencias de código abierto",
 
 };
 
