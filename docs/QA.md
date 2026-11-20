@@ -60,4 +60,14 @@ The follow-up iteration adds a worker-side pinned-message filter, an explicit fu
 - `npm audit --omit=dev`: no production dependency vulnerabilities reported.
 - No real conversation archive was used; all new copy and scroll fixtures are synthetic.
 
+## Follow-up verification: cleanup recipes and message comparison
+
+The current iteration adds one-click Balanced, Share safely, and Keep text recipes, plus a per-message before/after review that uses bounded Worker excerpts and keeps imported markup as text.
+
+- `npm test`: 101 core, CLI, localization, preview, Worker, and cleanup-recipe tests passed.
+- `npm run test:e2e -- --workers=2`: 44 browser tests passed in installed Chrome, including custom-rule preservation, safe text rendering, long-message excerpt notices, mobile dialog width, a single note-protection dialog after replacing files from comparison, offline installation, and standalone HTML exports.
+- `npm run check` and `npm run build`: passed.
+- All recipe labels, explanations, and comparison warnings are present in English, Simplified Chinese, Japanese, French, and Spanish.
+- The landing page shows a synthetic before/after example and opens the matching demo. The existing five-language tests exercise this entry point on mobile. Thumbnail contact-sheet reviews covered the landing page, desktop workbench, desktop comparison, mobile cleanup sheet, and mobile comparison.
+
 Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTURE.md). README screenshots use a 1440 × 900 viewport so they show the same persistent export controls a desktop user sees.

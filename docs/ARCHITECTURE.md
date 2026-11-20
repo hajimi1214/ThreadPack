@@ -8,6 +8,7 @@ flowchart LR
     UI[React workbench] -->|Typed RPC with archive and revision| Worker
     Worker -->|Current page: at most 30 bounded messages| UI
     Worker -->|One complete message after explicit copy| Clipboard[System clipboard]
+    Worker -->|One bounded before/after comparison| UI
     Worker -->|Transferable export buffer| Download[New downloaded file]
     SW[Service Worker] -->|Public shell only| Cache[HTML + manifest + icons]
 ```
@@ -16,7 +17,7 @@ The page sends the `File` to the worker, which reads bytes incrementally and rep
 
 Archive identifiers distinguish accepted files from cancelled candidate imports. Cleanup revisions identify an exact immutable recipe result. Queries, exports, and handoffs require that revision; stale requests cannot silently use a different cleanup configuration. React also checks the matching recipe and request generation before accepting responses.
 
-Both original and packed search run over complete worker-owned message bodies. The interface receives only the requested page, with long content replaced by bounded previews. Export and handoff generation use complete retained messages in the worker rather than reconstructing content from the preview. An explicit per-message copy request returns that single complete message in the selected original or packed mode. Pinned-only filtering is combined with role, changed-message, and text filters in the worker. `ArrayBuffer` export responses transfer ownership instead of structured-cloning the buffer. React's deferred query value avoids putting search work on the input event path.
+Both original and packed search run over complete worker-owned message bodies. The interface receives only the requested page, with long content replaced by bounded previews. Export and handoff generation use complete retained messages in the worker rather than reconstructing content from the preview. An explicit per-message copy request returns that single complete message in the selected original or packed mode. A separate review request returns at most 12,000 characters each from one message's original and cleaned form, with image payloads hidden and truncation disclosed. Pinned-only filtering is combined with role, changed-message, and text filters in the worker. `ArrayBuffer` export responses transfer ownership instead of structured-cloning the buffer. React's deferred query value avoids putting search work on the input event path.
 
 ## Measured comparison
 

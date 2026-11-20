@@ -48,8 +48,8 @@ Provider exports change over time. Unsupported records and partial imports produ
 ## Processing workflow
 
 1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
-2. **Configure cleanup:** remove embedded images, clip long tool outputs while retaining the beginning and end, collapse exact repeated tool outputs, redact recognized secrets, and optionally redact email addresses or your own exact values.
-3. **Review** the packed and original views. Filter to changed or pinned messages, inspect per-message cleanup labels, search within long messages, copy a complete message in the selected view, and pin the context that should remain in a handoff.
+2. **Configure cleanup:** start with a balanced, share-safe, or keep-text recipe, then adjust individual rules. Remove embedded images, clip long tool outputs, collapse exact repeats, and redact recognized secrets, email addresses, or your own exact values.
+3. **Review** the packed and original views. Filter to changed or pinned messages, open a bounded before/after review on any changed message, search within long messages, copy a complete message in the selected view, and pin the context that should remain in a handoff.
 4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, or a handoff with goal, decisions, constraints, and next steps.
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
