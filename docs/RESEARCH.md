@@ -19,6 +19,10 @@ The reports were inspected through GitHub's public search/API and public project
 - [claude-code-trace](https://github.com/delexw/claude-code-trace) provides a richer conversation/trace viewing environment. ThreadPack aims for a smaller workflow: open a single offline page, load a file, inspect changes, and download a copy.
 - [Gitleaks](https://github.com/gitleaks/gitleaks) is a dedicated secret scanner. ThreadPack's rule-based redaction is an export convenience and does not replace such a scanner.
 
+For code review and collection, ThreadPack bundles the MIT-licensed [lowlight](https://github.com/wooorm/lowlight), selected BSD-3-Clause [highlight.js](https://github.com/highlightjs/highlight.js) grammars, and MIT-licensed [fflate](https://github.com/101arrowz/fflate). The highlighter receives bounded preview text and returns an allowlisted virtual token tree rendered as React text. ZIP creation runs in the existing Worker from cleaned message offsets; snippets are never executed, and no runtime grammar or compression requests are sent externally.
+
+
+
 The intended difference is the combination of **offline, no setup, cross-format input, inspectable cleanup, and a user-authored handoff**, rather than another token counter or a claim to automatically understand a whole project.
 
 ## Scope decisions

@@ -174,6 +174,8 @@ for (const snippet of extractCodeSnippets(result.conversation)) {
 
 Backtick and tilde fences are supported, with matching close markers of sufficient length. Inline, over-indented, and unclosed fences are excluded. Unknown language info is normalized to `text`; source info strings do not become file names.
 
+The browser adds search and allowlisted language filters over cleaned snippets, then can stream all matching cleaned blocks into a ZIP archive in the Worker. The bundled preview highlighter uses selected local grammars; unsupported languages display as plain text. Browser UI and Worker dependencies include MIT `lowlight` with selected BSD-3-Clause `highlight.js` grammars and MIT `fflate`; they extend the UI and Worker, not this core API. Full runtime license texts appear in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
 ```ts
 buildTranscript(conversation: Conversation): string
 buildJsonl(conversation: Conversation): string

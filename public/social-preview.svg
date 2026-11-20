@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
-  <title id="title">ThreadPack — Clean and Export AI Conversations</title>
-  <desc id="description">Local tools for Codex, Claude Code, ChatGPT, and Claude exports. Review cleanup changes and download a transcript or handoff.</desc>
+  <title id="title">ThreadPack — Clean Conversation Exports and Extract Code</title>
+  <desc id="description">Local tools for cleaning, reviewing, syntax highlighting, and extracting code from Codex, Claude Code, ChatGPT, and Claude exports.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f4f7ff"/><stop offset="1" stop-color="#eaf1ff"/></linearGradient>
     <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0v36" fill="none" stroke="#d6e2f5" stroke-width="1"/></pattern>
@@ -16,12 +16,12 @@
     <text x="126" y="87" fill="#1e3555" font-size="31" font-weight="650" letter-spacing="-.9">ThreadPack</text>
     <text x="66" y="192" fill="#6780a4" font-size="13" font-weight="600" letter-spacing="1.9">CONVERSATION FILE TOOLS</text>
     <text x="63" y="260" fill="#18314f" font-size="49" font-weight="650" letter-spacing="-1.5">Clean conversations.</text>
-    <text x="63" y="321" fill="#18314f" font-size="49" font-weight="650" letter-spacing="-1.5">Export what you need.</text>
-    <text x="66" y="372" fill="#5e7391" font-size="20">Review changes, remove bulky output,</text>
-    <text x="66" y="402" fill="#5e7391" font-size="20">and prepare context for the next chat.</text>
+    <text x="63" y="321" fill="#18314f" font-size="49" font-weight="650" letter-spacing="-1.5">Extract code. Keep context.</text>
+    <text x="66" y="372" fill="#5e7391" font-size="20">Review changes, filter and highlight code,</text>
+    <text x="66" y="402" fill="#5e7391" font-size="20">then download a transcript or code ZIP.</text>
     <g transform="translate(66 451)" font-size="13" fill="#486897">
       <rect width="139" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="16" y="22">Offline browser app</text>
-      <rect x="149" width="92" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="166" y="22">Web + CLI</text>
+      <rect x="149" width="92" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="166" y="22">Code ZIP</text>
       <rect x="251" width="103" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="269" y="22">5 languages</text>
     </g>
     <text x="66" y="563" fill="#597395" font-size="14">Codex · Claude Code · ChatGPT · Claude</text>

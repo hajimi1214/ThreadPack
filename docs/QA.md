@@ -87,3 +87,11 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - Code, sharing, and import-guide labels are provided in all five supported interface languages.
 - Project metadata uses the canonical public URL; sharing does not serialize conversation state or page parameters. Search-engine indexing and audience growth depend on external discovery and are not measured by these checks.
 - Production web/CLI builds passed, and `npm audit --omit=dev` reported no production dependency vulnerabilities. Visual review used thumbnail contact sheets for the landing page, desktop/mobile code dialogs, import guide, and 1200 × 630 sharing card.
+
+## Version 1.4.0: offline code highlighting and ZIP archives
+
+- `npm test`: 123 tests cover fenced-code extraction, bounded syntax highlighting, exact text reconstruction, safe plain-text fallback, Worker ZIP contents, safe filenames, and third-party license notices.
+- `npm run test:e2e -- --workers=2`: 64 browser tests cover language and text filters, full cleaned code downloads, cross-page ZIPs, malicious-looking code as text, the built-in sample, Help license notices, PWA offline behavior, sharing, the JavaScript-free import guide, and prior workflows.
+- `npm run build`, the production dependency audit, npm package dry-run, and TypeScript checks passed. GitHub Windows/Linux CI passed.
+- The offline HTML is 582,090 bytes (174,848 gzip bytes with maximum compression), compared with 460,245 bytes (135,168 gzip bytes) in 1.3.0. The selected syntax grammars and runtime notices are bundled locally; runtime grammar requests are not made.
+- Visual review covered highlighted code and empty search on desktop and mobile, the license disclosure, import guide, and updated share card.

@@ -22,13 +22,13 @@ Open Codex, Claude Code, ChatGPT, and Claude exports in a local browser applicat
 
 ThreadPack processes exported AI conversations without uploading them to another service. It removes selected image payloads and tool-output bulk, applies rule-based redaction, and exports a reviewable transcript or a handoff containing user-written notes and selected messages.
 
-The browser application runs from a single self-contained HTML file. The command-line interface uses the same parsing, cleaning, and export engine. Neither interface requires an account, API key, backend, or model.
+The browser application runs from a single self-contained HTML file. The CLI shares its parsing, cleaning, and export engine. Both work locally without an account or API key.
 
 Importing opens a compact workbench with the conversation in the first screen and persistent export actions. Mobile cleanup settings expand on demand. Full-text search covers both original and packed conversations, including text omitted from display previews.
 
 Use **Export filtered results** to download every matching message as Markdown or JSONL, including messages on other pages. Search, role, change, and pin filters combine. Matching follows the selected view; exported message text always uses your cleanup settings.
 
-Open **Code snippets** to collect fenced code blocks across the selected conversation. Preview, copy, or download full cleaned code with the appropriate file extension. Long code stays complete when copied or downloaded. Try the built-in demo or [this Markdown sample](examples/code-snippets.md).
+Open **Code snippets** to collect fenced code blocks across the selected conversation. Search code, filter by language, switch between wrapping and horizontal scrolling, and preview, copy, or download cleaned code. Long code stays complete when copied or downloaded. Use **Download ZIP** for every matching block across pages. The offline app bundles [lowlight](https://github.com/wooorm/lowlight), selected BSD-3-Clause [highlight.js](https://github.com/highlightjs/highlight.js) grammars, and [fflate](https://github.com/101arrowz/fflate). Full license notices appear in Help and release downloads. Try the built-in demo or [this Markdown sample](examples/code-snippets.md).
 
 Useful for restarting a long coding session, collecting generated code, or preparing a smaller transcript to share. The **Share ThreadPack** button copies only the tool's public address, with no conversation text or current-page parameters.
 
@@ -71,7 +71,7 @@ Provider exports change over time. Unsupported records and partial imports produ
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
 
-Handoffs use deterministic excerpts. They do not infer decisions or generate an AI summary. Pinned messages and user notes are preserved even when they exceed the selected handoff budget; the output explicitly reports that condition.
+Handoffs include your notes, pinned messages, and recent context. If the selected text budget is exceeded, the export marks it.
 
 Switching conversations in the same archive preserves each conversation's notes, pins, and handoff settings in memory. Clearing the workspace, replacing the archive, or closing the tab removes these drafts. Custom redactions also clear when the workspace or archive is replaced. No conversation text, notes, or custom values are saved to browser storage.
 
@@ -98,7 +98,7 @@ Open the local URL printed by Vite. To create the production application and CLI
 npm run build
 ```
 
-The browser artifact is **`dist/index.html`**. The CLI artifact is **`dist-cli/threadpack.mjs`**.
+The browser artifact is **`dist/index.html`**. The CLI artifact is **`dist-cli/threadpack.mjs`**. Third-party and ThreadPack licenses are included in `THIRD_PARTY_NOTICES.md` and `LICENSE`.
 
 ### Command-line interface
 
@@ -116,6 +116,8 @@ The repository includes a synthetic fixture for local verification:
 ```sh
 node dist-cli/threadpack.mjs examples/demo-session.jsonl --out demo-cleaned.md
 ```
+
+Import [`examples/code-snippets.md`](examples/code-snippets.md) in the browser to test code extraction and ZIP download with a small fixture.
 
 After building, `npm link` makes the `threadpack` command available locally:
 
