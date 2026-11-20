@@ -71,3 +71,11 @@ The current iteration adds one-click Balanced, Share safely, and Keep text recip
 - The landing page shows a synthetic before/after example and opens the matching demo. The existing five-language tests exercise this entry point on mobile. Thumbnail contact-sheet reviews covered the landing page, desktop workbench, desktop comparison, mobile cleanup sheet, and mobile comparison.
 
 Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTURE.md). README screenshots use a 1440 × 900 viewport so they show the same persistent export controls a desktop user sees.
+
+## Follow-up verification: feedback, filtered exports, and screen adaptation
+
+- `npm test`: 106 tests passed, including full filtered exports, combinations of filters, cleaned exports from Original-mode searches, and stale/invalid export requests.
+- The full browser suite passed 58 tests. New checks cover pending/success/error copy states, duplicate-click prevention, export progress, stale export completion after file replacement, copy feedback across conversations, command-menu focus, and filter reset.
+- Screen tests cover 320 × 568, 600 × 740, 768 × 1024, 844 × 390, 1024 × 600, 1920 × 1080, and 2560 × 1440. They assert readable transcript height, reachable exports, header fit, and preserved filters/pins across orientation changes. Final CSS adjustments were rechecked with the eight screen tests.
+- Production web/CLI builds and TypeScript checks passed. All five languages use shorter task-oriented copy and include new action labels.
+- Thumbnail contact sheets were reviewed for copy feedback, command menus, excerpt dialogs, portrait phones, tablets, landscape windows, and wide desktop layouts. Short screens use document scrolling with actions in normal flow; the narrow cleanup sidebar keeps one setting per row.

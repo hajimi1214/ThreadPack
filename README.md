@@ -26,6 +26,12 @@ The browser application runs from a single self-contained HTML file. The command
 
 Importing opens a compact workbench with the conversation in the first screen and persistent export actions. Mobile cleanup settings expand on demand. Full-text search covers both original and packed conversations, including text omitted from display previews.
 
+Use **Export filtered results** to download every matching message as Markdown or JSONL, including messages on other pages. Search, role, change, and pin filters combine. Matching follows the selected view; exported message text always uses your cleanup settings.
+
+Press **Ctrl+K** (or **⌘K** on Mac) to open quick actions for importing, search, export, recipes, and page navigation. Copy buttons show pending, success, or failure at the point of interaction. The toolbar can clear all filters in one click.
+
+Layout adapts to both screen width and height. Phones and short landscape windows use page scrolling so the transcript keeps a usable height. Tablets switch cleanup settings to a sheet, the transcript toolbar follows its own available width, and ultrawide screens get a larger workspace. Rotating or resizing keeps the open conversation, filters, and pins.
+
 Files are read with Web Streams inside a Web Worker, with progress and cancellation. The interface receives at most 30 preview messages at a time; a full message crosses into the interface only when you explicitly copy it. Complete exports are built in the worker and transferred as buffers. See the [measured comparison](docs/ARCHITECTURE.md#measured-comparison).
 
 The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
