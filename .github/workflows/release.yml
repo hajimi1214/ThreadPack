@@ -8,7 +8,7 @@ on:
       tag:
         description: Existing version tag to publish
         required: true
-        default: v1.5.0
+        default: v1.6.0
 
 permissions:
   contents: write
