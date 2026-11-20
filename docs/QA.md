@@ -79,3 +79,11 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - Screen tests cover 320 × 568, 600 × 740, 768 × 1024, 844 × 390, 1024 × 600, 1920 × 1080, and 2560 × 1440. They assert readable transcript height, reachable exports, header fit, and preserved filters/pins across orientation changes. Final CSS adjustments were rechecked with the eight screen tests.
 - Production web/CLI builds and TypeScript checks passed. All five languages use shorter task-oriented copy and include new action labels.
 - Thumbnail contact sheets were reviewed for copy feedback, command menus, excerpt dialogs, portrait phones, tablets, landscape windows, and wide desktop layouts. Short screens use document scrolling with actions in normal flow; the narrow cleanup sidebar keeps one setting per row.
+
+## Version 1.3.0: code extraction and discovery
+
+- `npm test`: 118 tests passed, including fenced-code parsing, safe language/file-name handling, complete cleaned snippet copy/export, bounded previews, metadata, and link-preview image dimensions.
+- The browser suite passed 62 tests. New scenarios cover long code beyond the preview, redaction in code, snippet paging, imported HTML as text, the built-in code sample, project-only sharing, and the JavaScript-free import guide. The final pagination focus adjustment was checked with the focused snippet suite.
+- Code, sharing, and import-guide labels are provided in all five supported interface languages.
+- Project metadata uses the canonical public URL; sharing does not serialize conversation state or page parameters. Search-engine indexing and audience growth depend on external discovery and are not measured by these checks.
+- Production web/CLI builds passed, and `npm audit --omit=dev` reported no production dependency vulnerabilities. Visual review used thumbnail contact sheets for the landing page, desktop/mobile code dialogs, import guide, and 1200 × 630 sharing card.

@@ -158,6 +158,22 @@ Report integrations must omit `customSecrets` and any original rule-file path fr
 
 ## Export functions
 
+### `extractCodeSnippets(conversation)`
+
+Returns metadata for closed Markdown fenced blocks, including language, message/fence indices, line and character counts, and start/end offsets into the message content. It does not execute code or duplicate complete code bodies. Call it on `cleanConversation(...).conversation` to extract cleaned code:
+
+```ts
+import { extractCodeSnippets, snippetExtension } from './src/core/index.ts';
+
+for (const snippet of extractCodeSnippets(result.conversation)) {
+  const code = result.conversation.messages[snippet.messageIndex]!.content.slice(snippet.start, snippet.end);
+  const extension = snippetExtension(snippet.language);
+  // Deliver `code` to the caller. The extension is allowlisted; unknown languages use txt.
+}
+```
+
+Backtick and tilde fences are supported, with matching close markers of sufficient length. Inline, over-indented, and unclosed fences are excluded. Unknown language info is normalized to `text`; source info strings do not become file names.
+
 ```ts
 buildTranscript(conversation: Conversation): string
 buildJsonl(conversation: Conversation): string

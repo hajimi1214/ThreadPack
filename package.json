@@ -1,7 +1,7 @@
 {
   "name": "threadpack",
-  "version": "1.2.0",
-  "description": "An offline workbench for cleaning AI conversations and carrying context into your next chat.",
+  "version": "1.3.0",
+  "description": "Clean AI conversation exports, extract code snippets, and build portable context locally.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://hajimi1214.github.io/ThreadPack/",
@@ -20,7 +20,11 @@
     "offline",
     "conversation",
     "redaction",
-    "handoff"
+    "handoff",
+    "code-extraction",
+    "jsonl",
+    "context-management",
+    "pwa"
   ],
   "engines": {
     "node": ">=20.19.0"

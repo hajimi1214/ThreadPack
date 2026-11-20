@@ -4,7 +4,7 @@
 
 # ThreadPack
 
-**本地 AI 对话处理工具**
+**清理对话文件，提取代码，带走上下文。**
 
 通过浏览器应用或共用核心引擎的 TypeScript CLI，检查、清理和导出 AI 对话文件。
 
@@ -14,7 +14,7 @@
 
 [在线应用](https://hajimi1214.github.io/ThreadPack/) · [下载发布版本](https://github.com/hajimi1214/ThreadPack/releases/latest) · [English](README.md)
 
-[核心 API](docs/API.md) · [架构与性能](docs/ARCHITECTURE.md) · [需求调研](docs/RESEARCH.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
+[导入指南](https://hajimi1214.github.io/ThreadPack/import-guide.html#zh) · [核心 API](docs/API.md) · [架构与性能](docs/ARCHITECTURE.md) · [需求调研](docs/RESEARCH.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md)
 
 </div>
 
@@ -28,6 +28,10 @@ ThreadPack 在本地处理 AI 对话导出文件，无需上传到其他服务�
 
 点击「导出筛选结果」可下载全部匹配消息，包含其他分页，支持 Markdown 和 JSONL。搜索、角色、变更和固定条件可以组合；匹配按当前视图进行，导出正文始终应用清理设置。
 
+打开「代码片段」可集中查看对话里的围栏代码块，复制完整代码或按语言扩展名下载。预览较长代码时会缩短显示，复制和下载保留完整清理结果。可用内置演示或[这份 Markdown 示例](examples/code-snippets.md)试用。
+
+适合接续长时间编程会话、收集生成的代码，或整理一份便于分享的对话。「分享 ThreadPack」只复制工具的公开地址，不携带对话文本或当前页面参数。
+
 按 **Ctrl+K**（Mac 为 **⌘K**）打开快捷操作，可导入、搜索、导出、切换预设和跳转页面。复制按钮会显示处理中、成功或失败状态，筛选条件可一键清除。
 
 布局同时适配屏幕宽度和高度：手机及较矮的横屏窗口允许页面滚动，避免消息区被压缩；平板按需打开清理设置，工具栏随阅读面板的实际宽度调整，超宽屏使用更大的工作区。旋转屏幕或调整窗口时，会保留当前会话、筛选和固定消息。
@@ -37,6 +41,13 @@ ThreadPack 在本地处理 AI 对话导出文件，无需上传到其他服务�
 界面支持 **简体中文、English、日本語、Français 和 Español**。通过顶部语言菜单切换；首次打开会参考浏览器语言，手动选择后会记住偏好。界面切换不会翻译对话内容；规范化导出的标题、标记与诊断信息仍使用英文。
 
 ![ThreadPack 工作台与合成对话示例](docs/assets/demo.zh-CN.png)
+
+<details>
+<summary>查看代码提取界面</summary>
+
+![复制和下载完整代码块](docs/assets/code-snippets.png)
+
+</details>
 
 ## 支持的格式
 

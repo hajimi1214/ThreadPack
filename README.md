@@ -4,9 +4,9 @@
 
 # ThreadPack
 
-**Offline AI conversation processing toolkit**
+**Clean conversation exports. Extract code. Carry context forward.**
 
-Inspect, clean, and export AI conversation files using a local browser application or a shared TypeScript CLI.
+Open Codex, Claude Code, ChatGPT, and Claude exports in a local browser application or TypeScript CLI.
 
 [![CI](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml/badge.svg)](https://github.com/hajimi1214/ThreadPack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -14,7 +14,7 @@ Inspect, clean, and export AI conversation files using a local browser applicati
 
 [Live application](https://hajimi1214.github.io/ThreadPack/) · [Download release](https://github.com/hajimi1214/ThreadPack/releases/latest) · [简体中文](README.zh-CN.md)
 
-[Core API](docs/API.md) · [Architecture and performance](docs/ARCHITECTURE.md) · [Research](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Import guide](https://hajimi1214.github.io/ThreadPack/import-guide.html) · [Core API](docs/API.md) · [Architecture and performance](docs/ARCHITECTURE.md) · [Research](docs/RESEARCH.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -28,6 +28,10 @@ Importing opens a compact workbench with the conversation in the first screen an
 
 Use **Export filtered results** to download every matching message as Markdown or JSONL, including messages on other pages. Search, role, change, and pin filters combine. Matching follows the selected view; exported message text always uses your cleanup settings.
 
+Open **Code snippets** to collect fenced code blocks across the selected conversation. Preview, copy, or download full cleaned code with the appropriate file extension. Long code stays complete when copied or downloaded. Try the built-in demo or [this Markdown sample](examples/code-snippets.md).
+
+Useful for restarting a long coding session, collecting generated code, or preparing a smaller transcript to share. The **Share ThreadPack** button copies only the tool's public address, with no conversation text or current-page parameters.
+
 Press **Ctrl+K** (or **⌘K** on Mac) to open quick actions for importing, search, export, recipes, and page navigation. Copy buttons show pending, success, or failure at the point of interaction. The toolbar can clear all filters in one click.
 
 Layout adapts to both screen width and height. Phones and short landscape windows use page scrolling so the transcript keeps a usable height. Tablets switch cleanup settings to a sheet, the transcript toolbar follows its own available width, and ultrawide screens get a larger workspace. Rotating or resizing keeps the open conversation, filters, and pins.
@@ -37,6 +41,13 @@ Files are read with Web Streams inside a Web Worker, with progress and cancellat
 The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
 
 ![ThreadPack workbench with a synthetic conversation](docs/assets/demo.png)
+
+<details>
+<summary>Code extraction preview</summary>
+
+![Copying and downloading complete code blocks](docs/assets/code-snippets.png)
+
+</details>
 
 ## Supported formats
 
