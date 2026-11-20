@@ -1,0 +1,27 @@
+.preview-tools { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.snippet-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 7px 9px; background: #f7faff; color: #4a6590; border: 1px solid #dbe5f3; border-radius: 6px; font-size: 11px; }
+.snippet-trigger:hover:not(:disabled) { background: #edf4ff; border-color: #a9c2e8; color: #2e59a2; }
+.snippet-dialog { width: min(100%, 900px); max-width: 900px; }
+.snippet-explorer h2 { font-size: 27px; }
+.snippet-total { font-size: 11px; color: #607a9d; margin-bottom: 12px; }
+.snippet-list { display: grid; gap: 14px; }
+.snippet-card { overflow: hidden; border: 1px solid #dce6f3; border-radius: 9px; }
+.snippet-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; min-height: 40px; padding: 9px 13px; background: #f3f7fd; color: #6b7e99; font-size: 10px; border-bottom: 1px solid #e0e9f6; }
+.snippet-language { color: #365f9f; background: #e3edfc; border-radius: 4px; padding: 3px 6px; font: 11px var(--mono); }
+.snippet-code { color: #d8e4f5; background: #23354f; padding: 16px; margin: 0; font: 12px/1.8 var(--mono); overflow: auto; max-height: 310px; white-space: pre; tab-size: 2; }
+.snippet-shortened { padding: 9px 13px 0; color: #7c8ba1; font-size: 10px; line-height: 1.6; }
+.snippet-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+.snippet-actions [data-state="success"] { color: #277454; border-color: #badfca; background: #eaf6ef; }
+.snippet-actions [data-state="error"] { color: #ad4242; background: #fff0f0; }
+.snippet-empty, .snippet-loading { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; min-height: 170px; color: #7086a5; font-size: 13px; text-align: center; line-height: 1.7; }
+.share-project { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; background: transparent; color: #617997; font-size: 11px; padding: 5px 0; }
+.share-project:hover { color: #285df4; }
+.help-project-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.help-project-actions .button { font-size: 11px; }
+.import-guide-card { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-top: 17px; padding: 19px 23px; border: 1px solid #dfe7f3; background: #fbfdff; border-radius: 11px; }
+.import-guide-card h2 { color: #3c5578; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.import-guide-card p { color: #6c7e98; font-size: 11px; line-height: 1.8; }
+.import-guide-card a { flex: 0 0 auto; font-size: 11px; }
+@container transcript (max-width: 520px) { .preview-tools { flex: 1 0 100%; justify-content: space-between; } .preview-tools .segmented { margin-left: auto; } }
+@media (max-width: 650px) { .import-guide-card { flex-direction: column; align-items: flex-start; gap: 13px; padding: 17px; } }
+@media (max-width: 550px) { .snippet-dialog { padding: 34px 15px 19px; } .snippet-heading { padding: 8px 10px; gap: 5px 8px; } .snippet-code { font-size: 11px; padding: 12px; } .snippet-actions .button { flex: 1; } }

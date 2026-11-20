@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
 import type { CleanOptions, Role } from './core';
@@ -15,6 +15,7 @@ import { applyCleanupRecipe, identifyCleanupRecipe } from './cleanup-recipes';
 import MessageCard from './components/MessageCard';
 import LandingShowcase from './components/LandingShowcase';
 import CommandMenu from './components/CommandMenu';
+import SnippetExplorer from './components/SnippetExplorer';
 import type { QuickAction } from './components/CommandMenu';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
@@ -27,6 +28,7 @@ interface InstallPrompt extends Event {
 type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean };
 const MAX_BYTES = 100 * 1024 * 1024;
 const NO_PIN_FILTER: string[] = [];
+const PROJECT_URL = 'https://hajimi1214.github.io/ThreadPack/';
 const reviewChangeLabels = { image: 'imagesRemoved', tool: 'outputsTrimmed', duplicate: 'duplicatesRemoved', secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted' } as const;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
@@ -72,7 +74,8 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(() => { try { return resolveLanguage(localStorage.getItem('threadpack-language'), navigator.languages); } catch { return resolveLanguage(null, navigator.languages); } });
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
-  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | null>(null);
+  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | null>(null);
+  const [shareState, setShareState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [archive, setArchive] = useState<ParseInfo | null>(null);
   const [selected, setSelected] = useState('');
   const [processed, setProcessed] = useState<(CleanSummary & { generation: number; optionsKey: string }) | null>(null);
@@ -121,6 +124,7 @@ export default function App() {
   const exportLock = useRef(false);
   const exportGeneration = useRef(0);
   const handoffCopyLock = useRef(false);
+  const shareLock = useRef(false);
   const handoffCopyGeneration = useRef(0);
   const { request, stop: stopWorker } = useWorkerClient();
   const importGeneration = useRef(0);
@@ -155,6 +159,11 @@ export default function App() {
   }, []);
   useEffect(() => { document.documentElement.lang = htmlLanguage(lang); try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 3200); return () => clearTimeout(id); }, [toast]);
+  useEffect(() => {
+    if (shareState !== 'success' && shareState !== 'error') return;
+    const timer = setTimeout(() => setShareState('idle'), 2200);
+    return () => clearTimeout(timer);
+  }, [shareState]);
   useEffect(() => {
     if (handoffCopyState !== 'success' && handoffCopyState !== 'error') return;
     const timer = setTimeout(() => setHandoffCopyState('idle'), 2200);
@@ -224,7 +233,7 @@ export default function App() {
   async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
     ++exportGeneration.current; exportLock.current = false; setExporting(false); setExportFormat(null);
     if (dialog === 'compare') closeMessageReview();
-    else if (dialog === 'commands' || dialog === 'excerpt') setDialog(null);
+    else if (dialog === 'commands' || dialog === 'excerpt' || dialog === 'snippets') setDialog(null);
     const generation = ++importGeneration.current;
     if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
     setImporting(true); setImportProgress(null); setError('');
@@ -372,6 +381,16 @@ export default function App() {
   function closeMessageReview() {
     ++messageReviewGeneration.current; setMessageReview(null); setReviewBusy(false); setDialog(null);
   }
+  async function shareProject() {
+    if (shareLock.current) return;
+    shareLock.current = true; setShareState('pending');
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(PROJECT_URL);
+      setShareState('success'); notify(t.shareProjectCopied);
+    } catch { setShareState('error'); notify(t.copyFailed, 'error'); }
+    finally { shareLock.current = false; }
+  }
   async function installApp() {
     if (!installPrompt) return;
     try { await installPrompt.prompt(); await installPrompt.userChoice; } catch { /* Installation is optional. */ }
@@ -393,6 +412,7 @@ export default function App() {
     { id: 'filters', label: t.clearFilters, keywords: 'reset all', run: clearFilters, disabled: !filtersActive },
     { id: 'export', label: t.export, keywords: 'download markdown jsonl', run: () => setDialog('export'), disabled: !processed || working || customDirty },
     { id: 'excerpt', label: t.exportExcerpt, keywords: 'download matches filtered', run: () => setDialog('excerpt'), disabled: !preview?.total || working || customDirty },
+    { id: 'snippets', label: t.codeSnippets, keywords: 'code extract snippets typescript python javascript', run: () => setDialog('snippets'), disabled: !processed || working || customDirty },
     { id: 'handoff', label: t.buildHandoff, keywords: 'notes context', run: () => navigate('handoff'), disabled: !processed || working },
     { id: 'balanced', label: t.balancedRecipe, keywords: 'recipe', run: () => { setOptions(current => applyCleanupRecipe(current, 'balanced')); notify(t.recipeApplied); }, disabled: !archive },
     { id: 'share', label: t.shareSafeRecipe, keywords: 'recipe email', run: () => { setOptions(current => applyCleanupRecipe(current, 'share-safe')); notify(t.recipeApplied); }, disabled: !archive },
@@ -467,7 +487,7 @@ export default function App() {
       {archive && view === 'workbench' && <div className="workspace-grid">
         <button className="settings-toggle button secondary" aria-label={t.recipe} aria-expanded={settingsOpen} aria-controls="cleanup-settings" onClick={() => setSettingsOpen(value => !value)}><Settings2 size={16} />{t.recipe}<ChevronDown size={14} className={settingsOpen ? 'rotate' : ''} /></button>
         {!isCompact && cleanupPanel}
-        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div>
+        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="preview-tools"><button className="snippet-trigger" disabled={working || customDirty || !processed} onClick={() => setDialog('snippets')}><Code2 size={14} />{t.codeSnippets}</button><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div></div>
           <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool', 'system'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button><button className={`changed-filter ${pinnedOnly ? 'active' : ''}`} aria-pressed={pinnedOnly} onClick={() => setPinnedOnly(value => !value)}><Pin size={11} />{t.pinnedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label>{filtersActive && <button className="filter-clear icon-button" aria-label={t.clearFilters} title={t.clearFilters} onClick={clearFilters}><RotateCcw size={14} /></button>}<button className="excerpt-trigger" disabled={working || customDirty || !preview?.total} onClick={() => setDialog('excerpt')}><Download size={13} /><span>{t.exportExcerpt}</span><b>{preview?.total.toLocaleString() ?? 0}</b></button></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
           <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
@@ -484,7 +504,7 @@ export default function App() {
 
       {archive && <section className="export-bar">{customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}<div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary handoff-copy" aria-label={t.copy} aria-busy={handoffCopyState === 'pending'} data-state={handoffCopyState} disabled={working || customDirty || handoffBusy || !handoffText || handoffCopyState === 'pending'} onClick={() => void copyHandoff()}>{handoffCopyState === 'pending' ? <LoaderCircle size={15} className="spin" /> : handoffCopyState === 'success' ? <Check size={15} /> : handoffCopyState === 'error' ? <AlertCircle size={15} /> : <Clipboard size={15} />}{handoffCopyState === 'pending' ? t.copying : handoffCopyState === 'success' ? t.copied : t.copy}</button><button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 
-      {!archive && !importing && <><LandingShowcase t={t} onDemo={() => void openText(createDemo(), 'checkout-session.jsonl', true)} /><div className="empty-formats landing-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></>}
+      {!archive && !importing && <><LandingShowcase t={t} onDemo={() => void openText(createDemo(), 'checkout-session.jsonl', true)} onShare={() => void shareProject()} sharing={shareState === 'pending'} shared={shareState === 'success'} /><section className="import-guide-card" aria-labelledby="import-guide-heading"><div><h2 id="import-guide-heading">{t.guideTitle}</h2><p>{t.guideCodex}</p><p>{t.guideChatgpt}</p><p>{t.guideText}</p></div><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a></section><div className="empty-formats landing-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></>}
       </div>
     </main>
 
@@ -493,11 +513,12 @@ export default function App() {
     {dragging && <div className="drag-overlay"><div><Upload size={44} /><h2>{t.drop}</h2><p>{t.dropHint}</p></div></div>}
 
 
+    {dialog === 'snippets' && archive && processed && <Dialog close={() => setDialog(null)} label={t.codeSnippets} closeLabel={t.close} className="snippet-dialog"><SnippetExplorer key={`${archive.archiveId}:${selected}:${processed.revision}`} archiveId={archive.archiveId} conversationId={selected} revision={processed.revision} request={request} t={t} download={download} notify={notify} /></Dialog>}
     {dialog === 'commands' && <Dialog close={() => setDialog(null)} label={t.quickActions} closeLabel={t.close} className="command-dialog"><CommandMenu actions={quickActions} t={t} execute={executeQuickAction} /></Dialog>}
     {isCompact && settingsOpen && <Dialog close={() => setSettingsOpen(false)} label={t.recipe} closeLabel={t.close} className="settings-sheet"><div className="settings-sheet-content">{cleanupPanel}</div><div className="settings-sheet-actions"><button className="button primary" onClick={finishSettings}>{t.doneSettings}<Check size={16} /></button></div></Dialog>}
     {dialog === 'compare' && <Dialog close={closeMessageReview} label={t.comparisonTitle} closeLabel={t.close} className="message-review-dialog"><div className="dialog-eyebrow"><Eye size={17} />{t.comparisonTitle}</div><h2>{t.comparisonTitle}</h2><p className="review-message-warning"><ShieldCheck size={14} />{t.compareWarning}</p>{reviewBusy && <p className="review-message-loading" role="status"><LoaderCircle size={16} className="spin" />{t.processing}</p>}{messageReview && <><div className="review-change-list">{messageReview.result.changes.map((change, index) => <span key={`${change.kind}-${index}`}>{change.count} {t[reviewChangeLabels[change.kind]]}</span>)}</div><div className="review-columns"><section className="review-column"><h3>{t.compareOriginal}</h3><pre>{messageReview.result.original.text || '—'}</pre>{messageReview.result.original.shortened && <small>{t.comparisonShortened}</small>}</section><section className="review-column"><h3>{t.compareCleaned}</h3><pre>{messageReview.result.cleaned.text || '—'}</pre>{messageReview.result.cleaned.shortened && <small>{t.comparisonShortened}</small>}</section></div>{(messageReview.result.original.imageHidden || messageReview.result.cleaned.imageHidden) && <p className="review-message-note">{t.imagePreviewHidden}</p>}</>}</Dialog>}
     {pendingAction && <Dialog close={() => setPendingAction(null)} label={t.unsavedNotes} closeLabel={t.close}><div className="dialog-eyebrow"><FileText size={17} />{t.unsavedNotes}</div><h2>{t.unsavedNotes}</h2><p className="dialog-subtitle">{t.discardHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => setPendingAction(null)}>{t.keepWorking}</button><button className="button danger" onClick={discardNotes}>{t.discardNotes}</button></div></Dialog>}
-    {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div></Dialog>}
+    {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div><div className="help-project-actions"><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a><button className="button secondary small" aria-label={t.shareProject} aria-busy={shareState === 'pending'} disabled={shareState === 'pending'} title={t.shareProjectHint} onClick={() => void shareProject()}>{shareState === 'pending' ? <LoaderCircle size={14} className="spin" /> : shareState === 'success' ? <Check size={14} /> : <Link size={14} />}{shareState === 'success' ? t.copied : t.shareProject}</button></div></Dialog>}
     {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
     {(dialog === 'export' || dialog === 'excerpt') && <Dialog close={() => { if (!exportLock.current) setDialog(null); }} label={dialog === 'excerpt' ? t.exportExcerpt : t.export} closeLabel={t.close}>
       <div className="dialog-eyebrow"><Package size={18} />{dialog === 'excerpt' ? `${preview?.total.toLocaleString() ?? 0} ${t.resultCount}` : t.ready}</div>

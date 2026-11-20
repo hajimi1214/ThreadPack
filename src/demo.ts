@@ -10,7 +10,7 @@ export function createDemo(): string {
   const records = [
     { role: 'user', content: 'We are fixing duplicate charges in the checkout service. Keep the public API unchanged. The fix must be safe to retry and ship with a regression test.' },
     { role: 'assistant', content: 'The payment handler retries after a timeout without checking the idempotency key. I will move the lookup before the charge request and add a unique database constraint.' },
-    { role: 'tool', content: 'src/payments/checkout.ts\n\nexport async function checkout(request: CheckoutRequest) {\n  const existing = await findByIdempotencyKey(request.idempotencyKey);\n  if (existing) return existing;\n  return createCharge(request);\n}\n\nMigration: add UNIQUE (idempotency_key) to payment_attempts.' },
+    { role: 'tool', content: 'src/payments/checkout.ts\n\n```typescript\nexport async function checkout(request: CheckoutRequest) {\n  const existing = await findByIdempotencyKey(request.idempotencyKey);\n  if (existing) return existing;\n  return createCharge(request);\n}\n```\n\nMigration: add UNIQUE (idempotency_key) to payment_attempts.' },
     { role: 'user', content: `Here is the failing checkout screenshot.\n${image}` },
     { role: 'assistant', content: 'The duplicate appears when two requests arrive together. The database constraint handles the race; the handler must also catch the unique-key conflict and return the existing payment.' },
     { role: 'tool', content: toolOutput },
