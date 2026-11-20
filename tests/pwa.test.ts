@@ -10,7 +10,7 @@ import { build as esbuild } from 'esbuild';
 import { createOfflinePlugin, buildOfflineWorker } from '../scripts/pwa-plugin';
 
 const origin = 'https://example.test/ThreadPack/';
-const shell = ['', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'third-party-licenses.txt'].map(path => origin + path);
+const shell = ['', 'index.html', 'import-guide.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'third-party-licenses.txt'].map(path => origin + path);
 
 function workerHarness() {
   const handlers = new Map<string, (event: Record<string, unknown>) => void>();
@@ -109,6 +109,8 @@ test('shell navigation tries network first, then serves its cached copy when off
   assert.equal(await (await worker.request(`${origin}index.html`))!.text(), 'updated application shell');
   const calls = worker.network.length;
   assert.equal(await (await worker.request(`${origin}icons/icon-192.png`, 'cors'))!.text(), 'pre-cached shell');
+  assert.equal(worker.network.length, calls);
+  assert.equal(await (await worker.request(`${origin}import-guide.html`, 'navigate'))!.text(), 'pre-cached shell');
   assert.equal(worker.network.length, calls);
   assert.ok(worker.writes.every(path => shell.includes(path)));
 });

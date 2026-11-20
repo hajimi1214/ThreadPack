@@ -31,7 +31,7 @@ const BUILD_ID = ${JSON.stringify(buildId)};
 const SCOPE = new URL(self.registration.scope);
 const CACHE_PREFIX = 'threadpack-shell-' + encodeURIComponent(SCOPE.href) + ':';
 const CACHE_NAME = CACHE_PREFIX + BUILD_ID;
-const SHELL_URLS = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './third-party-licenses.txt'].map(path => new URL(path, SCOPE).href);
+const SHELL_URLS = ['./', './index.html', './import-guide.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './third-party-licenses.txt'].map(path => new URL(path, SCOPE).href);
 const NAVIGATION_URLS = new Set(SHELL_URLS.slice(0, 2));
 const STATIC_URLS = new Set(SHELL_URLS.slice(2));
 

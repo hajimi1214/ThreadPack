@@ -147,7 +147,12 @@ export class WorkerEngine {
       if (/\.zip$/i.test(file.name)) {
         let bytes: Uint8Array;
         try {
-          if (typeof file.arrayBuffer === 'function') bytes = new Uint8Array(await file.arrayBuffer());
+          if (typeof file.arrayBuffer === 'function') {
+            bytes = new Uint8Array(await file.arrayBuffer());
+            checkActive();
+            if (bytes.byteLength > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.');
+            progress?.({ loaded: bytes.byteLength, total: file.size });
+          }
           else if (typeof file.stream === 'function') {
             const reader = file.stream().getReader(); const chunks: Uint8Array[] = []; let size = 0;
             for (;;) { checkActive(); const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength; if (size > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.'); chunks.push(chunk.value); }
@@ -166,9 +171,14 @@ export class WorkerEngine {
       } else {
         try {
           const bytes = typeof file.arrayBuffer === 'function' ? new Uint8Array(await file.arrayBuffer()) : await new Promise<Uint8Array>((resolve, reject) => { const fallback = new FileReader(); fallback.onload = () => resolve(new Uint8Array(fallback.result as ArrayBuffer)); fallback.onerror = () => reject(fallback.error); fallback.readAsArrayBuffer(file); });
+          checkActive();
+          if (bytes.byteLength > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.');
           text = new TextDecoder('utf-8').decode(bytes); sourceBytes = bytes.byteLength; progress?.({ loaded: sourceBytes, total: file.size });
           reader = null as unknown as ReadableStreamDefaultReader<Uint8Array>;
-        } catch { throw new Error('This file could not be read. Choose it again or paste its text.'); }
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('This file exceeds')) throw error;
+          throw new Error('This file could not be read. Choose it again or paste its text.');
+        }
       }
       if (reader) {
       const decoder = new TextDecoder('utf-8');
