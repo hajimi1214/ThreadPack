@@ -58,6 +58,7 @@ const ja: Record<TranslationKey, string> = {
   markdown: 'Markdown の会話記録', markdownHint: "閲覧、保管、別の会話への引き継ぎに",
   jsonl: '正規化した JSONL', jsonlHint: '1 行に 1 メッセージ。独自のツールで利用できます',
   report: '整理レポート', reportHint: '件数と設定のみ。メッセージ本文は含みません。',
+  contextBundle: 'ポータブル文脈パック', contextBundleHint: '整理済みの会話、レポート、引き継ぎメモ、コードを含む ZIP',
   exportWarning: "書き出したファイルでは、元のエージェントセッションを直接再開できません。",
   close: '閉じる', cancel: 'キャンセル', pasteTitle: "会話を貼り付ける。", pasteHint: '会話、ログ、または対応する JSON エクスポートを貼り付けてください。', parseText: 'テキストを開く',
   helpTitle: "読み込み、整理、書き出し。",

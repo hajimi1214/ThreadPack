@@ -130,6 +130,7 @@ const fr: Record<TranslationKey, string> = {
   jsonl: 'JSONL normalisé',
   jsonlHint: 'Un message par ligne, pour vos propres outils',
   report: 'Rapport de nettoyage',
+  contextBundle: 'Pack de contexte portable', contextBundleHint: 'ZIP avec transcript nettoyé, rapport, notes de reprise et code',
   reportHint: 'Quantités et réglages uniquement. Aucun texte des messages.',
   exportWarning: "Ces exports ne permettent pas de rouvrir une session d’agent native.",
   close: 'Fermer',

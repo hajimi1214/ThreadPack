@@ -54,6 +54,7 @@ const en = {
   markdown: 'Markdown transcript', markdownHint: "Readable text for review, archiving, or another conversation",
   jsonl: 'Normalized JSONL', jsonlHint: 'One message per line, for your own tools',
   report: 'Cleanup report', reportHint: 'Counts and settings only. No message text.',
+  contextBundle: 'Portable context bundle', contextBundleHint: 'ZIP with cleaned transcript, report, handoff notes, and code',
   exportWarning: "These exports cannot reopen a native agent session.",
   close: 'Close', cancel: 'Cancel', pasteTitle: "Paste a conversation.", pasteHint: 'Paste a conversation, a log, or a supported JSON export.', parseText: 'Open text',
   helpTitle: "Import, clean, export.",

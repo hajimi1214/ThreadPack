@@ -132,3 +132,27 @@ test('bundled license notices are available offline in the application help', as
   await expect(help.locator('.third-party-notices pre')).toContainText('0.8.3');
   expect(await page.evaluate(() => document.querySelector<HTMLAnchorElement>('.site-footer a[href$="third-party-licenses.txt"]')?.getAttribute('href'))).toBe('./third-party-licenses.txt');
 });
+
+test('portable context bundle exports cleaned files from the main export dialog', async ({ page }) => {
+  await page.goto('/');
+  const secret = 'portable_bundle_private_fixture_7391';
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'bundle.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ messages: [
+      { role: 'user', content: `Keep this context but hide password=${secret}.` },
+      { role: 'assistant', content: '```typescript\nexport const ready = true;\n```' },
+    ] })),
+  });
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: 'Export transcript', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export transcript', exact: true });
+  const downloading = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: /^Portable context bundle/ }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('threadpack-context.zip');
+  const files = unzipSync(await readFile((await download.path())!));
+  expect(Object.keys(files).sort()).toEqual(['README.md', 'cleanup-report.json', 'code/threadpack-code-2-1.ts', 'messages.jsonl', 'transcript.md']);
+  const contents = Object.values(files).map(value => new TextDecoder().decode(value)).join('\n');
+  expect(contents).toContain('[SECRET_1]');
+  expect(contents).not.toContain(secret);
+});

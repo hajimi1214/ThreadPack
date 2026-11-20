@@ -54,6 +54,7 @@ const zh: Record<TranslationKey, string> = {
   markdown: 'Markdown 对话', markdownHint: "适合阅读、归档或交给其他会话",
   jsonl: '标准化 JSONL', jsonlHint: '每行一条消息，便于其他工具处理',
   report: '清理报告', reportHint: '仅含数量与设置，不包含消息正文',
+  contextBundle: '便携上下文包', contextBundleHint: 'ZIP 包含清理后的对话、报告、交接笔记和代码',
   exportWarning: "导出文件不能直接恢复原生代理会话。",
   close: '关闭', cancel: '取消', pasteTitle: "粘贴对话内容。", pasteHint: '粘贴一段对话、日志或支持的 JSON 导出。', parseText: '打开文本',
   helpTitle: "导入、清理、导出。",

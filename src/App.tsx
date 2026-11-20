@@ -20,7 +20,7 @@ import type { QuickAction } from './components/CommandMenu';
 import THIRD_PARTY_NOTICES from '../public/third-party-licenses.txt?raw';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
-import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult } from './worker/types';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult } from './worker/types';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
@@ -87,7 +87,7 @@ export default function App() {
   const [preview, setPreview] = useState<QueryResult | null>(null);
   const [querying, setQuerying] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'markdown' | 'jsonl' | 'report' | null>(null);
+  const [exportFormat, setExportFormat] = useState<'markdown' | 'jsonl' | 'report' | 'bundle' | null>(null);
   const [handoffCopyState, setHandoffCopyState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [handoffText, setHandoffText] = useState('');
   const [handoffBusy, setHandoffBusy] = useState(false);
@@ -324,8 +324,8 @@ export default function App() {
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; document.body.append(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500); notify(t.downloaded);
   }
-  async function exportFile(format: 'markdown' | 'jsonl' | 'report', excerpt = false) {
-    if (!archive || !processed || working || customDirty || exportLock.current || excerpt && (format === 'report' || !preview?.total)) return;
+  async function exportFile(format: 'markdown' | 'jsonl' | 'report' | 'bundle', excerpt = false) {
+    if (!archive || !processed || working || customDirty || exportLock.current || excerpt && (format === 'report' || format === 'bundle' || !preview?.total)) return;
     const generation = importGeneration.current;
     const operation = ++exportGeneration.current;
     const context = actionContext;
@@ -334,7 +334,10 @@ export default function App() {
       const result = excerpt
         ? await request<ExcerptExportResult>({ type: 'export-excerpt', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
           format, mode, query: deferredQuery, role: filter, changedOnly, pinnedOnly, pinnedIds: queryPinnedIds })
-        : await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format });
+        : format === 'bundle'
+          ? await request<ContextBundleResult>({ type: 'export-bundle', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
+            notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget })
+          : await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format });
       if (operation !== exportGeneration.current || generation !== importGeneration.current || context !== actionContextRef.current) return;
       download(result.buffer, result.filename, result.mimeType); setDialog(null);
     } catch (err) { if (operation === exportGeneration.current && generation === importGeneration.current && (err as Error).message !== 'Cancelled') { setError(t.exportFailed); setDialog(null); } }
@@ -529,7 +532,7 @@ export default function App() {
       <div className="dialog-eyebrow"><Package size={18} />{dialog === 'excerpt' ? `${preview?.total.toLocaleString() ?? 0} ${t.resultCount}` : t.ready}</div>
       <h2>{dialog === 'excerpt' ? t.excerptTitle : t.exportTitle}</h2><p className="dialog-subtitle">{dialog === 'excerpt' ? t.excerptHint : t.exportSub}</p>
       {dialog === 'excerpt' && <p className="excerpt-cleaned-note"><ShieldCheck size={14} />{t.excerptCleanedNote}</p>}
-      <div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }] as const).filter(item => dialog !== 'excerpt' || item.format !== 'report').map(({ format, title, hint, icon: Icon, ext }) => <button key={format} aria-label={`${t[title]} ${t[hint]}`} aria-busy={exporting && exportFormat === format} disabled={exporting || customDirty} onClick={() => void exportFile(format, dialog === 'excerpt')}><span className="format-icon">{exporting && exportFormat === format ? <LoaderCircle size={21} className="spin" /> : <Icon size={21} strokeWidth={1.5} />}</span><span><strong>{exporting && exportFormat === format ? t.exporting : t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div>
+      <div className="export-formats">{([{ format: 'markdown', title: 'markdown', hint: 'markdownHint', icon: FileText, ext: '.md' }, { format: 'jsonl', title: 'jsonl', hint: 'jsonlHint', icon: FileJson, ext: '.jsonl' }, { format: 'report', title: 'report', hint: 'reportHint', icon: ShieldCheck, ext: '.json' }, { format: 'bundle', title: 'contextBundle', hint: 'contextBundleHint', icon: Package, ext: '.zip' }] as const).filter(item => dialog !== 'excerpt' || item.format !== 'report' && item.format !== 'bundle').map(({ format, title, hint, icon: Icon, ext }) => <button key={format} aria-label={`${t[title]} ${t[hint]}`} aria-busy={exporting && exportFormat === format} disabled={exporting || customDirty} onClick={() => void exportFile(format, dialog === 'excerpt')}><span className="format-icon">{exporting && exportFormat === format ? <LoaderCircle size={21} className="spin" /> : <Icon size={21} strokeWidth={1.5} />}</span><span><strong>{exporting && exportFormat === format ? t.exporting : t[title]}</strong><small>{t[hint]}</small></span><span className="format-ext">{ext}</span><ArrowDownToLine size={16} /></button>)}</div>
       <p className="export-disclaimer">{t.reviewNote}</p><p className="export-disclaimer">{t.exportWarning}</p>
     </Dialog>}
   </div>;
