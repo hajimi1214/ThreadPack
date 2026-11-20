@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DEFAULT_OPTIONS } from '../src/core';
 import type { CleanOptions } from '../src/core';
-import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
+import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
 import type { CleanSummary, ExportExcerptRequest, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
 
 let rpcId = 0;
@@ -41,6 +41,68 @@ test('clean RPC sends summaries only; message bodies and full change arrays stay
   assert.ok(!('changes' in summary));
   const page = await preview(engine, archive, summary);
   assert.equal(page.items[0]!.message.content, 'UNIQUE_MESSAGE_BODY_DO_NOT_TRANSFER');
+});
+
+test('code snippet queries page across the full cleaned corpus and return bounded previews only', async () => {
+  const engine = new WorkerEngine();
+  const code = 'a'.repeat(MAX_SNIPPET_PREVIEW_CHARACTERS - 1) + '🔎' + 'tail '.repeat(1000);
+  const messages = Array.from({ length: 23 }, (_, index) => ({ role: 'assistant', content: `\`\`\`ts\n// block ${index + 1}\n${code}\n\`\`\`` }));
+  const archive = await load(engine, JSON.stringify({ messages }));
+  const summary = await clean(engine, archive);
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  const first = await engine.handle({ id: next(), type: 'query-snippets', ...selection, page: 0, pageSize: 20 });
+  assert.equal(first.total, 23);
+  assert.equal(first.items.length, 20);
+  assert.equal(first.pageCount, 2);
+  assert.ok(first.items.every(item => item.preview.length <= MAX_SNIPPET_PREVIEW_CHARACTERS && item.shortened && item.language === 'typescript'));
+  assert.ok(first.items.every(item => !('text' in item) && !('content' in item) && !('start' in item)));
+  const last = await engine.handle({ id: next(), type: 'query-snippets', ...selection, page: 10, pageSize: 20 });
+  assert.equal(last.page, 1);
+  assert.equal(last.items.length, 3);
+  assert.equal(last.items[2]!.id, 'message-23-code-1');
+});
+
+test('snippet copy and downloads retain complete cleaned code with safe filenames', async () => {
+  const engine = new WorkerEngine();
+  const secret = 'private-snippet-project-628';
+  const code = `const project = "${secret}";\n` + '// complete retained source\n'.repeat(400);
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'assistant', content: `\`\`\`ts filename=../../private.exe\n${code}\`\`\`` }] }));
+  const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, customSecrets: [secret] });
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  const copied = await engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-1' });
+  assert.equal(copied.text, code.replace(secret, '[CUSTOM_1]'));
+  assert.ok(copied.text.length > MAX_SNIPPET_PREVIEW_CHARACTERS);
+  const exported = await engine.handle({ id: next(), type: 'export-snippet', ...selection, snippetId: 'message-1-code-1' });
+  assert.equal(textOf(exported.buffer), copied.text);
+  assert.equal(exported.filename, 'threadpack-code-1-1.ts');
+  assert.equal(exported.mimeType, 'text/plain;charset=utf-8');
+  assert.doesNotMatch(exported.filename, /private|exe|\.\./);
+});
+
+test('snippet previews do not split a Unicode surrogate pair at their length boundary', async () => {
+  const engine = new WorkerEngine();
+  const code = 'x'.repeat(MAX_SNIPPET_PREVIEW_CHARACTERS - 1) + '🔎tail\n';
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'assistant', content: `\`\`\`text\n${code}\`\`\`` }] }));
+  const summary = await clean(engine, archive);
+  const result = await engine.handle({ id: next(), type: 'query-snippets', archiveId: archive.archiveId,
+    conversationId: summary.conversation.id, revision: summary.revision, page: 0, pageSize: 20 });
+  assert.equal(result.items[0]!.preview, 'x'.repeat(MAX_SNIPPET_PREVIEW_CHARACTERS - 1));
+  assert.equal(result.items[0]!.shortened, true);
+  assert.equal(result.items[0]!.characters, code.length);
+});
+
+test('snippet references reject stale revisions and missing or invalid IDs without reflecting input', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'assistant', content: '```python\nprint("ok")\n```' }] }));
+  const summary = await clean(engine, archive);
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  await assert.rejects(engine.handle({ id: next(), type: 'query-snippets', ...selection, page: -1, pageSize: 20 }), /page number/);
+  await assert.rejects(engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-10' }), /unavailable/);
+  await assert.rejects(engine.handle({ id: next(), type: 'export-snippet', ...selection, snippetId: '../../private-entry' }), error => error instanceof Error && !error.message.includes('private-entry'));
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await assert.rejects(engine.handle({ id: next(), type: 'query-snippets', ...selection, page: 0, pageSize: 20 }), /out of date/);
+  await assert.rejects(engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-1' }), /out of date/);
+  await assert.rejects(engine.handle({ id: next(), type: 'export-snippet', ...selection, snippetId: 'message-1-code-1' }), /out of date/);
 });
 
 test('original searches the complete body and sends a bounded excerpt around a deep match', async () => {

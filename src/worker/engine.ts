@@ -1,11 +1,14 @@
 import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInput, validateCustomSecrets } from '../core';
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
+import { extractCodeSnippets, snippetExtension } from '../core/snippets';
+import type { CodeSnippet } from '../core/snippets';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
+export const MAX_SNIPPET_PREVIEW_CHARACTERS = 2000;
 const STALE_REVISION = 'This preview is out of date. Refresh the cleanup result and try again.';
 const CANCELLED_IMPORT = 'This import was cancelled or replaced by a newer import.';
 const IMAGE_DATA = /data:image\/[a-z0-9.+-]+;base64,(?:[a-z0-9+/=_-]|\\[rn])+/gi;
@@ -20,6 +23,7 @@ interface CleanCache {
   changes: Map<string, Change[]>;
   originalSizes: Map<string, number>;
   cleanedSizes: Map<string, number>;
+  snippets?: CodeSnippet[];
 }
 interface ArchiveState { archive: ParsedArchive; cleaned: Map<string, CleanCache> }
 
@@ -112,6 +116,14 @@ export class WorkerEngine {
     if (request.type === 'compare-message') return this.compareMessage(original, cache, request);
     if (request.type === 'export') return this.export(state.archive, cache, request.format);
     if (request.type === 'export-excerpt') return this.exportExcerpt(state.archive, original, cache, request);
+    if (request.type === 'query-snippets') return this.querySnippets(cache, request);
+    if (request.type === 'copy-snippet') return { text: this.snippet(cache, request.snippetId).text };
+    if (request.type === 'export-snippet') {
+      const { snippet, text } = this.snippet(cache, request.snippetId);
+      return { buffer: encoder.encode(text).buffer as ArrayBuffer,
+        filename: `threadpack-code-${snippet.messageIndex + 1}-${snippet.fenceIndex + 1}.${snippetExtension(snippet.language)}`,
+        mimeType: 'text/plain;charset=utf-8' };
+    }
     if (request.type === 'handoff') return this.handoff(cache, request);
     throw new Error('This operation is not supported.');
   }
@@ -241,6 +253,33 @@ export class WorkerEngine {
     const message = conversation.messages.find(candidate => candidate.id === request.messageId);
     if (!message) throw new Error('This message is unavailable in the selected view.');
     return { text: message.content };
+  }
+
+  private querySnippets(cache: CleanCache, request: QuerySnippetsRequest): SnippetQueryResult {
+    if (request.pageSize !== 20 || !Number.isSafeInteger(request.page) || request.page < 0) {
+      throw new Error('A valid code page number is required.');
+    }
+    const snippets = cache.snippets ??= extractCodeSnippets(cache.result.conversation);
+    const pageCount = Math.max(1, Math.ceil(snippets.length / 20));
+    const page = Math.min(request.page, pageCount - 1);
+    const items = snippets.slice(page * 20, (page + 1) * 20).map(snippet => {
+      const content = cache.result.conversation.messages[snippet.messageIndex]!.content;
+      let end = Math.min(snippet.end, snippet.start + MAX_SNIPPET_PREVIEW_CHARACTERS);
+      // Keep a surrogate pair intact at the preview boundary.
+      if (end < snippet.end && /[\uD800-\uDBFF]/.test(content[end - 1] ?? '') && /[\uDC00-\uDFFF]/.test(content[end] ?? '')) end--;
+      return { id: snippet.id, language: snippet.language, messageIndex: snippet.messageIndex,
+        fenceIndex: snippet.fenceIndex, lines: snippet.lines, characters: snippet.characters,
+        preview: content.slice(snippet.start, end), shortened: end < snippet.end };
+    });
+    return { items, total: snippets.length, page, pageCount };
+  }
+
+  private snippet(cache: CleanCache, id: string): { snippet: CodeSnippet; text: string } {
+    if (typeof id !== 'string' || id.length > 100 || !/^message-\d+-code-\d+$/.test(id)) throw new Error('A valid code reference is required.');
+    const snippets = cache.snippets ??= extractCodeSnippets(cache.result.conversation);
+    const snippet = snippets.find(item => item.id === id);
+    if (!snippet) throw new Error('This code snippet is unavailable.');
+    return { snippet, text: cache.result.conversation.messages[snippet.messageIndex]!.content.slice(snippet.start, snippet.end) };
   }
 
   private compareMessage(original: Conversation, cache: CleanCache, request: CompareMessageRequest): CompareMessageResult {
