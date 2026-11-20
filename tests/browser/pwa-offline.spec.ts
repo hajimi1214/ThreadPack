@@ -44,7 +44,7 @@ test('HTTP app installs only its shell cache and reloads offline without storing
     return result;
   });
   expect(cached.length).toBeGreaterThan(0);
-  const expectedPaths = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+  const expectedPaths = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/third-party-licenses.txt'];
   for (const cache of cached) {
     expect(cache.name).toMatch(/^threadpack-shell-/);
     expect(cache.containsPrivate).toBe(false);

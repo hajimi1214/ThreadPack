@@ -10,7 +10,7 @@ import { build as esbuild } from 'esbuild';
 import { createOfflinePlugin, buildOfflineWorker } from '../scripts/pwa-plugin';
 
 const origin = 'https://example.test/ThreadPack/';
-const shell = ['', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'].map(path => origin + path);
+const shell = ['', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'third-party-licenses.txt'].map(path => origin + path);
 
 function workerHarness() {
   const handlers = new Map<string, (event: Record<string, unknown>) => void>();
