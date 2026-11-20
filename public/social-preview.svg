@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">ThreadPack — Clean and Export AI Conversations</title>
+  <desc id="description">Local tools for Codex, Claude Code, ChatGPT, and Claude exports. Review cleanup changes and download a transcript or handoff.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f4f7ff"/><stop offset="1" stop-color="#eaf1ff"/></linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0v36" fill="none" stroke="#d6e2f5" stroke-width="1"/></pattern>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="160%"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#234774" flood-opacity=".09"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#background)"/>
+  <rect x="600" width="600" height="630" fill="url(#grid)" opacity=".55"/>
+  <g transform="translate(64 54)">
+    <rect width="47" height="47" rx="12" fill="#285df4"/>
+    <g fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 16 11.5-6L35 16v15l-11.5 6L12 31Z M12 16l11.5 6L35 16 M23.5 22v15 M17.75 13l11.5 6"/></g>
+  </g>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <text x="126" y="87" fill="#1e3555" font-size="31" font-weight="650" letter-spacing="-.9">ThreadPack</text>
+    <text x="66" y="192" fill="#6780a4" font-size="13" font-weight="600" letter-spacing="1.9">CONVERSATION FILE TOOLS</text>
+    <text x="63" y="260" fill="#18314f" font-size="49" font-weight="650" letter-spacing="-1.5">Clean conversations.</text>
+    <text x="63" y="321" fill="#18314f" font-size="49" font-weight="650" letter-spacing="-1.5">Export what you need.</text>
+    <text x="66" y="372" fill="#5e7391" font-size="20">Review changes, remove bulky output,</text>
+    <text x="66" y="402" fill="#5e7391" font-size="20">and prepare context for the next chat.</text>
+    <g transform="translate(66 451)" font-size="13" fill="#486897">
+      <rect width="139" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="16" y="22">Offline browser app</text>
+      <rect x="149" width="92" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="166" y="22">Web + CLI</text>
+      <rect x="251" width="103" height="34" rx="7" fill="#fff" stroke="#d8e3f4"/><text x="269" y="22">5 languages</text>
+    </g>
+    <text x="66" y="563" fill="#597395" font-size="14">Codex · Claude Code · ChatGPT · Claude</text>
+  </g>
+  <g transform="translate(714 160)" font-family="Segoe UI,Arial,sans-serif" filter="url(#shadow)">
+    <rect width="398" height="178" rx="13" fill="#203651"/>
+    <circle cx="22" cy="24" r="3" fill="#8ea6c5"/><circle cx="33" cy="24" r="3" fill="#8ea6c5"/><circle cx="44" cy="24" r="3" fill="#8ea6c5"/>
+    <text x="63" y="29" fill="#c5d5ec" font-size="12">Conversation export</text>
+    <path d="M0 47h398" stroke="#ffffff15"/>
+    <g font-family="Consolas,monospace" font-size="14" fill="#b5cae8"><text x="23" y="84">[Embedded image payload]</text><text x="23" y="113">[Long tool output]</text><text x="23" y="142">[Repeated tool output]</text></g>
+  </g>
+  <g transform="translate(692 317)" font-family="Segoe UI,Arial,sans-serif" filter="url(#shadow)">
+    <rect width="398" height="186" rx="13" fill="#fff" stroke="#cfddf0"/>
+    <circle cx="25" cy="25" r="10" fill="#e5f3ec"/><path d="m21 25 3 3 6-7" stroke="#398368" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="45" y="30" fill="#44698e" font-size="12">Reviewable transcript</text>
+    <path d="M0 49h398" stroke="#e5edf8"/>
+    <g font-family="Consolas,monospace" font-size="14" fill="#49688d"><text x="23" y="85">[Image removed]</text><text x="23" y="114">[Output clipped · head + tail]</text><text x="23" y="143">[Duplicate omitted]</text></g>
+    <rect x="239" y="152" width="137" height="23" rx="5" fill="#ecf3ff"/><text x="251" y="168" font-size="10" fill="#3f67a5">Markdown · JSONL · Handoff</text>
+  </g>
+  <text x="1110" y="565" text-anchor="end" fill="#7890b0" font-family="Segoe UI,Arial,sans-serif" font-size="12">hajimi1214.github.io/ThreadPack</text>
+</svg>

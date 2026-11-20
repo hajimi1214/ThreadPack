@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="How to open Codex, Claude Code, ChatGPT and Claude conversation exports in ThreadPack. Supported files, cleanup, code extraction and portable handoffs." />
+  <meta name="theme-color" content="#2563eb" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'" />
+  <link rel="canonical" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" />
+  <meta property="og:title" content="ThreadPack — Import Guide" />
+  <meta property="og:description" content="Open local conversation exports, check cleanup, extract code, and download the context you need." />
+  <meta property="og:url" content="https://hajimi1214.github.io/ThreadPack/import-guide.html" />
+  <meta property="og:image" content="https://hajimi1214.github.io/ThreadPack/social-preview.png" />
+  <title>ThreadPack Import Guide — Codex, Claude Code, ChatGPT and Claude</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f7fc;color:#29415f;font:15px/1.8 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}main{width:min(860px,calc(100% - 32px));margin:32px auto 48px}header{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:32px}a{color:#2e5da9;text-underline-offset:4px}header a{font-size:14px}header strong{font-size:21px;letter-spacing:-.5px;color:#253f64}.intro{padding:30px;background:#fff;border:1px solid #dfe7f3;border-radius:14px}h1{font-size:34px;line-height:1.2;letter-spacing:-.9px;margin:0 0 15px;color:#1f3555}h2{font-size:22px;margin:30px 0 12px;color:#29466d}h3{font-size:16px;margin:0 0 7px}p{margin:0 0 13px}.intro p{color:#627590}.button{display:inline-block;border-radius:7px;padding:10px 17px;background:#285df4;color:#fff;text-decoration:none;font-size:14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.card{padding:20px;background:#fff;border:1px solid #dfe7f3;border-radius:10px}.card p{font-size:14px;margin:0;color:#61748f}ol{padding-left:22px}li{padding:5px 0}code{font-size:.9em;background:#eaf0fb;border-radius:4px;padding:2px 5px;overflow-wrap:anywhere}.note{padding:15px 18px;border-left:3px solid #b6caed;background:#eaf1fd;font-size:14px}.language{font-size:13px}footer{font-size:13px;color:#71819b;margin-top:30px}section[lang]{padding-top:8px;border-top:1px solid #dce5f3;margin-top:35px}@media(max-width:600px){main{margin-top:18px}.intro{padding:22px}h1{font-size:28px}.grid{grid-template-columns:1fr}header{align-items:flex-start}header>div{display:flex;flex-direction:column;align-items:flex-end}}
+  </style>
+</head>
+<body>
+<main>
+  <header><strong>ThreadPack</strong><div><a href="./">Open app</a> · <a href="https://github.com/hajimi1214/ThreadPack">GitHub</a><br /><a class="language" href="#zh">简体中文</a></div></header>
+  <div class="intro"><h1>Open your conversation export.</h1><p>Use a local file or paste a conversation. ThreadPack processes it in your browser and downloads a separate copy.</p><a class="button" href="./">Open ThreadPack</a></div>
+  <h2>Choose the right file</h2>
+  <div class="grid">
+    <article class="card"><h3>Codex and Claude Code</h3><p>Choose a local session log in <code>.jsonl</code> format. Keep the original log intact; import a copy when a session is still active.</p></article>
+    <article class="card"><h3>ChatGPT</h3><p>Use the JSON file from your data export, commonly <code>conversations.json</code>. If the download is a ZIP, extract it first. Choose a conversation after importing.</p></article>
+    <article class="card"><h3>Claude</h3><p>Use the conversation JSON from your data export. Exports containing <code>chat_messages</code> are supported; multi-conversation archives can be browsed separately.</p></article>
+    <article class="card"><h3>Text, Markdown and generic JSON</h3><p>Open <code>.txt</code> or <code>.md</code>, paste text, or use JSON/JSONL messages with <code>role</code> and <code>content</code>. Explicit role headings help split plain text.</p></article>
+  </div>
+  <h2>Review before downloading</h2>
+  <ol><li>Click <strong>Import file</strong>, drop a file, or choose <strong>Paste text</strong>. The limit is 100 MiB.</li><li>Choose a cleanup recipe and review the packed and original views. Add exact custom redactions if required.</li><li>Search, filter, and pin the messages you need. Open <strong>Code snippets</strong> to copy or download complete fenced code blocks from the cleaned conversation.</li><li>Download a complete transcript or all filtered results. Add notes in <strong>Handoff builder</strong> to carry selected context into a new chat.</li></ol>
+  <p class="note">Conversation text, notes, and custom rules stay in tab memory. Download what you need before closing or reloading. Redaction can miss secrets; review exported content before sharing. Normalized exports do not reopen a native agent session.</p>
+  <h2>Missing content or unsupported files</h2>
+  <p>Extract ZIP archives before opening them. Provider formats can change; check import notes for skipped records. External image references cannot reconstruct an image, and a cleaned export cannot restore removed content.</p>
+  <p>If a file does not open, try a smaller JSONL or text excerpt. For a bug report, use a small synthetic example and include the source tool and version. <a href="https://github.com/hajimi1214/ThreadPack/issues">Report a format issue</a>.</p>
+  <section lang="zh-CN" id="zh">
+    <h2>导入指南</h2>
+    <p>选择本地对话文件，或直接粘贴文本。所有处理在浏览器中完成，导出会生成新副本。</p>
+    <ol><li><strong>Codex / Claude Code：</strong>打开 <code>.jsonl</code> 会话日志，保留原始文件。</li><li><strong>ChatGPT：</strong>从数据导出中找到 JSON 文件，常见名称为 <code>conversations.json</code>。下载内容若为 ZIP，请先解压。</li><li><strong>Claude：</strong>打开包含 <code>chat_messages</code> 的 JSON 导出。多会话文件可在导入后切换。</li><li><strong>文本和 Markdown：</strong>导入 <code>.txt</code>、<code>.md</code>，或使用“粘贴文本”。通用 JSON/JSONL 支持 <code>role</code> 和 <code>content</code> 消息字段。</li></ol>
+    <p>文件上限为 100 MiB。导入后选择清理预设，检查原文和清理结果。可搜索、筛选、固定消息，或打开“代码片段”复制和下载代码。需要交接时，补充笔记后导出交接包。</p>
+    <p class="note">关闭或刷新前请下载需要的内容。脱敏可能漏检，分享前检查导出文件。标准化导出不能直接恢复原生代理会话。</p>
+    <a class="button" href="./">打开 ThreadPack</a>
+  </section>
+  <footer>ThreadPack is an independent MIT-licensed project. <a href="https://github.com/hajimi1214/ThreadPack">Source and CLI instructions</a>.</footer>
+</main>
+</body>
+</html>

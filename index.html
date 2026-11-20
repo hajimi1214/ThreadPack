@@ -6,12 +6,54 @@
     <meta name="theme-color" content="#2563eb" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%232563eb'/%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m11 16 13-7 13 7v16l-13 7-13-7Z M11 16l13 7 13-7 M24 23v16 M17.5 12.5l13 7'/%3E%3C/g%3E%3C/svg%3E" />
-    <meta name="description" content="Clean AI conversation exports, remove embedded images and noisy tool output, and build a portable handoff. Offline. No account. No API key." />
+    <meta name="description" content="Clean Codex, Claude Code, ChatGPT and Claude exports. Extract code, redact secrets, and download portable context locally. No account required." />
+    <link rel="canonical" href="https://hajimi1214.github.io/ThreadPack/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ThreadPack" />
+    <meta property="og:title" content="ThreadPack — Clean and Export AI Conversations" />
+    <meta property="og:description" content="Open Codex, Claude Code, ChatGPT, or Claude exports. Clean bulky content, review changes, and export a transcript or handoff locally." />
+    <meta property="og:url" content="https://hajimi1214.github.io/ThreadPack/" />
+    <meta property="og:image" content="https://hajimi1214.github.io/ThreadPack/social-preview.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="ThreadPack: clean conversation exports locally and download a reviewable transcript." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ThreadPack — Clean and Export AI Conversations" />
+    <meta name="twitter:description" content="Local tools for Codex, Claude Code, ChatGPT, and Claude exports. Clean, review, and download the context you need." />
+    <meta name="twitter:image" content="https://hajimi1214.github.io/ThreadPack/social-preview.png" />
+    <meta name="twitter:image:alt" content="ThreadPack: clean conversation exports locally and download a reviewable transcript." />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; manifest-src 'self'; connect-src 'self' ws://127.0.0.1:4317; base-uri 'none'; form-action 'none'; object-src 'none'" />
-    <title>ThreadPack — Offline AI Conversation Toolkit</title>
+    <title>ThreadPack — Clean and Export AI Conversations</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ThreadPack",
+        "url": "https://hajimi1214.github.io/ThreadPack/",
+        "description": "Local tools for cleaning and exporting Codex, Claude Code, ChatGPT, and Claude conversation files.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows, macOS, Linux, Android, iOS",
+        "browserRequirements": "Requires a modern browser with JavaScript and Web Workers.",
+        "inLanguage": ["en", "zh-CN", "ja", "fr", "es"],
+        "isAccessibleForFree": true,
+        "license": "https://opensource.org/license/mit/",
+        "sameAs": "https://github.com/hajimi1214/ThreadPack",
+        "image": "https://hajimi1214.github.io/ThreadPack/social-preview.png",
+        "featureList": ["Local file processing", "Conversation cleanup and redaction", "Code snippet extraction", "Message comparison", "Filtered Markdown and JSONL exports", "Portable handoff notes", "Keyboard quick actions", "Offline browser application and CLI"]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <main>
+        <h1>ThreadPack — Conversation File Tools</h1>
+        <p>Clean and export Codex, Claude Code, ChatGPT, and Claude conversation files on your device. Review cleanup changes, redact recognized secrets, and download Markdown, JSONL, or a handoff for your next conversation.</p>
+        <p>The browser application requires JavaScript. Files are processed locally and no account is required.</p>
+        <p><a href="https://hajimi1214.github.io/ThreadPack/import-guide.html">Import guide for Codex, Claude Code, ChatGPT and Claude exports</a></p>
+        <p><a href="https://github.com/hajimi1214/ThreadPack">Source code and command-line instructions</a> · <a href="https://github.com/hajimi1214/ThreadPack/releases/latest">Download the offline application</a> · <a href="https://github.com/hajimi1214/ThreadPack/blob/main/README.zh-CN.md">简体中文使用说明</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

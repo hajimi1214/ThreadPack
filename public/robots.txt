@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /ThreadPack/
+
+Sitemap: https://hajimi1214.github.io/ThreadPack/sitemap.xml
