@@ -2,7 +2,7 @@ import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInpu
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
-import type { CleanSummary, ConversationInfo, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import type { CleanSummary, ConversationInfo, CopyMessageRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -108,6 +108,7 @@ export class WorkerEngine {
     const cache = state.cleaned.get(original.id);
     if (!cache || cache.revision !== request.revision) throw new Error(STALE_REVISION);
     if (request.type === 'query') return this.query(original, cache, request);
+    if (request.type === 'copy-message') return this.copyMessage(original, cache, request);
     if (request.type === 'export') return this.export(state.archive, cache, request.format);
     if (request.type === 'handoff') return this.handoff(cache, request);
     throw new Error('This operation is not supported.');
@@ -176,16 +177,18 @@ export class WorkerEngine {
   }
 
   private query(original: Conversation, cache: CleanCache, request: QueryRequest): QueryResult {
-    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
+    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || typeof request.changedOnly !== 'boolean' || typeof request.pinnedOnly !== 'boolean' || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string' || id.length > 500) || request.pinnedIds.length > 10000 || request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
       throw new Error('Valid preview filters and a page number are required.');
     }
     const conversation = request.mode === 'original' ? original : cache.result.conversation;
     const pattern = searchPattern(request.query);
+    const pinned = new Set(request.pinnedIds);
     const matches: number[] = [];
     for (let index = 0; index < conversation.messages.length; index++) {
       const message = conversation.messages[index]!;
       if (request.role !== 'all' && message.role !== request.role) continue;
       if (request.changedOnly && !cache.changes.has(message.id)) continue;
+      if (request.pinnedOnly && !pinned.has(message.id)) continue;
       // Match the complete worker-owned content before image removal or clipping.
       if (pattern && !pattern.test(message.content)) continue;
       matches.push(index);
@@ -202,21 +205,33 @@ export class WorkerEngine {
     return { items, total: matches.length, page, pageCount };
   }
 
+  private copyMessage(original: Conversation, cache: CleanCache, request: CopyMessageRequest): { text: string } {
+    if (!['cleaned', 'original'].includes(request.mode) || typeof request.messageId !== 'string' || request.messageId.length < 1 || request.messageId.length > 500) {
+      throw new Error('A valid message reference is required.');
+    }
+    const conversation = request.mode === 'original' ? original : cache.result.conversation;
+    const message = conversation.messages.find(candidate => candidate.id === request.messageId);
+    if (!message) throw new Error('This message is unavailable in the selected view.');
+    return { text: message.content };
+  }
+
   private export(archive: ParsedArchive, cache: CleanCache, format: 'markdown' | 'jsonl' | 'report'): ExportResult {
     const conversation = cache.result.conversation;
+    const conversationIndex = archive.conversations.findIndex(item => item.id === conversation.id);
+    const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';
     const options = cache.options;
     let text: string;
     let filename: string;
     let mimeType: string;
-    if (format === 'markdown') { text = buildTranscript(conversation); filename = 'threadpack-transcript.md'; mimeType = 'text/markdown;charset=utf-8'; }
-    else if (format === 'jsonl') { text = buildJsonl(conversation); filename = 'threadpack-transcript.jsonl'; mimeType = 'application/x-ndjson;charset=utf-8'; }
+    if (format === 'markdown') { text = buildTranscript(conversation); filename = `threadpack-transcript${suffix}.md`; mimeType = 'text/markdown;charset=utf-8'; }
+    else if (format === 'jsonl') { text = buildJsonl(conversation); filename = `threadpack-transcript${suffix}.jsonl`; mimeType = 'application/x-ndjson;charset=utf-8'; }
     else if (format === 'report') {
       text = JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive.format, messageCount: conversation.messages.length, stats: cache.result.stats,
         options: { stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit, deduplicate: options.deduplicate,
           redact: options.redact, redactEmails: options.redactEmails, customRuleCount: options.customSecrets?.length ?? 0 },
         scope: 'UTF-8 normalized message text; excludes source metadata. No message text, file paths, or custom redaction values are included in this report.',
       }, null, 2);
-      filename = 'threadpack-report.json'; mimeType = 'application/json;charset=utf-8';
+      filename = `threadpack-report${suffix}.json`; mimeType = 'application/json;charset=utf-8';
     } else throw new Error('Choose a supported export format.');
     return { buffer: encoder.encode(text).buffer as ArrayBuffer, filename, mimeType };
   }

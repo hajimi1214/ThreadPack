@@ -17,7 +17,7 @@ async function clean(engine: WorkerEngine, archive: ParseInfo, options: CleanOpt
 }
 function preview(engine: WorkerEngine, archive: ParseInfo, summary: CleanSummary, overrides: Partial<QueryRequest> = {}) {
   return engine.handle({ id: next(), type: 'query', archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision,
-    mode: 'cleaned', query: '', role: 'all', changedOnly: false, page: 0, pageSize: 30, ...overrides });
+    mode: 'cleaned', query: '', role: 'all', changedOnly: false, pinnedOnly: false, pinnedIds: [], page: 0, pageSize: 30, ...overrides });
 }
 function deferredFile(name = 'stream.txt') {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -83,6 +83,41 @@ test('pagination and role/changed filters query the whole corpus, including syst
   assert.equal(literal.items[0]!.index, 5002);
 });
 
+test('pinned-only filtering combines with existing filters and validates supplied pin IDs', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [
+    { role: 'user', content: 'first pinned' }, { role: 'assistant', content: 'second pinned' }, { role: 'user', content: 'not pinned' },
+  ] }));
+  const summary = await clean(engine, archive);
+  const pinned = ['message-1', 'message-2'];
+  const filtered = await preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: pinned });
+  assert.equal(filtered.total, 2);
+  assert.deepEqual(filtered.items.map(item => item.index), [0, 1]);
+  const role = await preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: pinned, role: 'assistant' });
+  assert.equal(role.total, 1);
+  assert.equal(role.items[0]!.index, 1);
+  const none = await preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: ['missing-id'] });
+  assert.equal(none.total, 0);
+  await assert.rejects(preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: [42 as unknown as string] }), /filters/);
+});
+
+test('copy-message returns the complete body in the requested mode and rejects stale or unknown references', async () => {
+  const engine = new WorkerEngine();
+  const originalBody = 'password=synthetic-placeholder-value ' + 'complete '.repeat(3000);
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'user', content: originalBody }] }));
+  const summary = await clean(engine, archive);
+  const request = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision, messageId: 'message-1' };
+  const original = await engine.handle({ id: next(), type: 'copy-message', ...request, mode: 'original' });
+  assert.equal(original.text, originalBody);
+  assert.ok(original.text.length > MAX_PREVIEW_CHARACTERS);
+  const cleaned = await engine.handle({ id: next(), type: 'copy-message', ...request, mode: 'cleaned' });
+  assert.ok(cleaned.text.length > MAX_PREVIEW_CHARACTERS);
+  assert.doesNotMatch(cleaned.text, /synthetic-placeholder-value/);
+  assert.match(cleaned.text, /complete /);
+  await assert.rejects(engine.handle({ id: next(), type: 'copy-message', ...request, revision: summary.revision + 1, mode: 'original' }), /out of date/);
+  await assert.rejects(engine.handle({ id: next(), type: 'copy-message', ...request, messageId: 'unknown', mode: 'cleaned' }), /unavailable/);
+});
+
 test('inline image data stays hidden in either preview mode without swallowing following text', async () => {
   const engine = new WorkerEngine();
   const image = 'data:image/png;base64,' + 'QUJD'.repeat(10000);
@@ -142,6 +177,21 @@ test('exports transfer complete cleaned UTF-8 data and reports contain only allo
   const markdown = await engine.handle({ id: next(), type: 'export', ...request, format: 'markdown' });
   assert.equal(markdown.filename, 'threadpack-transcript.md');
   assert.ok(!textOf(markdown.buffer).includes(fakeToken));
+});
+
+test('exports distinguish conversations by ordinal without including source titles in filenames', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify([
+    { id: 'one', title: 'sensitive/source/path', messages: [{ role: 'user', content: 'First' }] },
+    { id: 'two', title: 'private conversation name', messages: [{ role: 'user', content: 'Second' }] },
+  ]));
+  const first = await clean(engine, archive, DEFAULT_OPTIONS, 0);
+  const second = await clean(engine, archive, DEFAULT_OPTIONS, 1);
+  const firstExport = await engine.handle({ id: next(), type: 'export', archiveId: 1, conversationId: first.conversation.id, revision: first.revision, format: 'markdown' });
+  const secondExport = await engine.handle({ id: next(), type: 'export', archiveId: 1, conversationId: second.conversation.id, revision: second.revision, format: 'markdown' });
+  assert.equal(firstExport.filename, 'threadpack-transcript-1.md');
+  assert.equal(secondExport.filename, 'threadpack-transcript-2.md');
+  assert.doesNotMatch(secondExport.filename, /private|conversation|two|source|path/i);
 });
 
 test('handoff cleans notes with separate aliases and retains pinned full text from the worker', async () => {
