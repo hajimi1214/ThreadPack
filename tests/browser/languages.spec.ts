@@ -36,10 +36,11 @@ for (const language of SUPPORTED_LANGUAGES) {
     await expect(selector).toHaveValue(language.code);
     await expect(page.locator('html')).toHaveAttribute('lang', language.htmlLang);
     await expect(page.getByRole('button', { name: t.demo, exact: true })).toBeVisible();
+    await expect(page.locator('.landing-showcase').getByRole('heading', { name: t.showcaseTitle, exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: t.help, exact: true })).toBeVisible();
     await noHorizontalOverflow(page);
 
-    await page.getByRole('button', { name: t.demo, exact: true }).click();
+    await page.getByRole('button', { name: t.showcaseAction, exact: true }).click();
     await idle(page);
     await expect(page.locator('.demo-badge')).toHaveText(t.demoBadge);
     const imageSwitch = page.getByRole('switch', { name: t.stripImages, exact: true });

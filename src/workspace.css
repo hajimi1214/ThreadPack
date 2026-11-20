@@ -25,6 +25,13 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
 .has-archive .panel-heading { flex: 0 0 auto; min-height: 64px; padding: 14px 16px; }
 .has-archive .panel-heading h2 { font-size: 15px; color: #22334c; }
 .has-archive .panel-heading p { font-size: 11px; color: #62728a; line-height: 1.5; }
+.recipe-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 0 14px; }
+.recipe-presets button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 58px; padding: 6px 3px; border: 1px solid #dce5f2; border-radius: 7px; background: #fbfcff; color: #5e7190; font-size: 10px; line-height: 1.4; text-align: center; }
+.recipe-presets button svg { flex: 0 0 auto; color: #829bc1; }
+.recipe-presets button:hover { border-color: #a8c0e5; background: #f5f8ff; }
+.recipe-presets button.active { border-color: #86a8e0; background: #edf4ff; color: #315ca6; box-shadow: inset 0 0 0 1px #86a8e033; }
+.recipe-presets button.active svg { color: #315ca6; }
+.recipe-preset-hint { min-height: 31px; margin: 7px 15px 0; color: #62728a; font-size: 11px; line-height: 1.6; }
 .has-archive .preview-toolbar { flex: 0 0 auto; padding: 9px 14px; gap: 10px; }
 .has-archive .role-filter button, .has-archive .changed-filter { font-size: 11px; min-height: 32px; }
 .has-archive .changed-filter { color: #435b7d; border-color: #bdcee6; }
@@ -45,6 +52,8 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
 .message-copy-button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 5px; background: transparent; color: #536983; }
 .message-copy-button:hover, .message-copy-button:focus-visible { background: #edf3ff; color: #315ca6; }
 .message-copy-button:focus-visible, .pin-button:focus-visible { outline: 2px solid #7aa1eb; outline-offset: 1px; }
+.review-message-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin: -3px 0 4px 34px; padding: 5px 8px; border: 1px solid #dbe5f4; border-radius: 5px; background: #f8faff; color: #405f90; font-size: 10px; }
+.review-message-button:hover:not(:disabled) { border-color: #a9c2e8; background: #eff5ff; color: #2852a0; }
 .message-change-labels > span { color: #416598; font-size: 10px; }
 .preview-footnote, .expand-button { font-size: 11px; color: #536d91; }
 .preview-footnote { line-height: 1.6; }
@@ -90,6 +99,20 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
 .settings-sheet .privacy-card { margin: 0 20px 18px; display: block; }
 .settings-sheet-actions { flex: 0 0 auto; padding: 12px 16px; border-top: 1px solid #dce4ef; background: #fff; }
 .settings-sheet-actions .button { width: 100%; min-height: 44px; font-size: 13px; }
+.message-review-dialog { width: min(100%, 960px); max-width: 960px; }
+.review-message-warning { display: flex; align-items: flex-start; gap: 8px; margin: 18px 0; padding: 11px 12px; border: 1px solid #eeddb5; border-radius: 7px; background: #fffaf0; color: #755d28; font-size: 11px; line-height: 1.6; }
+.review-message-warning svg { flex: 0 0 auto; margin-top: 1px; }
+.review-message-loading { display: flex; align-items: center; gap: 8px; min-height: 130px; justify-content: center; color: #536d91; font-size: 12px; }
+.review-change-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.review-change-list span { padding: 4px 7px; border: 1px solid #dbe6f6; border-radius: 5px; background: #f6f9ff; color: #496a9e; font-size: 10px; }
+.review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.review-column { min-width: 0; overflow: hidden; border: 1px solid #e2e9f3; border-radius: 8px; background: #fbfcff; }
+.review-column h3 { padding: 10px 12px; border-bottom: 1px solid #e5ebf4; color: #334964; font-size: 12px; }
+.review-column:first-child h3 { background: #fff8f3; color: #85604c; }
+.review-column:last-child h3 { background: #eff8f3; color: #34715f; }
+.review-column pre { max-height: min(48dvh, 520px); overflow: auto; overscroll-behavior: contain; margin: 0; padding: 12px; color: #40536d; font: 11px/1.75 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-column > small { display: block; padding: 0 12px 10px; color: #6b7890; font-size: 10px; line-height: 1.55; }
+.review-message-note { margin-top: 10px; color: #6b7890; font-size: 10px; line-height: 1.6; }
 
 @media (min-width: 801px) and (max-height: 850px) {
   main.loaded .metric { padding-top: 9px; padding-bottom: 9px; }
@@ -172,4 +195,7 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
   .update-notice { flex-wrap: wrap; padding: 10px; }
   .update-notice p { flex-basis: calc(100% - 35px); }
   .settings-sheet { width: 100%; border-radius: 15px; }
+  .message-review-dialog { padding: 34px 15px 18px; }
+  .review-columns { grid-template-columns: 1fr; }
+  .review-column pre { max-height: 30dvh; }
 }

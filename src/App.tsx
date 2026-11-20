@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, Download, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
 import type { CleanOptions, Role } from './core';
@@ -11,10 +11,12 @@ import { useConversationDrafts } from './hooks/useConversationDrafts';
 import { useWorkerClient } from './hooks/useWorkerClient';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { isRedactionDraftDirty } from './redaction-draft';
+import { applyCleanupRecipe, identifyCleanupRecipe } from './cleanup-recipes';
 import MessageCard from './components/MessageCard';
+import LandingShowcase from './components/LandingShowcase';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
-import type { ParseInfo, CleanSummary, QueryResult, ExportResult, HandoffResult, ImportProgress, CopyMessageResult } from './worker/types';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult } from './worker/types';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
@@ -23,6 +25,7 @@ interface InstallPrompt extends Event {
 type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean };
 const MAX_BYTES = 100 * 1024 * 1024;
 const NO_PIN_FILTER: string[] = [];
+const reviewChangeLabels = { image: 'imagesRemoved', tool: 'outputsTrimmed', duplicate: 'duplicatesRemoved', secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted' } as const;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
 
@@ -65,7 +68,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(() => { try { return resolveLanguage(localStorage.getItem('threadpack-language'), navigator.languages); } catch { return resolveLanguage(null, navigator.languages); } });
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
-  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | null>(null);
+  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'compare' | null>(null);
   const [archive, setArchive] = useState<ParseInfo | null>(null);
   const [selected, setSelected] = useState('');
   const [processed, setProcessed] = useState<(CleanSummary & { generation: number; optionsKey: string }) | null>(null);
@@ -74,6 +77,8 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [handoffText, setHandoffText] = useState('');
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [messageReview, setMessageReview] = useState<{ messageId: string; result: CompareMessageResult } | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -105,6 +110,7 @@ export default function App() {
   const goalInput = useRef<HTMLTextAreaElement>(null);
   const customRules = useRef<HTMLDetailsElement>(null);
   const readingPositions = useRef(new Map<string, number>());
+  const messageReviewGeneration = useRef(0);
   const { request, stop: stopWorker } = useWorkerClient();
   const importGeneration = useRef(0);
   const activeArchiveId = useRef<number | null>(null);
@@ -112,6 +118,9 @@ export default function App() {
   const optionsKey = JSON.stringify(options);
   const customDirty = isRedactionDraftDirty(customText, options.customSecrets);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
+  const activeRecipe = identifyCleanupRecipe(options);
+  const activeRecipeHint: TranslationKey = activeRecipe === 'share-safe' ? 'shareSafeRecipeHint'
+    : activeRecipe === 'keep-text' ? 'keepTextRecipeHint' : activeRecipe === 'balanced' ? 'balancedRecipeHint' : 'customRecipeHint';
   const queryPinnedIds = pinnedOnly ? pins : NO_PIN_FILTER;
   const readingPositionKey = archive ? JSON.stringify([archive.archiveId, selected, mode, deferredQuery, filter, changedOnly, pinnedOnly, pinnedOnly ? [...pins].sort() : [], page]) : '';
 
@@ -178,6 +187,7 @@ export default function App() {
   }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, budget, request]);
 
   async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
+    if (dialog === 'compare') closeMessageReview();
     const generation = ++importGeneration.current;
     if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
     setImporting(true); setImportProgress(null); setError('');
@@ -196,13 +206,17 @@ export default function App() {
     finally { if (generation === importGeneration.current) { setImporting(false); setImportProgress(null); } }
   }
   function importArchive(name: string, content: { text?: string; file?: File }, isDemo = false) {
-    if (hasNotes && !importing) { setPendingAction({ kind: 'import', name, content, isDemo }); return Promise.resolve(); }
+    if (hasNotes && !importing) {
+      if (dialog === 'compare') closeMessageReview(); else setDialog(null);
+      setSettingsOpen(false); setPendingAction({ kind: 'import', name, content, isDemo }); return Promise.resolve();
+    }
     return performImport(name, content, isDemo);
   }
   const openText = (text: string, name: string, isDemo = false) => importArchive(name, { text }, isDemo);
   const openFile = (file: File) => importArchive(file.name, { file });
 
   function clearWorkspace() {
+    ++messageReviewGeneration.current; setMessageReview(null); setReviewBusy(false);
     activeArchiveId.current = null; ++importGeneration.current; ++cleanupGeneration.current; stopWorker();
     setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
     setArchive(null); setProcessed(null); setPreview(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText('');
@@ -283,6 +297,23 @@ export default function App() {
       if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setToast(t.clipboardError);
     }
   }
+  async function reviewMessage(messageId: string) {
+    if (!archive || !processed || working || customDirty || processed.optionsKey !== optionsKey) return;
+    const generation = importGeneration.current;
+    const reviewGeneration = ++messageReviewGeneration.current;
+    setMessageReview(null); setReviewBusy(true); setDialog('compare');
+    try {
+      const result = await request<CompareMessageResult>({ type: 'compare-message', archiveId: archive.archiveId,
+        conversationId: selected, revision: processed.revision, messageId });
+      if (generation !== importGeneration.current || reviewGeneration !== messageReviewGeneration.current || processed.generation !== cleanupGeneration.current) return;
+      setMessageReview({ messageId, result });
+    } catch (err) {
+      if (generation === importGeneration.current && reviewGeneration === messageReviewGeneration.current && (err as Error).message !== 'Cancelled') { setError(t.comparisonFailed); setDialog(null); }
+    } finally { if (generation === importGeneration.current && reviewGeneration === messageReviewGeneration.current) setReviewBusy(false); }
+  }
+  function closeMessageReview() {
+    ++messageReviewGeneration.current; setMessageReview(null); setReviewBusy(false); setDialog(null);
+  }
   async function installApp() {
     if (!installPrompt) return;
     try { await installPrompt.prompt(); await installPrompt.userChoice; } catch { /* Installation is optional. */ }
@@ -302,6 +333,7 @@ export default function App() {
 
   const cleanupPanel = (
     <aside id="cleanup-settings" className={`recipe-panel panel ${settingsOpen ? 'settings-open' : ''}`}><div className="panel-heading"><div><h2>{t.recipe}</h2><p>{t.recipeSub}</p></div><button className="icon-button muted" title={t.reset} aria-label={t.reset} onClick={resetRecipe}><RotateCcw size={15} /></button></div>
+          <div className="recipe-presets" role="group" aria-label={t.quickRecipes}>{([{ id: 'balanced', label: 'balancedRecipe', hint: 'balancedRecipeHint', icon: Sparkles }, { id: 'share-safe', label: 'shareSafeRecipe', hint: 'shareSafeRecipeHint', icon: ShieldCheck }, { id: 'keep-text', label: 'keepTextRecipe', hint: 'keepTextRecipeHint', icon: FileText }] as const).map(({ id, label, hint, icon: Icon }) => <button key={id} className={activeRecipe === id ? 'active' : ''} aria-pressed={activeRecipe === id} title={t[hint]} onClick={() => setOptions(current => applyCleanupRecipe(current, id))}><Icon size={15} /><span>{t[label]}</span></button>)}</div><p className="recipe-preset-hint">{t[activeRecipeHint]}</p>
           <div className="recipe-controls"><Toggle title={t.stripImages} hint={t.stripImagesHint} icon={ImageMinus} checked={options.stripImages} onChange={() => toggle('stripImages')} /><Toggle title={t.trimTools} hint={t.trimToolsHint} icon={Terminal} checked={options.trimToolOutputs} onChange={() => toggle('trimToolOutputs')} />
             {options.trimToolOutputs && <div className="range-control"><div><label htmlFor="tool-limit">{t.toolLimit}</label><output htmlFor="tool-limit">{options.toolLimit.toLocaleString()}</output></div><input id="tool-limit" type="range" min="500" max="12000" step="500" value={options.toolLimit} onChange={e => setOptions(o => ({ ...o, toolLimit: Number(e.target.value) }))} /><div className="range-labels"><span>500</span><span>12,000</span></div></div>}
             <Toggle title={t.dedup} hint={t.dedupHint} icon={Copy} checked={options.deduplicate} onChange={() => toggle('deduplicate')} /><div className="recipe-divider" /><Toggle title={t.redact} hint={t.redactHint} icon={ShieldCheck} checked={options.redact} onChange={() => toggle('redact')} /><Toggle title={t.emails} hint={t.emailsHint} icon={Mail} checked={options.redactEmails} onChange={() => toggle('redactEmails')} />
@@ -363,7 +395,7 @@ export default function App() {
           <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !visible.length && <p className="no-results">{t.noResults}</p>}
-            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => void copyMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
+            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => void copyMessage(message.id)} onReview={() => void reviewMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
           </div>
           {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(safePage + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
           <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
@@ -374,7 +406,7 @@ export default function App() {
 
       {archive && <section className="export-bar">{customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}<div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => void copyHandoff()}><Clipboard size={15} />{t.copy}</button><button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 
-      {!archive && !importing && <section className="empty-state"><div className="empty-symbol"><Layers size={26} strokeWidth={1.2} /><span><ArrowRight size={12} /></span></div><h2>{t.emptyTitle}</h2><p>{t.emptyBody}</p><div className="empty-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></section>}
+      {!archive && !importing && <><LandingShowcase t={t} onDemo={() => void openText(createDemo(), 'checkout-session.jsonl', true)} /><div className="empty-formats landing-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></>}
       </div>
     </main>
 
@@ -384,6 +416,7 @@ export default function App() {
 
 
     {isCompact && settingsOpen && <Dialog close={() => setSettingsOpen(false)} label={t.recipe} closeLabel={t.close} className="settings-sheet"><div className="settings-sheet-content">{cleanupPanel}</div><div className="settings-sheet-actions"><button className="button primary" onClick={finishSettings}>{t.doneSettings}<Check size={16} /></button></div></Dialog>}
+    {dialog === 'compare' && <Dialog close={closeMessageReview} label={t.comparisonTitle} closeLabel={t.close} className="message-review-dialog"><div className="dialog-eyebrow"><Eye size={17} />{t.comparisonTitle}</div><h2>{t.comparisonTitle}</h2><p className="review-message-warning"><ShieldCheck size={14} />{t.compareWarning}</p>{reviewBusy && <p className="review-message-loading" role="status"><LoaderCircle size={16} className="spin" />{t.processing}</p>}{messageReview && <><div className="review-change-list">{messageReview.result.changes.map((change, index) => <span key={`${change.kind}-${index}`}>{change.count} {t[reviewChangeLabels[change.kind]]}</span>)}</div><div className="review-columns"><section className="review-column"><h3>{t.compareOriginal}</h3><pre>{messageReview.result.original.text || '—'}</pre>{messageReview.result.original.shortened && <small>{t.comparisonShortened}</small>}</section><section className="review-column"><h3>{t.compareCleaned}</h3><pre>{messageReview.result.cleaned.text || '—'}</pre>{messageReview.result.cleaned.shortened && <small>{t.comparisonShortened}</small>}</section></div>{(messageReview.result.original.imageHidden || messageReview.result.cleaned.imageHidden) && <p className="review-message-note">{t.imagePreviewHidden}</p>}</>}</Dialog>}
     {pendingAction && <Dialog close={() => setPendingAction(null)} label={t.unsavedNotes} closeLabel={t.close}><div className="dialog-eyebrow"><FileText size={17} />{t.unsavedNotes}</div><h2>{t.unsavedNotes}</h2><p className="dialog-subtitle">{t.discardHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => setPendingAction(null)}>{t.keepWorking}</button><button className="button danger" onClick={discardNotes}>{t.discardNotes}</button></div></Dialog>}
     {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div></Dialog>}
     {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}

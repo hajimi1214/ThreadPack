@@ -37,6 +37,81 @@ async function applyCustom(page: Page, value: string) {
   await idle(page);
 }
 
+test('cleanup presets change the real recipe without dropping custom redactions', async ({ page }) => {
+  const privateValue = 'Recipe-only private project 384';
+  await importMessages(page, [
+    { role: 'user', content: `SHARE_CONTENT: ${privateValue}. Contact: recipe-user@example.test` },
+    { role: 'tool', content: `TOOL_CONTEXT: ${'Synthetic log context. '.repeat(120)}` },
+  ]);
+  await applyCustom(page, privateValue);
+  await expect(page.locator('.messages-list')).not.toContainText(privateValue);
+
+  const shareSafe = page.getByRole('button', { name: 'Share safely', exact: true });
+  await shareSafe.click();
+  await idle(page);
+  await expect(shareSafe).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.messages-list')).not.toContainText(privateValue);
+  await expect(page.locator('.messages-list')).toContainText('[EMAIL_1]');
+
+  const keepText = page.getByRole('button', { name: 'Keep text', exact: true });
+  await keepText.click();
+  await idle(page);
+  await expect(keepText).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('switch', { name: 'Clip long tool outputs', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('.messages-list')).not.toContainText(privateValue);
+
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await idle(page);
+  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('.messages-list')).toContainText(privateValue);
+});
+
+test('message review shows bounded original and cleaned excerpts without rendering imported markup', async ({ page }) => {
+  const privateValue = 'audit-only-private-value-719';
+  const longBody = `API_KEY=${privateValue}\n<img src=x onerror=alert(1)>\n${'Synthetic trace details. '.repeat(900)}`;
+  await importMessages(page, [{ role: 'user', content: longBody }]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const card = page.locator('.message-card').first();
+  await expect(card.getByRole('button', { name: 'Review changes', exact: true })).toBeVisible();
+  await card.getByRole('button', { name: 'Review changes', exact: true }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Message changes', exact: true });
+  await expect(dialog.getByRole('heading', { name: 'Original', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Cleaned', exact: true })).toBeVisible();
+  const original = dialog.locator('.review-column').nth(0).locator('pre');
+  const cleaned = dialog.locator('.review-column').nth(1).locator('pre');
+  await expect(original).toContainText(privateValue);
+  await expect(cleaned).not.toContainText(privateValue);
+  await expect(cleaned).toContainText('[SECRET_1]');
+  await expect(dialog.locator('img')).toHaveCount(0);
+  await expect(dialog.getByText('This message is long, so the comparison shows excerpts only.', { exact: true }).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('replacing a file from message review shows one note-protection dialog and releases the scroll lock', async ({ page }) => {
+  await importMessages(page, [{ role: 'user', content: 'API_KEY="synthetic_review_fixture_938471"' }]);
+  await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Keep these handwritten notes.');
+  await page.getByRole('button', { name: 'Workbench', exact: true }).click();
+  await idle(page);
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Message changes', exact: true })).toBeVisible();
+
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'replacement.txt', mimeType: 'text/plain', buffer: Buffer.from('New conversation.'),
+  });
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  const confirmation = page.getByRole('dialog', { name: 'Unsaved handoff notes', exact: true });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole('button', { name: 'Keep working', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.style.overflow)).not.toBe('hidden');
+  await expect(page.locator('.file-details > strong')).toHaveText('review.json');
+  await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Keep these handwritten notes.');
+});
+
 async function exportText(page: Page, format: string) {
   await page.getByRole('button', { name: 'Export transcript', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export transcript', exact: true });
