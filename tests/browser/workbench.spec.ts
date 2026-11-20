@@ -57,7 +57,7 @@ test('demo cleanup controls update real results, reset defaults, and compare the
   await page.goto('/');
   await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
   await ready(page);
-  await expect(page.locator('.demo-badge')).toHaveText('SYNTHETIC DEMO');
+  await expect(page.locator('.demo-badge')).toHaveText('SAMPLE DATA');
   await expect(page.locator('.message-card')).toHaveCount(10);
   await expect(changes(page, 'images removed')).toHaveText('1');
   await expect(changes(page, 'outputs clipped')).toHaveText('1');

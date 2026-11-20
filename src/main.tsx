@@ -4,6 +4,8 @@ import App from './App';
 import './styles.css';
 import './workspace.css';
 import './landing.css';
+import './interaction.css';
+import './screen-fit.css';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
