@@ -6,6 +6,24 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "browser"],
+  "categories": ["developer", "productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Try the demo",
+      "short_name": "Demo",
+      "description": "Open ThreadPack with a local sample conversation.",
+      "url": "./?demo=1",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Import guide",
+      "short_name": "Guide",
+      "description": "Read the supported export formats and workflow.",
+      "url": "./import-guide.html",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "theme_color": "#2563eb",
   "background_color": "#f4f7ff",
   "icons": [

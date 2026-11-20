@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const selectedBrowser = process.env.THREADPACK_BROWSER as 'chromium' | 'firefox' | 'webkit' | undefined;
+
 const testPort = Number(process.env.THREADPACK_TEST_PORT ?? 4318);
 const testBaseURL = `http://127.0.0.1:${testPort}`;
 
@@ -10,6 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: 'list',
+  projects: selectedBrowser ? [{ name: selectedBrowser, use: { browserName: selectedBrowser } }] : undefined,
   use: {
     baseURL: testBaseURL,
     headless: true,
