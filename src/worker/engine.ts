@@ -2,7 +2,7 @@ import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInpu
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
-import type { CleanSummary, ConversationInfo, CopyMessageRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -109,6 +109,7 @@ export class WorkerEngine {
     if (!cache || cache.revision !== request.revision) throw new Error(STALE_REVISION);
     if (request.type === 'query') return this.query(original, cache, request);
     if (request.type === 'copy-message') return this.copyMessage(original, cache, request);
+    if (request.type === 'compare-message') return this.compareMessage(original, cache, request);
     if (request.type === 'export') return this.export(state.archive, cache, request.format);
     if (request.type === 'handoff') return this.handoff(cache, request);
     throw new Error('This operation is not supported.');
@@ -213,6 +214,29 @@ export class WorkerEngine {
     const message = conversation.messages.find(candidate => candidate.id === request.messageId);
     if (!message) throw new Error('This message is unavailable in the selected view.');
     return { text: message.content };
+  }
+
+  private compareMessage(original: Conversation, cache: CleanCache, request: CompareMessageRequest): CompareMessageResult {
+    if (typeof request.messageId !== 'string' || request.messageId.length < 1 || request.messageId.length > 500) {
+      throw new Error('A valid message reference is required.');
+    }
+    const source = original.messages.find(message => message.id === request.messageId);
+    const cleaned = cache.result.conversation.messages.find(message => message.id === request.messageId);
+    if (!source || !cleaned) throw new Error('This message is unavailable in the selected view.');
+    const excerpt = (content: string): CompareMessageResult['original'] => {
+      const readable = content.replace(IMAGE_DATA, '[Embedded image payload · hidden in preview]');
+      const imageHidden = readable !== content;
+      if (readable.length <= MAX_PREVIEW_CHARACTERS) return { text: readable, shortened: false, imageHidden };
+      const marker = '\n\n[Review excerpt shortened · beginning and end shown.]\n\n';
+      const available = MAX_PREVIEW_CHARACTERS - marker.length;
+      const head = Math.ceil(available / 2);
+      const tail = available - head;
+      return { text: readable.slice(0, head) + marker + readable.slice(-tail), shortened: true, imageHidden };
+    };
+    return {
+      original: excerpt(source.content), cleaned: excerpt(cleaned.content),
+      changes: (cache.changes.get(request.messageId) ?? []).map(change => ({ ...change })),
+    };
   }
 
   private export(archive: ParsedArchive, cache: CleanCache, format: 'markdown' | 'jsonl' | 'report'): ExportResult {

@@ -119,6 +119,52 @@ test('copy-message returns the complete body in the requested mode and rejects s
   await assert.rejects(engine.handle({ id: next(), type: 'copy-message', ...request, messageId: 'unknown', mode: 'cleaned' }), /unavailable/);
 });
 
+test('compare-message returns bounded excerpts and cleanup change metadata', async () => {
+  const engine = new WorkerEngine();
+  const privateValue = 'synthetic-compare-secret-581';
+  const body = `password=${privateValue}\n${'TRACE_LINE '.repeat(8000)}`;
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'tool', content: body }] }));
+  const summary = await clean(engine, archive);
+  const request = { id: next(), type: 'compare-message' as const, archiveId: archive.archiveId,
+    conversationId: summary.conversation.id, revision: summary.revision, messageId: 'message-1' };
+  const result = await engine.handle(request);
+  assert.equal(result.original.shortened, true);
+  assert.ok(result.original.text.length <= MAX_PREVIEW_CHARACTERS);
+  assert.ok(result.cleaned.text.length <= MAX_PREVIEW_CHARACTERS);
+  assert.ok(result.original.text.startsWith(`password=${privateValue}`));
+  assert.ok(result.cleaned.text.startsWith('password=[SECRET_1]'));
+  assert.equal(result.cleaned.shortened, false);
+  assert.deepEqual(result.changes.map(change => change.kind), ['secret', 'tool']);
+  assert.ok(!JSON.stringify(result.changes).includes(privateValue));
+});
+
+test('compare-message hides embedded image payloads and preserves nearby text in both excerpts', async () => {
+  const engine = new WorkerEngine();
+  const payload = 'QUJD'.repeat(20000);
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'user', content: `before\ndata:image/png;base64,${payload}\nafter` }] }));
+  const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, stripImages: false });
+  const result = await engine.handle({ id: next(), type: 'compare-message', archiveId: archive.archiveId,
+    conversationId: summary.conversation.id, revision: summary.revision, messageId: 'message-1' });
+  for (const side of [result.original, result.cleaned]) {
+    assert.equal(side.imageHidden, true);
+    assert.doesNotMatch(side.text, /QUJD/);
+    assert.match(side.text, /Embedded image payload · hidden in preview/);
+    assert.match(side.text, /before/);
+    assert.match(side.text, /after/);
+  }
+});
+
+test('compare-message rejects stale revisions and unknown messages', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'user', content: 'Before and after.' }] }));
+  const first = await clean(engine, archive);
+  const request = { id: next(), type: 'compare-message' as const, archiveId: archive.archiveId,
+    conversationId: first.conversation.id, revision: first.revision, messageId: 'message-1' };
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await assert.rejects(engine.handle({ ...request, id: next() }), /out of date/);
+  await assert.rejects(engine.handle({ ...request, id: next(), revision: (await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true })).revision, messageId: 'unknown' }), /unavailable/);
+});
+
 test('inline image data stays hidden in either preview mode without swallowing following text', async () => {
   const engine = new WorkerEngine();
   const image = 'data:image/png;base64,' + 'QUJD'.repeat(10000);

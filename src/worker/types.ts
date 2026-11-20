@@ -25,6 +25,8 @@ export interface PreviewMessage {
 export interface QueryResult { items: PreviewMessage[]; total: number; page: number; pageCount: number }
 export interface ExportResult { buffer: ArrayBuffer; filename: string; mimeType: string }
 export interface CopyMessageResult { text: string }
+export interface MessageReviewExcerpt { text: string; shortened: boolean; imageHidden: boolean }
+export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
 export interface HandoffNotes { goal: string; decisions: string; constraints: string; nextSteps: string }
 export interface HandoffResult { text: string }
 export interface ImportProgress { loaded: number; total: number }
@@ -42,12 +44,13 @@ export interface QueryRequest extends RequestBase, RevisionSelection {
 }
 export interface ExportRequest extends RequestBase, RevisionSelection { type: 'export'; format: 'markdown' | 'jsonl' | 'report' }
 export interface CopyMessageRequest extends RequestBase, RevisionSelection { type: 'copy-message'; messageId: string; mode: 'cleaned' | 'original' }
+export interface CompareMessageRequest extends RequestBase, RevisionSelection { type: 'compare-message'; messageId: string }
 export interface HandoffRequest extends RequestBase, RevisionSelection {
   type: 'handoff'; notes: HandoffNotes; pinnedIds: string[];
   recentCount: number; maxCharacters: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | CopyMessageRequest | HandoffRequest | ClearRequest;
-export type WorkerResult = ParseInfo | CleanSummary | QueryResult | ExportResult | CopyMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | CopyMessageRequest | CompareMessageRequest | HandoffRequest | ClearRequest;
+export type WorkerResult = ParseInfo | CleanSummary | QueryResult | ExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'copy-message': CopyMessageResult; handoff: HandoffResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; handoff: HandoffResult; clear: null }
