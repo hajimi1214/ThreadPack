@@ -176,6 +176,8 @@ Backtick and tilde fences are supported, with matching close markers of sufficie
 
 The browser adds search and allowlisted language filters over cleaned snippets, then can stream all matching cleaned blocks into a ZIP archive in the Worker. The bundled preview highlighter uses selected local grammars; unsupported languages display as plain text. Browser UI and Worker dependencies include MIT `lowlight` with selected BSD-3-Clause `highlight.js` grammars and MIT `fflate`; they extend the UI and Worker, not this core API. Full runtime license texts appear in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
+The export dialog also offers a portable context bundle. The Worker creates a ZIP from the cleaned conversation containing `README.md`, `transcript.md`, `messages.jsonl`, `cleanup-report.json`, cleaned `code/` files, and `handoff.md` only when submitted notes contain nonblank text. The bundle uses allowlisted metadata and never includes original-view content or custom redaction values.
+
 ```ts
 buildTranscript(conversation: Conversation): string
 buildJsonl(conversation: Conversation): string

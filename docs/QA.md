@@ -95,3 +95,10 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - `npm run build`, the production dependency audit, npm package dry-run, and TypeScript checks passed. GitHub Windows/Linux CI passed.
 - The offline HTML is 582,090 bytes (174,848 gzip bytes with maximum compression), compared with 460,245 bytes (135,168 gzip bytes) in 1.3.0. The selected syntax grammars and runtime notices are bundled locally; runtime grammar requests are not made.
 - Visual review covered highlighted code and empty search on desktop and mobile, the license disclosure, import guide, and updated share card.
+
+## Version 1.5.0: portable context bundles
+
+- `npm test`: 125 tests passed, including cleaned bundle contents, safe code paths, optional handoff omission, custom-value exclusion, and stale revision rejection.
+- `npm run test:e2e -- --workers=2`: 65 browser tests passed, including the main export dialog bundle download, ZIP inspection, five interface languages, mobile layouts, offline behavior, and existing exports.
+- `npm run build`, `npm audit --omit=dev`, and `npm pack --dry-run` passed. The single-file HTML is 587,000 bytes (176,105 gzip bytes with maximum compression).
+- Portable bundles contain cleaned Markdown, normalized JSONL, aggregate cleanup metadata, a manifest, and cleaned code files. `handoff.md` is included only when handoff notes are nonblank; original-view text and custom redaction values are excluded.

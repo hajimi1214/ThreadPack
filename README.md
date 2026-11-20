@@ -30,6 +30,8 @@ Use **Export filtered results** to download every matching message as Markdown o
 
 Open **Code snippets** to collect fenced code blocks across the selected conversation. Search code, filter by language, switch between wrapping and horizontal scrolling, and preview, copy, or download cleaned code. Long code stays complete when copied or downloaded. Use **Download ZIP** for every matching block across pages. The offline app bundles [lowlight](https://github.com/wooorm/lowlight), selected BSD-3-Clause [highlight.js](https://github.com/highlightjs/highlight.js) grammars, and [fflate](https://github.com/101arrowz/fflate). Full license notices appear in Help and release downloads. Try the built-in demo or [this Markdown sample](examples/code-snippets.md).
 
+Use **Portable context bundle** to download one safe ZIP containing the cleaned Markdown transcript, normalized JSONL, aggregate cleanup report, a short manifest, code files, and an optional handoff note. It is designed for issue reports, team handoffs, and archives; the bundle is created in the Worker and never includes original-view content or custom redaction values.
+
 Useful for restarting a long coding session, collecting generated code, or preparing a smaller transcript to share. The **Share ThreadPack** button copies only the tool's public address, with no conversation text or current-page parameters.
 
 Press **Ctrl+K** (or **⌘K** on Mac) to open quick actions for importing, search, export, recipes, and page navigation. Copy buttons show pending, success, or failure at the point of interaction. The toolbar can clear all filters in one click.
@@ -67,7 +69,7 @@ Provider exports change over time. Unsupported records and partial imports produ
 1. **Import** a local file, paste text, or load the included synthetic demo. Select a conversation if the archive contains several.
 2. **Configure cleanup:** start with a balanced, share-safe, or keep-text recipe, then adjust individual rules. Remove embedded images, clip long tool outputs, collapse exact repeats, and redact recognized secrets, email addresses, or your own exact values.
 3. **Review** the packed and original views. Filter to changed or pinned messages, open a bounded before/after review on any changed message, search within long messages, copy a complete message in the selected view, and pin the context that should remain in a handoff.
-4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, or a handoff with goal, decisions, constraints, and next steps.
+4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, portable context bundle, or a handoff with goal, decisions, constraints, and next steps.
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
 
