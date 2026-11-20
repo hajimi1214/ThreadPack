@@ -5,7 +5,8 @@ import type { CodeSnippet } from '../core/snippets';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
 import { buildCodeArchive, codeSnippetFilename, normalizedSnippetLanguage } from './code-archive';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import { buildContextBundle } from './context-bundle';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -127,6 +128,7 @@ export class WorkerEngine {
         mimeType: 'text/plain;charset=utf-8' };
     }
     if (request.type === 'handoff') return this.handoff(cache, request);
+    if (request.type === 'export-bundle') return this.exportBundle(state.archive, cache, request);
     throw new Error('This operation is not supported.');
   }
 
@@ -368,5 +370,56 @@ export class WorkerEngine {
     const cleanedNotes = cleanConversation({ id: 'notes', title: '', source: 'notes', messages: keys.map(key => ({ id: key, role: 'user' as const, content: request.notes[key] })) }, { ...cache.options, trimToolOutputs: false, deduplicate: false });
     const notes = Object.fromEntries(cleanedNotes.conversation.messages.map(message => [message.id, message.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]')])) as unknown as HandoffRequest['notes'];
     return { text: buildHandoff(cache.result.conversation, { ...notes, pinnedIds: request.pinnedIds, recentCount: request.recentCount, maxCharacters: request.maxCharacters }) };
+  }
+
+  private exportBundle(archive: ParsedArchive, cache: CleanCache, request: ExportBundleRequest): ContextBundleResult {
+    const notes: HandoffRequest['notes'] = request.notes ?? { goal: '', decisions: '', constraints: '', nextSteps: '' };
+    const keys = ['goal', 'decisions', 'constraints', 'nextSteps'] as const;
+    if (!request.notes || typeof request.notes !== 'object' || keys.some(key => typeof notes[key] !== 'string' || notes[key].length > 12000)) {
+      if (request.notes !== undefined) throw new Error('Valid handoff notes are required.');
+    }
+    const pinnedIds = request.pinnedIds ?? [];
+    if (!Array.isArray(pinnedIds) || pinnedIds.length > cache.result.conversation.messages.length || pinnedIds.some(id => typeof id !== 'string' || id.length > 500)) {
+      throw new Error('Valid pinned message references are required.');
+    }
+    const recentCount = request.recentCount ?? 0;
+    if (!Number.isSafeInteger(recentCount) || recentCount < 0 || recentCount > 1000) throw new Error('Recent context must be between 0 and 1,000 messages.');
+    const maxCharacters = request.maxCharacters ?? 16000;
+    if (!Number.isFinite(maxCharacters) || maxCharacters < 1000 || maxCharacters > 10_000_000) throw new Error('Handoff budget must be between 1,000 and 10,000,000 characters.');
+    const hasNotes = keys.some(key => notes[key].trim().length > 0);
+    const handoff = hasNotes ? this.handoff(cache, {
+      id: request.id, type: 'handoff', archiveId: request.archiveId, conversationId: request.conversationId,
+      revision: request.revision, notes, pinnedIds, recentCount, maxCharacters,
+    }).text : undefined;
+    const conversation = cache.result.conversation;
+    const snippets = cache.snippets ??= extractCodeSnippets(conversation);
+    const options = cache.options;
+    const report = JSON.stringify({
+      tool: 'ThreadPack', version: APP_VERSION, format: archive.format,
+      messageCount: conversation.messages.length, codeSnippetCount: snippets.length,
+      handoffIncluded: hasNotes, stats: cache.result.stats,
+      options: { stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit,
+        deduplicate: options.deduplicate, redact: options.redact, redactEmails: options.redactEmails,
+        customRuleCount: options.customSecrets?.length ?? 0 },
+      scope: 'Cleaned UTF-8 message text and allowlisted metadata. Original content and custom redaction values are not included.',
+    }, null, 2);
+    const readme = [
+      '# ThreadPack context bundle', '',
+      'A portable context package created locally from a cleaned conversation.', '',
+      '- `transcript.md` — readable cleaned transcript.',
+      '- `messages.jsonl` — normalized cleaned messages, one per line.',
+      '- `cleanup-report.json` — allowlisted counts and cleanup settings.',
+      ...(hasNotes ? ['- `handoff.md` — notes, pinned context, and recent context.'] : []),
+      ...(snippets.length ? [`- code/ — ${snippets.length} cleaned code file(s).`] : []), '',
+      'Review the files before sharing. The original conversation and custom redaction values are not included.', '',
+      'Generated locally with ThreadPack.', '',
+    ].join('\n');
+    const bytes = buildContextBundle(conversation, snippets, {
+      transcript: buildTranscript(conversation), messages: buildJsonl(conversation), report, readme, handoff,
+    });
+    const conversationIndex = archive.conversations.findIndex(item => item.id === conversation.id);
+    const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';
+    return { buffer: bytes.buffer, filename: `threadpack-context${suffix}.zip`, mimeType: 'application/zip',
+      fileCount: 4 + (hasNotes ? 1 : 0) + snippets.length, snippetCount: snippets.length, handoffIncluded: hasNotes };
   }
 }

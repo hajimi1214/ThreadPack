@@ -35,6 +35,11 @@ export interface SnippetQueryResult {
   languages: { language: string; count: number }[];
 }
 export interface SnippetArchiveResult extends ExportResult { snippetCount: number }
+export interface ContextBundleResult extends ExportResult {
+  fileCount: number;
+  snippetCount: number;
+  handoffIncluded: boolean;
+}
 export interface CopyMessageResult { text: string }
 export interface MessageReviewExcerpt { text: string; shortened: boolean; imageHidden: boolean }
 export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
@@ -68,8 +73,15 @@ export interface HandoffRequest extends RequestBase, RevisionSelection {
   type: 'handoff'; notes: HandoffNotes; pinnedIds: string[];
   recentCount: number; maxCharacters: number;
 }
+export interface ExportBundleRequest extends RequestBase, RevisionSelection {
+  type: 'export-bundle';
+  notes?: HandoffNotes;
+  pinnedIds?: string[];
+  recentCount?: number;
+  maxCharacters?: number;
+}
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ClearRequest;
-export type WorkerResult = ParseInfo | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
+export type WorkerResult = ParseInfo | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }
