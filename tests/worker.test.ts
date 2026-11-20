@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { unzipSync } from 'fflate';
 import { DEFAULT_OPTIONS } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
@@ -378,6 +379,42 @@ test('exports transfer complete cleaned UTF-8 data and reports contain only allo
   const markdown = await engine.handle({ id: next(), type: 'export', ...request, format: 'markdown' });
   assert.equal(markdown.filename, 'threadpack-transcript.md');
   assert.ok(!textOf(markdown.buffer).includes(fakeToken));
+});
+
+test('portable context bundles contain cleaned files, safe code names, and no custom values', async () => {
+  const engine = new WorkerEngine();
+  const custom = 'bundle-private-value-739';
+  const archive = await load(engine, JSON.stringify({ title: custom, source: 'Messages JSON', messages: [
+    { role: 'user', content: `Keep ${custom} out of the bundle.` },
+    { role: 'assistant', content: `\`\`\`ts filename=../../private.exe\nconst value = '${custom}';\n\`\`\`` },
+  ] }));
+  const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, customSecrets: [custom] });
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  const emptyNotes = await engine.handle({ id: next(), type: 'export-bundle', ...selection,
+    notes: { goal: '', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: ['message-1'], recentCount: 1, maxCharacters: 6000 });
+  const emptyFiles = unzipSync(new Uint8Array(emptyNotes.buffer));
+  assert.deepEqual(Object.keys(emptyFiles).sort(), ['README.md', 'cleanup-report.json', 'code/threadpack-code-2-1.ts', 'messages.jsonl', 'transcript.md'].sort());
+  assert.ok(!Object.hasOwn(emptyFiles, 'handoff.md'));
+  const allText = Object.values(emptyFiles).map(value => new TextDecoder().decode(value)).join('\n');
+  assert.doesNotMatch(allText, new RegExp(custom));
+  assert.ok(allText.includes('[CUSTOM_1]'));
+
+  const withNotes = await engine.handle({ id: next(), type: 'export-bundle', ...selection,
+    notes: { goal: `Use ${custom}`, decisions: '', constraints: '', nextSteps: '' }, pinnedIds: ['message-2'], recentCount: 1, maxCharacters: 6000 });
+  const files = unzipSync(new Uint8Array(withNotes.buffer));
+  assert.ok(Object.hasOwn(files, 'handoff.md'));
+  assert.equal(JSON.parse(new TextDecoder().decode(files['cleanup-report.json']!)).options.customRuleCount, 1);
+  assert.equal(withNotes.handoffIncluded, true);
+  assert.equal(withNotes.snippetCount, 1);
+});
+
+test('portable context bundles reject stale cleanup revisions', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'user', content: 'stale bundle' }] }));
+  const first = await clean(engine, archive);
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redact: false });
+  await assert.rejects(engine.handle({ id: next(), type: 'export-bundle', archiveId: archive.archiveId,
+    conversationId: first.conversation.id, revision: first.revision }), /out of date/);
 });
 
 test('exports distinguish conversations by ordinal without including source titles in filenames', async () => {
