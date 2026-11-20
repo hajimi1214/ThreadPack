@@ -30,12 +30,15 @@ test('conversation drafts survive switching and are discarded with the archive',
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual(['threadpack-language']);
   await page.getByRole('button', { name: 'Workbench', exact: true }).click(); await ready();
   await expect(page.getByRole('button', { name: 'Unpin message', exact: true })).toBeVisible();
-  await upload(); await ready();
+  await upload();
+  await page.getByRole('dialog', { name: 'Unsaved handoff notes', exact: true }).getByRole('button', { name: 'Discard notes', exact: true }).click();
+  await ready();
   await expect(page.getByRole('button', { name: 'Pin for handoff', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('This draft must be cleared.');
   await page.getByRole('button', { name: 'Clear workspace', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved handoff notes', exact: true }).getByRole('button', { name: 'Discard notes', exact: true }).click();
   await upload(); await ready();
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');

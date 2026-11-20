@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { SetStateAction } from 'react';
+import { hasNonblankNotes } from '../draft-state';
 
 export interface HandoffNotes {
   goal: string;
@@ -25,6 +26,7 @@ export function useConversationDrafts(conversationId: string) {
   const [drafts, setDrafts] = useState<Map<string, ConversationDraft>>(() => new Map());
   const emptyDraft = useMemo(freshDraft, [conversationId]);
   const draft = drafts.get(conversationId) ?? emptyDraft;
+  const hasNotes = useMemo(() => [...drafts.values()].some(value => hasNonblankNotes(value.notes)), [drafts]);
   const update = useCallback(<K extends keyof ConversationDraft>(key: K, action: SetStateAction<ConversationDraft[K]>) => {
     if (!conversationId) return;
     setDrafts(previous => {
@@ -42,5 +44,5 @@ export function useConversationDrafts(conversationId: string) {
   const setRecent = useCallback((action: SetStateAction<number>) => update('recent', action), [update]);
   const setBudget = useCallback((action: SetStateAction<number>) => update('budget', action), [update]);
   const clearDrafts = useCallback(() => setDrafts(new Map()), []);
-  return { ...draft, setNotes, setPins, setRecent, setBudget, clearDrafts };
+  return { ...draft, hasNotes, setNotes, setPins, setRecent, setBudget, clearDrafts };
 }

@@ -99,7 +99,7 @@ test('mobile keeps settings collapsed until requested and shows the first messag
   await settings.click();
   await expect(settings).toHaveAttribute('aria-expanded', 'true');
   await expect(imageSwitch).toBeVisible();
-  await settings.click();
+  await page.getByRole('dialog', { name: 'Cleanup recipe', exact: true }).getByRole('button', { name: 'Done, show results', exact: true }).click();
   await expect(settings).toHaveAttribute('aria-expanded', 'false');
   await expect(imageSwitch).not.toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

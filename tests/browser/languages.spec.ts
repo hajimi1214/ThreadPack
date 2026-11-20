@@ -56,6 +56,8 @@ for (const language of SUPPORTED_LANGUAGES) {
     await imageSwitch.click();
     await idle(page);
     await expect(imagesRemoved).toHaveText('1');
+    const settingsDialog = page.getByRole('dialog', { name: t.recipe, exact: true });
+    if (await settingsDialog.isVisible()) await settingsDialog.getByRole('button', { name: t.doneSettings, exact: true }).click();
     await noHorizontalOverflow(page);
 
     const help = page.getByRole('button', { name: t.help, exact: true });

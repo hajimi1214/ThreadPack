@@ -27,7 +27,7 @@ const ja: Record<TranslationKey, string> = {
   preview: '会話のプレビュー', previewSub: '次の会話に必要なメッセージをピン留め。', cleaned: '整理後', original: '元の内容',
   search: 'メッセージを検索…', all: 'すべて', user: 'ユーザー', assistant: 'アシスタント', tool: 'ツール', system: 'システム',
   noResults: '条件に一致するメッセージはありません。', pin: '引き継ぎ用にピン留め', unpin: 'ピン留めを解除', pinned: '件をピン留め',
-  expand: '続きを表示', collapse: '折りたたむ', prev: '前へ', next: '次へ',
+  expand: "プレビューを展開", collapse: '折りたたむ', prev: '前へ', next: '次へ',
   originalWarning: "元の内容には機密情報が含まれる場合があります。検索は会話全体が対象です。長文と埋め込み画像はプレビューのみ短縮します。",
   changes: '変更内容', imagesRemoved: '枚の画像を削除', outputsTrimmed: '件の出力を短縮', duplicatesRemoved: '件の重複を整理', secretsRedacted: '件の認証情報を非表示', emailsRedacted: '件のメールアドレスを非表示',
   export: '会話を書き出す', buildHandoff: '引き継ぎを作成', ready: '引き継ぎの準備完了', exportHint: '新しいコピーを作成します。元のファイルは変更しません。',
@@ -65,6 +65,14 @@ const ja: Record<TranslationKey, string> = {
   updateReady: "新しいバージョンがあります。更新するとメモリ内の会話が消去されるため、先に必要な内容を保存してください。",
   updateApp: "更新して再読み込み",
   resultCount: "件の一致するメッセージ",
+
+  doneSettings: "完了して結果を見る",
+  unappliedRules: "未適用のマスキング設定",
+  unappliedHint: "書き出す前に変更を適用するか、入力を消去してください。",
+  unsavedNotes: "未保存の引き継ぎメモ",
+  discardHint: "このワークスペースには手書きの引き継ぎメモがあります。消去または別ファイルを開くと失われます。先に確認や保存をするには作業を続けてください。",
+  keepWorking: "作業を続ける",
+  discardNotes: "メモを破棄",
 
 };
 

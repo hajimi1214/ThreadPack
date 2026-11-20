@@ -68,7 +68,7 @@ const fr: Record<TranslationKey, string> = {
   pin: 'Épingler pour la reprise',
   unpin: 'Désépingler le message',
   pinned: 'épinglés',
-  expand: 'Afficher plus',
+  expand: "Développer l’aperçu",
   collapse: 'Afficher moins',
   prev: 'Précédent',
   next: 'Suivant',
@@ -154,6 +154,14 @@ const fr: Record<TranslationKey, string> = {
   updateReady: "Une nouvelle version est disponible. Enregistrez votre travail avant la mise à jour : les conversations en mémoire seront effacées.",
   updateApp: "Mettre à jour et recharger",
   resultCount: "messages correspondants",
+
+  doneSettings: "Terminer, voir les résultats",
+  unappliedRules: "Masquages non appliqués",
+  unappliedHint: "Appliquez ou effacez les règles modifiées avant l’export.",
+  unsavedNotes: "Notes de reprise non enregistrées",
+  discardHint: "Cet espace contient des notes de reprise rédigées à la main. Effacer l’espace ou ouvrir un autre fichier les supprime. Poursuivez le travail pour les vérifier ou les télécharger d’abord.",
+  keepWorking: "Poursuivre le travail",
+  discardNotes: "Abandonner les notes",
 
 };
 

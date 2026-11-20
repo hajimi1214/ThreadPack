@@ -25,7 +25,7 @@ const en = {
   preview: 'Transcript preview', previewSub: 'Pin the messages your next chat needs.', cleaned: 'Packed', original: 'Original',
   search: 'Search messages…', all: 'All', user: 'User', assistant: 'Assistant', tool: 'Tool', system: 'System',
   noResults: 'No messages match this filter.', pin: 'Pin for handoff', unpin: 'Unpin message', pinned: 'pinned',
-  expand: 'Show more', collapse: 'Show less', prev: 'Previous', next: 'Next',
+  expand: "Expand preview", collapse: 'Show less', prev: 'Previous', next: 'Next',
   originalWarning: "Original content may contain sensitive data. Search covers the full conversation; very long text and embedded images are shortened only in previews.",
   changes: 'CHANGES AT A GLANCE', imagesRemoved: 'images removed', outputsTrimmed: 'outputs clipped', duplicatesRemoved: 'repeats collapsed', secretsRedacted: 'secrets redacted', emailsRedacted: 'emails redacted',
   export: 'Export transcript', buildHandoff: 'Build a handoff', ready: 'READY TO GO', exportHint: 'A new copy. Your original file stays intact.',
@@ -65,5 +65,13 @@ const en = {
   updateReady: "A new version is ready. Download your work before updating; in-memory conversations will be cleared.",
   updateApp: "Update and reload",
   resultCount: "matching messages",
+
+  doneSettings: "Done, show results",
+  unappliedRules: "Unapplied redactions",
+  unappliedHint: "Apply or clear your edited rules before exporting.",
+  unsavedNotes: "Unsaved handoff notes",
+  discardHint: "This workspace contains hand-written handoff notes. Clearing it or opening another file discards those notes. Keep working to review or download them first.",
+  keepWorking: "Keep working",
+  discardNotes: "Discard notes",
 } as const;
 export default en;

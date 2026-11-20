@@ -27,6 +27,6 @@ export default function MessageCard({ message, index, sizeLabel, pinned, onPin, 
     {preview.contextual && <span className="search-match-label">{t.searchMatch}</span>}
     <pre className="message-content">{match >= 0 ? <>{preview.text.slice(0, match)}<mark>{preview.text.slice(match, match + query.length)}</mark>{preview.text.slice(match + query.length)}</> : preview.text || '—'}</pre>
     {preview.expandable && <button className="text-button expand-button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? t.collapse : t.expand}<ChevronDown size={13} className={expanded ? 'rotate' : ''} /></button>}
-    {(preview.shortened || sourceShortened) && expanded && <small className="preview-footnote">{t.previewShortened}</small>}
+    {sourceShortened && <small className="preview-footnote">{t.previewShortened}</small>}
   </article>;
 }

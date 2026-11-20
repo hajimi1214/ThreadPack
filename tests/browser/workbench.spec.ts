@@ -279,6 +279,7 @@ test('390px viewport keeps the workbench and handoff controls within the page', 
   if (!(await page.getByRole('switch', { name: 'Remove embedded images' }).isVisible())) await page.locator('.settings-toggle').click();
   await expect(page.getByRole('switch', { name: 'Remove embedded images' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole('dialog', { name: 'Cleanup recipe', exact: true }).getByRole('button', { name: 'Done, show results', exact: true }).click();
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Mobile handoff goal.');
   await expect(page.locator('.handoff-document')).toContainText('Mobile handoff goal.');

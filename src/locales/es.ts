@@ -68,7 +68,7 @@ const es: Record<TranslationKey, string> = {
   pin: 'Fijar para el traspaso',
   unpin: 'Desfijar mensaje',
   pinned: 'fijados',
-  expand: 'Mostrar más',
+  expand: "Ampliar vista previa",
   collapse: 'Mostrar menos',
   prev: 'Anterior',
   next: 'Siguiente',
@@ -154,6 +154,14 @@ const es: Record<TranslationKey, string> = {
   updateReady: "Hay una nueva versión. Guarda tu trabajo antes de actualizar: las conversaciones en memoria se borrarán.",
   updateApp: "Actualizar y recargar",
   resultCount: "mensajes coincidentes",
+
+  doneSettings: "Listo, ver resultados",
+  unappliedRules: "Ocultaciones sin aplicar",
+  unappliedHint: "Aplica o borra las reglas editadas antes de exportar.",
+  unsavedNotes: "Notas de traspaso sin guardar",
+  discardHint: "Este espacio contiene notas de traspaso escritas a mano. Se perderán al borrar el espacio o abrir otro archivo. Sigue trabajando para revisarlas o descargarlas primero.",
+  keepWorking: "Seguir trabajando",
+  discardNotes: "Descartar notas",
 
 };
 

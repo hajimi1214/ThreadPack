@@ -33,7 +33,7 @@ async function customInput(page: Page) {
 
 async function applyCustom(page: Page, value: string) {
   await (await customInput(page)).fill(value);
-  await page.getByRole('button', { name: 'Apply redactions', exact: true }).click();
+  await page.locator('.custom-rules').getByRole('button', { name: 'Apply redactions', exact: true }).click();
   await idle(page);
 }
 
@@ -109,13 +109,12 @@ test('invalid custom drafts preserve applied rules, while explicit clearing and 
   await expect(page.locator('.messages-list')).not.toContainText(privateValue);
 
   await (await customInput(page)).fill('§');
-  await page.getByRole('button', { name: 'Apply redactions', exact: true }).click();
+  await page.locator('.custom-rules').getByRole('button', { name: 'Apply redactions', exact: true }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('alert')).not.toContainText('§');
   await expect(page.locator('.messages-list')).toContainText('[CUSTOM_1]');
   await expect(page.locator('.messages-list')).not.toContainText(privateValue);
-  const stillProtected = await exportText(page, 'Markdown transcript');
-  expect(stillProtected).not.toContain(privateValue);
+  await expect(page.getByRole('button', { name: 'Export transcript', exact: true })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Clear custom rules', exact: true }).click();
   await idle(page);
