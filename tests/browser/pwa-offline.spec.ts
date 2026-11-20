@@ -15,6 +15,7 @@ test('HTTP app installs only its shell cache and reloads offline without storing
   expect(manifest.icons.map((icon: { sizes: string }) => icon.sizes)).toEqual(['192x192', '512x512']);
   await page.evaluate(async () => { await navigator.serviceWorker.ready; });
   await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+  const origin = new URL(page.url()).origin;
 
   const privateMarker = 'SYNTHETIC_PWA_SESSION_MUST_NOT_BE_CACHED_812';
   await page.getByLabel('Import file', { exact: true }).setInputFiles({
@@ -48,7 +49,7 @@ test('HTTP app installs only its shell cache and reloads offline without storing
     expect(cache.name).toMatch(/^threadpack-shell-/);
     expect(cache.containsPrivate).toBe(false);
     expect(cache.urls.map(url => new URL(url).pathname).sort()).toEqual([...expectedPaths].sort());
-    expect(cache.urls.every(url => new URL(url).origin === 'http://127.0.0.1:4317')).toBe(true);
+    expect(cache.urls.every(url => new URL(url).origin === origin)).toBe(true);
     expect(cache.urls.every(url => !new URL(url).search)).toBe(true);
   }
   await context.setOffline(true);

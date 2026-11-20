@@ -50,4 +50,14 @@ Release validation: 66 core/CLI/localization/preview tests and 22 browser tests 
 - The production web and CLI build and the locked dependency audit passed.
 - Visual checks covered the desktop workspace, collapsed and expanded mobile settings, and the handoff. Tool text, privacy reminders, pin controls, and changed-message filters use stronger contrast.
 
+## Follow-up verification: message review tools
+
+The follow-up iteration adds a worker-side pinned-message filter, an explicit full-message copy action for the active original or packed view, distinct ordinal filenames for multi-conversation exports, and independent reading positions for each conversation and filter view.
+
+- `npm test`: 96 core, CLI, localization, preview, and Worker tests passed.
+- `npm run test:e2e -- --workers=2`: 41 browser tests passed in installed Chrome, including pinned-filter composition, copying a message longer than the display preview, per-conversation scroll restoration, production Service Worker installation, offline operation, and standalone HTML exports.
+- `npm run check` and `npm run build`: passed.
+- `npm audit --omit=dev`: no production dependency vulnerabilities reported.
+- No real conversation archive was used; all new copy and scroll fixtures are synthetic.
+
 Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTURE.md). README screenshots use a 1440 × 900 viewport so they show the same persistent export controls a desktop user sees.

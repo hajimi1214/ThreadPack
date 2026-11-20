@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test';
 
+const testPort = Number(process.env.THREADPACK_TEST_PORT ?? 4318);
+const testBaseURL = `http://127.0.0.1:${testPort}`;
+
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: true,
@@ -8,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4317',
+    baseURL: testBaseURL,
     headless: true,
     viewport: { width: 1440, height: 1000 },
     ...(process.env.THREADPACK_BROWSER_CHANNEL ? { channel: process.env.THREADPACK_BROWSER_CHANNEL } : {}),
@@ -16,8 +19,8 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run build:web && npm run preview',
-    url: 'http://127.0.0.1:4317',
+    command: `npm run build:web && npm run preview -- --port ${testPort}`,
+    url: testBaseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 60000,
   },
