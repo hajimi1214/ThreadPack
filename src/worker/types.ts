@@ -29,7 +29,12 @@ export interface SnippetPreview {
   id: string; language: string; messageIndex: number; fenceIndex: number;
   lines: number; characters: number; preview: string; shortened: boolean;
 }
-export interface SnippetQueryResult { items: SnippetPreview[]; total: number; page: number; pageCount: number }
+export interface SnippetFilters { query?: string; language?: string }
+export interface SnippetQueryResult {
+  items: SnippetPreview[]; total: number; allTotal: number; page: number; pageCount: number;
+  languages: { language: string; count: number }[];
+}
+export interface SnippetArchiveResult extends ExportResult { snippetCount: number }
 export interface CopyMessageResult { text: string }
 export interface MessageReviewExcerpt { text: string; shortened: boolean; imageHidden: boolean }
 export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
@@ -55,7 +60,8 @@ export interface ExportRequest extends RequestBase, RevisionSelection { type: 'e
 export interface ExportExcerptRequest extends RequestBase, RevisionSelection, PreviewFilters { type: 'export-excerpt'; format: 'markdown' | 'jsonl' }
 export interface CopyMessageRequest extends RequestBase, RevisionSelection { type: 'copy-message'; messageId: string; mode: 'cleaned' | 'original' }
 export interface CompareMessageRequest extends RequestBase, RevisionSelection { type: 'compare-message'; messageId: string }
-export interface QuerySnippetsRequest extends RequestBase, RevisionSelection { type: 'query-snippets'; page: number; pageSize: 20 }
+export interface QuerySnippetsRequest extends RequestBase, RevisionSelection, SnippetFilters { type: 'query-snippets'; page: number; pageSize: 20 }
+export interface ExportSnippetsRequest extends RequestBase, RevisionSelection, SnippetFilters { type: 'export-snippets' }
 export interface CopySnippetRequest extends RequestBase, RevisionSelection { type: 'copy-snippet'; snippetId: string }
 export interface ExportSnippetRequest extends RequestBase, RevisionSelection { type: 'export-snippet'; snippetId: string }
 export interface HandoffRequest extends RequestBase, RevisionSelection {
@@ -63,7 +69,7 @@ export interface HandoffRequest extends RequestBase, RevisionSelection {
   recentCount: number; maxCharacters: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ClearRequest;
-export type WorkerResult = ParseInfo | CleanSummary | QueryResult | SnippetQueryResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ClearRequest;
+export type WorkerResult = ParseInfo | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; clear: null }

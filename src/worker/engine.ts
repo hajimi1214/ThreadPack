@@ -1,10 +1,11 @@
 import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInput, validateCustomSecrets } from '../core';
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
-import { extractCodeSnippets, snippetExtension } from '../core/snippets';
+import { extractCodeSnippets } from '../core/snippets';
 import type { CodeSnippet } from '../core/snippets';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import { buildCodeArchive, codeSnippetFilename, normalizedSnippetLanguage } from './code-archive';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -117,11 +118,12 @@ export class WorkerEngine {
     if (request.type === 'export') return this.export(state.archive, cache, request.format);
     if (request.type === 'export-excerpt') return this.exportExcerpt(state.archive, original, cache, request);
     if (request.type === 'query-snippets') return this.querySnippets(cache, request);
+    if (request.type === 'export-snippets') return this.exportSnippets(state.archive, cache, request);
     if (request.type === 'copy-snippet') return { text: this.snippet(cache, request.snippetId).text };
     if (request.type === 'export-snippet') {
       const { snippet, text } = this.snippet(cache, request.snippetId);
       return { buffer: encoder.encode(text).buffer as ArrayBuffer,
-        filename: `threadpack-code-${snippet.messageIndex + 1}-${snippet.fenceIndex + 1}.${snippetExtension(snippet.language)}`,
+        filename: codeSnippetFilename(snippet),
         mimeType: 'text/plain;charset=utf-8' };
     }
     if (request.type === 'handoff') return this.handoff(cache, request);
@@ -255,11 +257,33 @@ export class WorkerEngine {
     return { text: message.content };
   }
 
+  private matchingSnippets(cache: CleanCache, request: SnippetFilters): { snippets: CodeSnippet[]; allTotal: number; languages: { language: string; count: number }[] } {
+    const query = request.query === undefined ? '' : request.query;
+    const rawLanguage = request.language === undefined ? '' : request.language;
+    if (typeof query !== 'string' || query.length > 1000 || typeof rawLanguage !== 'string' || rawLanguage.length > 30) {
+      throw new Error('Valid code filters are required.');
+    }
+    const language = normalizedSnippetLanguage(rawLanguage);
+    if (language === null) throw new Error('Valid code filters are required.');
+    const snippets = cache.snippets ??= extractCodeSnippets(cache.result.conversation);
+    const counts = new Map<string, number>();
+    for (const snippet of snippets) counts.set(snippet.language, (counts.get(snippet.language) ?? 0) + 1);
+    const pattern = searchPattern(query);
+    const matches = snippets.filter(snippet => {
+      if (language && snippet.language !== language) return false;
+      if (!pattern) return true;
+      const content = cache.result.conversation.messages[snippet.messageIndex]!.content;
+      return pattern.test(content.slice(snippet.start, snippet.end));
+    });
+    return { snippets: matches, allTotal: snippets.length,
+      languages: [...counts].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([language, count]) => ({ language, count })) };
+  }
+
   private querySnippets(cache: CleanCache, request: QuerySnippetsRequest): SnippetQueryResult {
     if (request.pageSize !== 20 || !Number.isSafeInteger(request.page) || request.page < 0) {
       throw new Error('A valid code page number is required.');
     }
-    const snippets = cache.snippets ??= extractCodeSnippets(cache.result.conversation);
+    const { snippets, allTotal, languages } = this.matchingSnippets(cache, request);
     const pageCount = Math.max(1, Math.ceil(snippets.length / 20));
     const page = Math.min(request.page, pageCount - 1);
     const items = snippets.slice(page * 20, (page + 1) * 20).map(snippet => {
@@ -271,7 +295,17 @@ export class WorkerEngine {
         fenceIndex: snippet.fenceIndex, lines: snippet.lines, characters: snippet.characters,
         preview: content.slice(snippet.start, end), shortened: end < snippet.end };
     });
-    return { items, total: snippets.length, page, pageCount };
+    return { items, total: snippets.length, allTotal, languages, page, pageCount };
+  }
+
+  private exportSnippets(archive: ParsedArchive, cache: CleanCache, request: ExportSnippetsRequest): SnippetArchiveResult {
+    const { snippets } = this.matchingSnippets(cache, request);
+    if (!snippets.length) throw new Error('No code snippets match the current filters.');
+    if (snippets.length > 65535) throw new Error('This archive contains too many code files. Apply a narrower code filter.');
+    const bytes = buildCodeArchive(cache.result.conversation, snippets);
+    const index = archive.conversations.findIndex(conversation => conversation.id === cache.result.conversation.id);
+    const suffix = archive.conversations.length > 1 ? `-${Math.max(0, index) + 1}` : '';
+    return { buffer: bytes.buffer, filename: `threadpack-code${suffix}.zip`, mimeType: 'application/zip', snippetCount: snippets.length };
   }
 
   private snippet(cache: CleanCache, id: string): { snippet: CodeSnippet; text: string } {
