@@ -162,6 +162,9 @@ export default function App() {
     window.addEventListener('appinstalled', installed);
     return () => { stop(); window.removeEventListener('beforeinstallprompt', beforeInstall); window.removeEventListener('appinstalled', installed); };
   }, []);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('demo') === '1') void openText(createDemo(), 'checkout-session.jsonl', true);
+  }, []);
   useEffect(() => { document.documentElement.lang = htmlLanguage(lang); try { localStorage.setItem('threadpack-language', lang); } catch { /* Optional preference only. */ } }, [lang]);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 3200); return () => clearTimeout(id); }, [toast]);
   useEffect(() => {
@@ -477,7 +480,7 @@ export default function App() {
       {error && <div className="error-banner" role="alert"><div><strong>{t.errorTitle}</strong><p>{error}</p></div><button className="icon-button" aria-label={t.close} onClick={() => setError('')}><X size={17} /></button></div>}
 
       <section className={`import-panel ${archive ? 'has-file' : ''}`}>
-        <input ref={input} type="file" tabIndex={-1} accept=".jsonl,.ndjson,.json,.md,.txt,.log" aria-label={t.import} className="file-input" onChange={e => { const f = e.target.files?.[0]; if (f) void openFile(f); e.target.value = ''; }} />
+        <input ref={input} type="file" tabIndex={-1} accept=".zip,.jsonl,.ndjson,.json,.md,.txt,.log" aria-label={t.import} className="file-input" onChange={e => { const f = e.target.files?.[0]; if (f) void openFile(f); e.target.value = ''; }} />
         {!archive ? <><button className="drop-target" disabled={importing} onClick={() => input.current?.click()}><span className="upload-icon"><Upload size={23} strokeWidth={1.6} /></span><span><strong>{t.drop}</strong><small>{t.dropHint}</small></span></button><div className="import-alternatives"><button className="button secondary" disabled={importing} onClick={() => void openText(createDemo(), 'checkout-session.jsonl', true)}><Sparkles size={15} />{t.demo}</button><button className="text-button" onClick={() => setDialog('paste')}><Clipboard size={14} />{t.paste}</button></div></> : <><div className="file-summary"><span className="file-icon"><FileText size={23} strokeWidth={1.5} /></span><div className="file-details"><div className="overline">{t.fileLabel}{demo && <span className="demo-badge">{t.demoBadge}</span>}</div><strong title={filename}>{filename}</strong><small>{archive.format} <span>·</span> {bytes(archive.sourceBytes)}</small></div></div><div className="file-controls">{archive.conversations.length > 1 && <div className="select-wrap"><select aria-label={t.conversations} value={selected} onChange={e => selectConversation(e.target.value)}>{archive.conversations.map((c, i) => <option key={c.id} value={c.id}>{i + 1}. {c.title.slice(0, 100)}</option>)}</select><ChevronDown size={14} /></div>}<button className="button secondary small" onClick={() => input.current?.click()}><Upload size={14} />{t.changeFile}</button><button className="icon-button muted" aria-label={t.clear} title={t.clear} onClick={clear}><Trash2 size={16} /></button></div></>}
       </section>
 

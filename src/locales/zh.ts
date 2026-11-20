@@ -9,7 +9,7 @@ const zh: Record<TranslationKey, string> = {
   showcaseKept: "保留下一段对话需要的上下文。",
   import: '导入文件', demo: '试用演示', paste: '粘贴文本', clear: '清空工作区',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
-  drop: '把对话文件拖到这里', dropHint: '或点击选择 · .jsonl、.json、.md、.txt · 最大 100 MiB',
+  drop: '把对话文件拖到这里', dropHint: '或点击选择 · .zip、.jsonl、.json、.md、.txt · 最大 100 MiB',
   sample: '演示对话', fileLabel: '你的对话', changeFile: '更换文件', conversations: '选择对话',
   sourceSize: '原始文本', cleanSize: '打包后文本', saved: '减少体积', messages: '消息条数', payloadHint: '统计 UTF-8 消息文本，不含导出元数据',
   recipe: '清理设置', recipeSub: "选择预设，或逐项调整规则。", reset: '重置',

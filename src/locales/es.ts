@@ -19,7 +19,7 @@ const es: Record<TranslationKey, string> = {
   clear: 'Vaciar el panel',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
   drop: 'Suelta una conversación aquí',
-  dropHint: 'o elige un archivo · .jsonl, .json, .md, .txt · hasta 100 MiB',
+  dropHint: 'o elige un archivo · .zip, .jsonl, .json, .md, .txt · hasta 100 MiB',
   sample: 'Conversación de ejemplo',
   fileLabel: 'TU CONVERSACIÓN',
   changeFile: 'Cambiar archivo',

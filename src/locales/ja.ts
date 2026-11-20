@@ -11,7 +11,7 @@ const ja: Record<TranslationKey, string> = {
   showcaseKept: "次の会話に必要な文脈を残します。",
   import: 'ファイルを開く', demo: 'デモを試す', paste: '貼り付け', clear: '内容を消去',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
-  drop: '会話ファイルをここにドロップ', dropHint: 'またはファイルを選択 · .jsonl、.json、.md、.txt · 最大 100 MiB',
+  drop: '会話ファイルをここにドロップ', dropHint: 'またはファイルを選択 · .zip、.jsonl、.json、.md、.txt · 最大 100 MiB',
   sample: 'デモの会話', fileLabel: '読み込んだ会話', changeFile: 'ファイルを変更', conversations: '会話を選択',
   sourceSize: '元のテキスト', cleanSize: '整理後のテキスト', saved: '削減量', removed: '削減', messages: 'メッセージ数', payloadHint: 'UTF-8 のメッセージ本文を集計。エクスポートのメタデータは含みません',
   recipe: '整理の設定', recipeSub: "プリセットを選ぶか、各ルールを調整します。", reset: 'リセット',

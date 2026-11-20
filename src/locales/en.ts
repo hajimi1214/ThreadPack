@@ -9,7 +9,7 @@ const en = {
   showcaseKept: "Keep the context you need for the next conversation.",
   import: 'Import file', demo: 'Try the demo', paste: 'Paste text', clear: 'Clear workspace',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
-  drop: 'Drop a conversation here', dropHint: 'or choose a file · .jsonl, .json, .md, .txt · up to 100 MiB',
+  drop: 'Drop a conversation here', dropHint: 'or choose a file · .zip, .jsonl, .json, .md, .txt · up to 100 MiB',
   sample: 'Demo conversation', fileLabel: 'YOUR CONVERSATION', changeFile: 'Change file', conversations: 'Conversation',
   sourceSize: 'Original text', cleanSize: 'Packed text', saved: 'Lighter by', messages: 'Messages', payloadHint: 'UTF-8 message text, excluding export metadata',
   recipe: 'Cleanup recipe', recipeSub: "Choose a preset or adjust each rule.", reset: 'Reset',

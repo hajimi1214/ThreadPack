@@ -19,7 +19,7 @@ const fr: Record<TranslationKey, string> = {
   clear: 'Vider l’atelier',
   supported: 'Codex · Claude Code · ChatGPT · Claude · JSON · Markdown',
   drop: 'Déposez une conversation ici',
-  dropHint: 'ou choisissez un fichier · .jsonl, .json, .md, .txt · 100 MiB maximum',
+  dropHint: 'ou choisissez un fichier · .zip, .jsonl, .json, .md, .txt · 100 MiB maximum',
   sample: 'Conversation de démonstration',
   fileLabel: 'VOTRE CONVERSATION',
   changeFile: 'Changer de fichier',

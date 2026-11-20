@@ -6,6 +6,7 @@ import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
 import { buildCodeArchive, codeSnippetFilename, normalizedSnippetLanguage } from './code-archive';
 import { buildContextBundle } from './context-bundle';
+import { extractZipText } from './zip-import';
 import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
@@ -136,14 +137,40 @@ export class WorkerEngine {
     const sequence = ++this.parseSequence;
     if (this.archives.has(request.archiveId)) throw new Error('This archive reference is already in use. Start a new import.');
     const checkActive = (): void => { if (sequence !== this.parseSequence) throw new Error(CANCELLED_IMPORT); };
-    let text: string;
-    let sourceBytes: number;
+    let text = '';
+    let parsedFilename = request.filename ?? request.file?.name ?? 'pasted.txt';
+    let importWarning: string | undefined;
+    let sourceBytes = 0;
     if (request.file) {
       const file = request.file;
-      if (typeof file.stream !== 'function' || !Number.isFinite(file.size) || file.size < 0 || file.size > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit or cannot be read.');
-      let reader: ReadableStreamDefaultReader<Uint8Array>;
-      try { reader = file.stream().getReader(); }
-      catch { throw new Error('This file could not be read. Choose it again or paste its text.'); }
+      if ((!file.stream && !file.arrayBuffer && typeof FileReader === 'undefined') || !Number.isFinite(file.size) || file.size < 0 || file.size > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit or cannot be read.');
+      if (/\.zip$/i.test(file.name)) {
+        let bytes: Uint8Array;
+        try {
+          if (typeof file.arrayBuffer === 'function') bytes = new Uint8Array(await file.arrayBuffer());
+          else if (typeof file.stream === 'function') {
+            const reader = file.stream().getReader(); const chunks: Uint8Array[] = []; let size = 0;
+            for (;;) { checkActive(); const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength; if (size > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.'); chunks.push(chunk.value); }
+            bytes = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+          } else bytes = await new Promise<Uint8Array>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer)); reader.onerror = () => reject(reader.error); reader.readAsArrayBuffer(file); });
+          const extracted = extractZipText(bytes); text = extracted.text; parsedFilename = extracted.filename; sourceBytes = bytes.byteLength; importWarning = extracted.warning;
+        } catch (error) {
+          if (error instanceof Error && (error.message.includes('ZIP') || error.message.includes('100 MiB') || error.message.includes('supported text'))) throw error;
+          throw new Error('This ZIP could not be read. Choose a valid conversation export.');
+        }
+      } else {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+      if (typeof file.stream === 'function') {
+        try { reader = file.stream().getReader(); }
+        catch { throw new Error('This file could not be read. Choose it again or paste its text.'); }
+      } else {
+        try {
+          const bytes = typeof file.arrayBuffer === 'function' ? new Uint8Array(await file.arrayBuffer()) : await new Promise<Uint8Array>((resolve, reject) => { const fallback = new FileReader(); fallback.onload = () => resolve(new Uint8Array(fallback.result as ArrayBuffer)); fallback.onerror = () => reject(fallback.error); fallback.readAsArrayBuffer(file); });
+          text = new TextDecoder('utf-8').decode(bytes); sourceBytes = bytes.byteLength; progress?.({ loaded: sourceBytes, total: file.size });
+          reader = null as unknown as ReadableStreamDefaultReader<Uint8Array>;
+        } catch { throw new Error('This file could not be read. Choose it again or paste its text.'); }
+      }
+      if (reader) {
       const decoder = new TextDecoder('utf-8');
       const chunks: string[] = [];
       sourceBytes = 0;
@@ -173,13 +200,16 @@ export class WorkerEngine {
       } finally { reader.releaseLock(); }
       text = chunks.join('');
       progress?.({ loaded: sourceBytes, total: file.size });
+      }
+      }
     } else {
       text = request.text ?? '';
       sourceBytes = byteLength(text);
       if (sourceBytes > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.');
     }
     checkActive();
-    const archive = parseInput(text, request.filename ?? request.file?.name ?? 'pasted.txt');
+    const archive = parseInput(text, parsedFilename);
+    if (importWarning) archive.warnings.push(importWarning);
     checkActive();
     archive.sourceBytes = sourceBytes;
     // The importing interface owns acceptance. An older queued clean may run
