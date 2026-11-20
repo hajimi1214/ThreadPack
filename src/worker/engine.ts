@@ -2,7 +2,7 @@ import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInpu
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
 import { searchPattern } from '../preview';
 import { APP_VERSION } from '../version';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportExcerptRequest, ExportResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -111,6 +111,7 @@ export class WorkerEngine {
     if (request.type === 'copy-message') return this.copyMessage(original, cache, request);
     if (request.type === 'compare-message') return this.compareMessage(original, cache, request);
     if (request.type === 'export') return this.export(state.archive, cache, request.format);
+    if (request.type === 'export-excerpt') return this.exportExcerpt(state.archive, original, cache, request);
     if (request.type === 'handoff') return this.handoff(cache, request);
     throw new Error('This operation is not supported.');
   }
@@ -177,9 +178,9 @@ export class WorkerEngine {
     };
   }
 
-  private query(original: Conversation, cache: CleanCache, request: QueryRequest): QueryResult {
-    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || typeof request.changedOnly !== 'boolean' || typeof request.pinnedOnly !== 'boolean' || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string' || id.length > 500) || request.pinnedIds.length > original.messages.length || request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
-      throw new Error('Valid preview filters and a page number are required.');
+  private matchingMessages(original: Conversation, cache: CleanCache, request: PreviewFilters): { conversation: Conversation; matches: number[] } {
+    if (!['cleaned', 'original'].includes(request.mode) || !['all', 'user', 'assistant', 'tool', 'system'].includes(request.role) || typeof request.query !== 'string' || request.query.length > 1000 || typeof request.changedOnly !== 'boolean' || typeof request.pinnedOnly !== 'boolean' || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string' || id.length > 500) || request.pinnedIds.length > original.messages.length) {
+      throw new Error('Valid preview filters are required.');
     }
     const conversation = request.mode === 'original' ? original : cache.result.conversation;
     const pattern = searchPattern(request.query);
@@ -194,6 +195,14 @@ export class WorkerEngine {
       if (pattern && !pattern.test(message.content)) continue;
       matches.push(index);
     }
+    return { conversation, matches };
+  }
+
+  private query(original: Conversation, cache: CleanCache, request: QueryRequest): QueryResult {
+    if (request.pageSize !== 30 || !Number.isSafeInteger(request.page) || request.page < 0) {
+      throw new Error('Valid preview filters and a page number are required.');
+    }
+    const { conversation, matches } = this.matchingMessages(original, cache, request);
     const pageCount = Math.max(1, Math.ceil(matches.length / 30));
     const page = Math.min(request.page, pageCount - 1);
     const sizes = request.mode === 'original' ? cache.originalSizes : cache.cleanedSizes;
@@ -204,6 +213,24 @@ export class WorkerEngine {
         changes: (cache.changes.get(message.id) ?? []).map(change => ({ ...change })), shortened: preview.shortened };
     });
     return { items, total: matches.length, page, pageCount };
+  }
+
+  private exportExcerpt(archive: ParsedArchive, original: Conversation, cache: CleanCache, request: ExportExcerptRequest): ExcerptExportResult {
+    if (!['markdown', 'jsonl'].includes(request.format)) throw new Error('Choose a supported excerpt format.');
+    const { conversation, matches } = this.matchingMessages(original, cache, request);
+    if (!matches.length) throw new Error('No messages match the current filters.');
+    // Match against the active view, but exports always use cleaned bodies and metadata.
+    const ids = new Set(matches.map(index => conversation.messages[index]!.id));
+    const excerpt = { ...cache.result.conversation, messages: cache.result.conversation.messages.filter(message => ids.has(message.id)) };
+    const messageCount = excerpt.messages.length;
+    const text = request.format === 'markdown'
+      ? `# Filtered excerpt\n\n${messageCount} matching messages · cleaned content\n\n${buildTranscript(excerpt)}`
+      : buildJsonl(excerpt);
+    const conversationIndex = archive.conversations.findIndex(item => item.id === original.id);
+    const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';
+    const extension = request.format === 'markdown' ? 'md' : 'jsonl';
+    const mimeType = request.format === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/x-ndjson;charset=utf-8';
+    return { buffer: encoder.encode(text).buffer as ArrayBuffer, filename: `threadpack-excerpt${suffix}.${extension}`, mimeType, messageCount };
   }
 
   private copyMessage(original: Conversation, cache: CleanCache, request: CopyMessageRequest): { text: string } {

@@ -24,6 +24,7 @@ export interface PreviewMessage {
 }
 export interface QueryResult { items: PreviewMessage[]; total: number; page: number; pageCount: number }
 export interface ExportResult { buffer: ArrayBuffer; filename: string; mimeType: string }
+export interface ExcerptExportResult extends ExportResult { messageCount: number }
 export interface CopyMessageResult { text: string }
 export interface MessageReviewExcerpt { text: string; shortened: boolean; imageHidden: boolean }
 export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
@@ -38,11 +39,15 @@ export interface ParseRequest extends RequestBase {
   text?: string; filename?: string; file?: File;
 }
 export interface CleanRequest extends RequestBase, Selection { type: 'clean'; options: CleanOptions }
-export interface QueryRequest extends RequestBase, RevisionSelection {
-  type: 'query'; mode: 'cleaned' | 'original'; query: string; role: 'all' | Role;
-  changedOnly: boolean; pinnedOnly: boolean; pinnedIds: string[]; page: number; pageSize: 30;
+export interface PreviewFilters {
+  mode: 'cleaned' | 'original'; query: string; role: 'all' | Role;
+  changedOnly: boolean; pinnedOnly: boolean; pinnedIds: string[];
+}
+export interface QueryRequest extends RequestBase, RevisionSelection, PreviewFilters {
+  type: 'query'; page: number; pageSize: 30;
 }
 export interface ExportRequest extends RequestBase, RevisionSelection { type: 'export'; format: 'markdown' | 'jsonl' | 'report' }
+export interface ExportExcerptRequest extends RequestBase, RevisionSelection, PreviewFilters { type: 'export-excerpt'; format: 'markdown' | 'jsonl' }
 export interface CopyMessageRequest extends RequestBase, RevisionSelection { type: 'copy-message'; messageId: string; mode: 'cleaned' | 'original' }
 export interface CompareMessageRequest extends RequestBase, RevisionSelection { type: 'compare-message'; messageId: string }
 export interface HandoffRequest extends RequestBase, RevisionSelection {
@@ -50,7 +55,7 @@ export interface HandoffRequest extends RequestBase, RevisionSelection {
   recentCount: number; maxCharacters: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | CopyMessageRequest | CompareMessageRequest | HandoffRequest | ClearRequest;
-export type WorkerResult = ParseInfo | CleanSummary | QueryResult | ExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | HandoffRequest | ClearRequest;
+export type WorkerResult = ParseInfo | CleanSummary | QueryResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; handoff: HandoffResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; handoff: HandoffResult; clear: null }

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { DEFAULT_OPTIONS } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
-import type { CleanSummary, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
+import type { CleanSummary, ExportExcerptRequest, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
 
 let rpcId = 0;
 const next = () => ++rpcId;
@@ -18,6 +18,10 @@ async function clean(engine: WorkerEngine, archive: ParseInfo, options: CleanOpt
 function preview(engine: WorkerEngine, archive: ParseInfo, summary: CleanSummary, overrides: Partial<QueryRequest> = {}) {
   return engine.handle({ id: next(), type: 'query', archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision,
     mode: 'cleaned', query: '', role: 'all', changedOnly: false, pinnedOnly: false, pinnedIds: [], page: 0, pageSize: 30, ...overrides });
+}
+function exportExcerpt(engine: WorkerEngine, archive: ParseInfo, summary: CleanSummary, overrides: Partial<ExportExcerptRequest> = {}) {
+  return engine.handle({ id: next(), type: 'export-excerpt', archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision,
+    mode: 'cleaned', query: '', role: 'all', changedOnly: false, pinnedOnly: false, pinnedIds: [], format: 'jsonl', ...overrides });
 }
 function deferredFile(name = 'stream.txt') {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -100,6 +104,94 @@ test('pinned-only filtering combines with existing filters and validates supplie
   assert.equal(none.total, 0);
   await assert.rejects(preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: [42 as unknown as string] }), /filters/);
   await assert.rejects(preview(engine, archive, summary, { pinnedOnly: true, pinnedIds: ['one', 'two', 'three', 'four'] }), /filters/);
+});
+
+test('filtered excerpt export includes every match across pages and preserves complete cleaned bodies', async () => {
+  const engine = new WorkerEngine();
+  const longBody = 'Selected result 0: ' + 'complete content '.repeat(2000);
+  const messages = Array.from({ length: 95 }, (_, index) => ({ role: index % 2 ? 'assistant' : 'user', content: index ? `Selected result ${index}` : longBody }));
+  const archive = await load(engine, JSON.stringify({ messages }));
+  const summary = await clean(engine, archive);
+  const filters = { role: 'user' as const, query: 'selected result' };
+  const firstPage = await preview(engine, archive, summary, filters);
+  assert.equal(firstPage.items.length, 30);
+  assert.equal(firstPage.total, 48);
+  const exported = await exportExcerpt(engine, archive, summary, filters);
+  const lines = textOf(exported.buffer).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(exported.messageCount, 48);
+  assert.equal(lines.length, 48);
+  assert.equal(lines[0].content, longBody);
+  assert.equal(lines.at(-1).content, 'Selected result 94');
+  assert.equal(exported.filename, 'threadpack-excerpt.jsonl');
+  const markdown = await exportExcerpt(engine, archive, summary, { ...filters, format: 'markdown' });
+  assert.equal(markdown.filename, 'threadpack-excerpt.md');
+  assert.ok(textOf(markdown.buffer).startsWith('# Filtered excerpt\n'));
+  assert.match(textOf(markdown.buffer), /48 matching messages/);
+  assert.match(textOf(markdown.buffer), /Selected result 94/);
+  assert.doesNotMatch(textOf(markdown.buffer), /Selected result 93/);
+});
+
+test('filtered excerpts share role, pin, search, and changed-only matching with preview', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [
+    { role: 'user', content: 'MATCH_PRIVATE password=synthetic-sensitive-fixture-001' },
+    { role: 'assistant', content: 'MATCH_PRIVATE password=synthetic-sensitive-fixture-002' },
+    { role: 'user', content: 'OTHER password=synthetic-sensitive-fixture-003' },
+    { role: 'user', content: 'MATCH_PRIVATE unchanged public content' },
+    { role: 'user', content: 'MATCH_PRIVATE password=synthetic-sensitive-fixture-005' },
+  ] }));
+  const summary = await clean(engine, archive);
+  const filters = { mode: 'original' as const, role: 'user' as const, query: 'match_private', changedOnly: true, pinnedOnly: true, pinnedIds: ['message-1', 'message-2', 'message-3', 'message-4'] };
+  const page = await preview(engine, archive, summary, filters);
+  const exported = await exportExcerpt(engine, archive, summary, filters);
+  const lines = textOf(exported.buffer).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(page.total, 1);
+  assert.equal(exported.messageCount, page.total);
+  assert.deepEqual(lines.map(message => message.id), page.items.map(item => item.message.id));
+  assert.match(lines[0].content, /\[SECRET_1\]/);
+  assert.doesNotMatch(textOf(exported.buffer), /synthetic-sensitive-fixture/);
+});
+
+test('original-view excerpt searches may match removed text but always export cleaned bodies and metadata', async () => {
+  const engine = new WorkerEngine();
+  const privateValue = 'private-original-search-value-839';
+  const archive = await load(engine, JSON.stringify({ title: privateValue, source: privateValue, messages: [
+    { role: 'user', content: `Keep this context but hide ${privateValue}.` },
+    { role: 'assistant', content: 'Other public context.' },
+  ] }));
+  const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, customSecrets: [privateValue] });
+  const exported = await exportExcerpt(engine, archive, summary, { mode: 'original', query: privateValue, format: 'markdown' });
+  const text = textOf(exported.buffer);
+  assert.equal(exported.messageCount, 1);
+  assert.match(text, /Keep this context but hide \[CUSTOM_1\]/);
+  assert.doesNotMatch(text, new RegExp(privateValue));
+  assert.doesNotMatch(text, /Other public context/);
+  await assert.rejects(exportExcerpt(engine, archive, summary, { mode: 'cleaned', query: privateValue }), error => error instanceof Error && /No messages match/.test(error.message) && !error.message.includes(privateValue));
+});
+
+test('filtered excerpt exports reject stale, empty, or invalid requests without echoing filter text', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'user', content: 'Keep this result.' }] }));
+  const summary = await clean(engine, archive);
+  const sensitiveQuery = 'absent-private-search-string';
+  await assert.rejects(exportExcerpt(engine, archive, summary, { query: sensitiveQuery }), error => error instanceof Error && /No messages match/.test(error.message) && !error.message.includes(sensitiveQuery));
+  await assert.rejects(exportExcerpt(engine, archive, summary, { pinnedIds: [42 as unknown as string] }), /filters/);
+  await assert.rejects(exportExcerpt(engine, archive, summary, { query: 'x'.repeat(1001) }), /filters/);
+  await assert.rejects(exportExcerpt(engine, archive, summary, { format: 'report' as ExportExcerptRequest['format'] }), /supported excerpt format/);
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await assert.rejects(exportExcerpt(engine, archive, summary), /out of date/);
+});
+
+test('filtered excerpt filenames distinguish archive conversations without exposing titles', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify([
+    { title: 'private-first-title', messages: [{ role: 'user', content: 'First result' }] },
+    { title: 'private-second-title', messages: [{ role: 'user', content: 'Second result' }] },
+  ]));
+  const first = await clean(engine, archive, DEFAULT_OPTIONS, 0);
+  const second = await clean(engine, archive, DEFAULT_OPTIONS, 1);
+  assert.equal((await exportExcerpt(engine, archive, first, { format: 'markdown' })).filename, 'threadpack-excerpt-1.md');
+  assert.equal((await exportExcerpt(engine, archive, second)).filename, 'threadpack-excerpt-2.jsonl');
 });
 
 test('copy-message returns the complete body in the requested mode and rejects stale or unknown references', async () => {
