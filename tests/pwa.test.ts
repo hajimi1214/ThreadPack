@@ -152,6 +152,9 @@ test('Vite plugin uses the final HTML hash and package version, with deployable 
     assert.equal(manifest.start_url, './');
     assert.equal(manifest.scope, './');
     assert.equal(manifest.display, 'standalone');
+    assert.deepEqual(manifest.display_override, ['window-controls-overlay', 'standalone', 'browser']);
+    assert.deepEqual(manifest.categories, ['developer', 'productivity', 'utilities']);
+    assert.deepEqual(manifest.shortcuts.map((shortcut: { short_name: string }) => shortcut.short_name), ['Demo', 'Guide']);
     assert.equal(manifest.theme_color, '#2563eb');
     for (const size of [192, 512]) {
       const png = await readFile(join(out, 'icons', `icon-${size}.png`));

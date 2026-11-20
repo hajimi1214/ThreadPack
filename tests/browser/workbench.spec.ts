@@ -3,6 +3,7 @@ import type { Page, Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { zipSync } from 'fflate';
 
 const pageErrors = new WeakMap<Page, string[]>();
 test.beforeEach(({ page }) => {
@@ -27,6 +28,15 @@ async function upload(page: Page, name: string, data: unknown) {
 function changes(page: Page, label: string) {
   return page.locator('.changes-list > span').filter({ hasText: label }).locator('strong');
 }
+
+test('imports a supported conversation directly from a ZIP export', async ({ page }) => {
+  const zip = zipSync({ 'conversations.json': Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: 'DIRECT_ZIP_IMPORT' }] })) });
+  await page.goto('/');
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({ name: 'chatgpt-export.zip', mimeType: 'application/zip', buffer: Buffer.from(zip) });
+  await ready(page);
+  await expect(page.locator('.file-details > strong')).toHaveText('chatgpt-export.zip');
+  await expect(page.locator('.message-content').first()).toContainText('DIRECT_ZIP_IMPORT');
+});
 
 async function switchRecipe(page: Page, title: string, checked: boolean) {
   const control = page.getByRole('switch', { name: title, exact: true });

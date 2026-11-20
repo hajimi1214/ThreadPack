@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { unzipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import { DEFAULT_OPTIONS } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
@@ -415,6 +415,39 @@ test('portable context bundles reject stale cleanup revisions', async () => {
   await clean(engine, archive, { ...DEFAULT_OPTIONS, redact: false });
   await assert.rejects(engine.handle({ id: next(), type: 'export-bundle', archiveId: archive.archiveId,
     conversationId: first.conversation.id, revision: first.revision }), /out of date/);
+});
+
+test('ZIP conversation imports choose supported text exports without crossing the worker boundary', async () => {
+  const engine = new WorkerEngine();
+  const zip = zipSync({
+    'conversations.json': new TextEncoder().encode(JSON.stringify({ messages: [{ role: 'user', content: 'ZIP_IMPORT_OK' }] })),
+    'notes.md': new TextEncoder().encode('unselected notes'),
+  });
+  const archive = await engine.handle({ id: next(), type: 'parse', archiveId: 4, keepArchiveId: null,
+    file: { name: 'chatgpt-export.zip', size: zip.byteLength, arrayBuffer: async () => zip.buffer as ArrayBuffer } as File });
+  assert.equal(archive.format, 'Messages JSON export');
+  assert.equal(archive.sourceBytes, zip.byteLength);
+  const summary = await clean(engine, archive);
+  const page = await preview(engine, archive, summary);
+  assert.equal(page.items[0]!.message.content, 'ZIP_IMPORT_OK');
+  assert.ok(!JSON.stringify(archive).includes('notes.md'));
+});
+
+test('file imports fall back to arrayBuffer when File.stream is unavailable', async () => {
+  const engine = new WorkerEngine();
+  const bytes = new TextEncoder().encode('ARRAY_BUFFER_FALLBACK');
+  const archive = await engine.handle({ id: next(), type: 'parse', archiveId: 5, keepArchiveId: null,
+    file: { name: 'fallback.txt', size: bytes.byteLength, arrayBuffer: async () => bytes.buffer as ArrayBuffer } as File });
+  const summary = await clean(engine, archive);
+  const page = await preview(engine, archive, summary);
+  assert.equal(page.items[0]!.message.content, 'ARRAY_BUFFER_FALLBACK');
+});
+
+test('ZIP imports reject unsafe paths without echoing archive entry names', async () => {
+  const engine = new WorkerEngine();
+  const zip = zipSync({ '../private.json': new TextEncoder().encode('{"messages":[]}') });
+  await assert.rejects(engine.handle({ id: next(), type: 'parse', archiveId: 6, keepArchiveId: null,
+    file: { name: 'unsafe.zip', size: zip.byteLength, arrayBuffer: async () => zip.buffer as ArrayBuffer } as File }), error => error instanceof Error && /supported text export/.test(error.message) && !error.message.includes('private.json'));
 });
 
 test('exports distinguish conversations by ordinal without including source titles in filenames', async () => {
