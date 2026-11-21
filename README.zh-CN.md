@@ -115,6 +115,7 @@ node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
 node dist-cli/threadpack.mjs session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
+node dist-cli/threadpack.mjs session.jsonl --out dated-handoff.md --format handoff --recent 12 --recent-mode timestamp
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
@@ -131,6 +132,7 @@ threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
 threadpack session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
+threadpack session.jsonl --out dated-handoff.md --format handoff --recent 12 --recent-mode timestamp
 threadpack --help
 ```
 
@@ -157,8 +159,9 @@ threadpack --help
 | `--redact-emails` | 同时替换邮箱地址 |
 | `--redact-file FILE` | 从本地 UTF-8 文件读取精确脱敏值，每行一个 |
 | `--recent N` | 交接包中的近期消息数，范围 0–100，默认 8 |
-| `--notes-file FILE` | 从 UTF-8 JSON 文件读取交接笔记，每个字段最多 12000 字符 |
-| `--pin N` | 固定所选源会话中从 1 开始计数的消息，可重复传入 |
+| `--recent-mode MODE` | 按 `source` 源顺序（默认）或有效时间戳选择；适用于交接包和报告 |
+| `--notes-file FILE` | 从 UTF-8 JSON 文件读取交接笔记，每个字段最多 12000 字符；适用于交接包和报告 |
+| `--pin N` | 固定所选源会话中从 1 开始计数的消息，可重复传入，适用于交接包和报告 |
 | `--force` | 替换已存在的输出文件 |
 
 网页文本和 ZIP 输入上限为 **100 MiB**。ZIP 最多处理 256 个条目，解压后最多 100 MiB；危险路径和不支持的文件不会泄露文件名。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入、笔记和规则文件必须彼此不同，也必须与输出文件不同，包括文件别名。解析器和清理器警告详情会写入 stderr 与 JSON 报告，但不会包含对话或笔记内容。
@@ -167,7 +170,9 @@ threadpack --help
 
 常见密钥清理也识别裸 URL 中的用户信息，包括数据库、Redis、HTTP(S)、IPv6 主机和百分号编码凭据。邮箱清理会跳过 URL authority 区域与独立的多 `@` 字符串。报告分别提供 `customRuleMatches`（自定义规则命中次数）、`customRedacted`（采用自定义别名的替换区间数）及 `redactionReplacements`（合并后的总替换区间数）。自定义值被更长的密钥规则整体覆盖时，仍会计入命中次数。缺少 URL 或赋值上下文的多 `@` 字符串需用自定义规则完整隐藏。
 
-交接包的 `--notes-file` 接受 `goal`、`decisions`、`constraints` 和 `nextSteps` 字符串字段。每个字段最多 12000 字符，JSON 文件最多 256 KiB。笔记使用与对话相同的启用内置秘密、邮箱和自定义规则脱敏，但别名独立使用 `[NOTE_SECRET_n]`、`[NOTE_EMAIL_n]` 和 `[NOTE_CUSTOM_n]`。可重复传入 `--pin N`，按所选源会话中从 1 开始的消息顺序固定消息。`--notes-file` 和 `--pin` 仅适用于 `--format handoff`。
+时间戳模式按有效时间戳选择最近消息；时间戳相同时，优先选择源序位置靠后的消息，最终仍按源顺序展示。缺失或无效时间戳不会参与此模式。浏览器交接预览和 CLI JSON 报告会显示近期上下文时间范围、完整消息数、超出近期数量的消息数、预算状态、因预算省略的消息 ID 和被截短的消息 ID。长消息正文保留节选提示。
+
+交接包的 `--notes-file` 接受 `goal`、`decisions`、`constraints` 和 `nextSteps` 字符串字段。每个字段最多 12000 字符，JSON 文件最多 256 KiB。笔记使用与对话相同的启用内置秘密、邮箱和自定义规则脱敏，但别名独立使用 `[NOTE_SECRET_n]`、`[NOTE_EMAIL_n]` 和 `[NOTE_CUSTOM_n]`。可重复传入 `--pin N`，按所选源会话中从 1 开始的消息顺序固定消息。`--format report` 也可传入笔记和固定消息，用于计算对应交接摘要，报告不会包含笔记正文。
 
 诊断和报告不包含自定义值或笔记内容，但会提供警告详情和汇总匹配数量。规则文件与笔记文件应按敏感本地资料保管，不要提交到版本控制。
 

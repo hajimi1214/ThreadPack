@@ -207,13 +207,17 @@ interface HandoffOptions {
   nextSteps: string;
   pinnedIds: string[];
   recentCount: number;
+  recentMode?: 'source' | 'timestamp';
   maxCharacters?: number;
 }
 
 buildHandoff(conversation: Conversation, options: HandoffOptions): string
+buildHandoffWithSummary(conversation: Conversation, options: HandoffOptions): HandoffBuildResult
 ```
 
 Creates a Markdown document containing explicit notes, pinned messages, and recent messages. Recent messages already pinned are not duplicated. Excerpts are deterministic and labeled as historical material, without generating a semantic summary.
+
+`recentMode` defaults to `source`, which preserves the existing source window and renders messages in source order. `timestamp` selects only messages with valid timestamps, resolving equal timestamps by preferring the later source position. Both modes render selected messages in source order. `buildHandoffWithSummary` returns the same Markdown plus selection mode, included time range, complete/omitted/truncated counts and message IDs, timestamp exclusions, and budget overflow status. `buildHandoff` remains a text-only wrapper.
 
 - `maxCharacters` defaults to 16000; valid budgets range from 1000 to 10,000,000.
 - User notes and pinned messages are retained in full. If they exceed the budget, the output explicitly reports the overflow.

@@ -113,6 +113,7 @@ node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
 node dist-cli/threadpack.mjs session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
+node dist-cli/threadpack.mjs session.jsonl --out dated-handoff.md --format handoff --recent 12 --recent-mode timestamp
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
@@ -131,6 +132,7 @@ threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
 threadpack session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
+threadpack session.jsonl --out dated-handoff.md --format handoff --recent 12 --recent-mode timestamp
 threadpack --help
 ```
 
@@ -157,8 +159,9 @@ The notes file is a UTF-8 JSON object. Any of the four fields may be omitted and
 | `--redact-emails` | Also replace email addresses |
 | `--redact-file FILE` | Redact exact values from a local UTF-8 file, one value per line |
 | `--recent N` | Recent messages included in a handoff, from 0 to 100; defaults to 8 |
-| `--notes-file FILE` | Add handoff notes from UTF-8 JSON, up to 12000 characters per field |
-| `--pin N` | Pin a 1-based message number from the selected source conversation; repeatable |
+| `--recent-mode MODE` | Select by `source` order (default) or valid timestamps; only for handoffs and reports |
+| `--notes-file FILE` | Add handoff notes from UTF-8 JSON, up to 12000 characters per field; only for handoffs and reports |
+| `--pin N` | Pin a 1-based message number from the selected source conversation; repeatable for handoffs and reports |
 | `--force` | Replace an existing output file |
 
 The browser accepts local text exports and ZIPs up to **100 MiB**. ZIP imports allow at most 256 entries and 100 MiB of expanded content; unsafe paths and unsupported entries are rejected without exposing archive names. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. Input, notes, and redaction files must be distinct from each other and the output, including file aliases. Parser and cleaner warning details are printed to stderr and included in JSON reports, while transcript and note content remain excluded.
@@ -167,7 +170,9 @@ For values that generic secret detectors cannot recognize, supply `--redact-file
 
 Common-secret cleanup also detects bare URL credentials, including database, Redis, and HTTP(S) URLs with IPv6 hosts or percent-encoded user information. Email cleanup excludes URL authorities and standalone multi-`@` tokens. Reports distinguish `customRuleMatches` (every custom-rule occurrence), `customRedacted` (intervals using a custom alias), and `redactionReplacements` (all merged replacement intervals). A custom substring already covered by a larger secret replacement still counts as a rule match.
 
-For handoffs, `--notes-file` accepts `goal`, `decisions`, `constraints`, and `nextSteps` strings. Each field is limited to 12000 characters and the JSON file to 256 KiB. Notes use the same enabled built-in, email, and custom redaction rules as the conversation, with independent `[NOTE_SECRET_n]`, `[NOTE_EMAIL_n]`, and `[NOTE_CUSTOM_n]` aliases. Repeat `--pin N` to include messages by their 1-based order in the original selected conversation. `--notes-file` and `--pin` require `--format handoff`.
+Timestamp selection chooses the most recently dated messages with valid timestamps. Equal timestamps use later source positions first for selection, then selected messages are rendered in source order. Missing or invalid timestamps are excluded from timestamp selection. The browser handoff preview and CLI JSON report show the recent-context time range, complete-message count, messages outside the recent limit, budget status, budget-omitted IDs, and truncated IDs. Long messages retain an inline excerpt marker.
+
+For handoffs, `--notes-file` accepts `goal`, `decisions`, `constraints`, and `nextSteps` strings. Each field is limited to 12000 characters and the JSON file to 256 KiB. Notes use the same enabled built-in, email, and custom redaction rules as the conversation, with independent `[NOTE_SECRET_n]`, `[NOTE_EMAIL_n]`, and `[NOTE_CUSTOM_n]` aliases. Repeat `--pin N` to include messages by their 1-based order in the original selected conversation. Notes and pins can also be passed with `--format report` to calculate its handoff summary without including note text.
 
 Custom values and note contents are omitted from diagnostics and reports; reports expose warning details and aggregate match counts. Treat redaction and notes files as sensitive local data and keep them out of version control.
 
