@@ -60,6 +60,34 @@ function excerpt(content: string, budget: number, language: OutputLanguage): str
   return content.slice(0, head) + marker + content.slice(-(available - head));
 }
 
+function messageBlockOverhead(message: Message): number {
+  const emptyBlockLength = messageBlock({ ...message, content: '' }).length;
+  let fenceLength = 3;
+  for (const match of message.content.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, match[0].length + 1);
+  return emptyBlockLength + (fenceLength - 3) * 2;
+}
+
+function allocateContentBudgets(messages: Message[], totalBudget: number): number[] {
+  const allocations = new Array<number>(messages.length).fill(0);
+  let remainingBudget = totalBudget;
+  let active = messages.map((_, index) => index);
+  while (active.length > 0) {
+    const share = Math.floor(remainingBudget / active.length);
+    const complete = active.filter((index) => messages[index]!.content.length <= share);
+    if (complete.length === 0) {
+      for (const index of active) allocations[index] = share;
+      break;
+    }
+    for (const index of complete) {
+      allocations[index] = messages[index]!.content.length;
+      remainingBudget -= allocations[index]!;
+    }
+    const completeSet = new Set(complete);
+    active = active.filter((index) => !completeSet.has(index));
+  }
+  return allocations;
+}
+
 export function buildHandoff(conversation: Conversation, options: HandoffOptions): string {
   return buildHandoffWithSummary(conversation, options).text;
 }
@@ -104,24 +132,32 @@ export function buildHandoffWithSummary(conversation: Conversation, options: Han
   const footer = `\n\n---\n${labels.footer}\n`;
   const omittedMarker = labels.omitted;
   const budget = Math.max(0, maxCharacters - result.length - footer.length - omittedMarker.length - 4);
-  const selected: { message: Message; index: number; truncated: boolean }[] = [];
+  const includedCandidates: typeof recentCandidates = [];
   const omittedMessageIds: string[] = [];
-  const truncatedMessageIds: string[] = [];
-  let used = 0;
+  let remainingBudget = budget;
+  const excerptMarkerLength = `\n[ThreadPack: ${labels.excerpt}]\n`.length;
   for (const candidate of recentCandidates) {
-    const { message, index } = candidate;
-    const blockSize = messageBlock(message).length + 2;
-    if (used + blockSize <= budget) {
-      selected.push({ message, index, truncated: false });
-      used += blockSize;
-    } else if (!selected.length && budget > 250) {
-      const overhead = messageBlock({ ...message, content: '' }).length + 8;
-      const shortened = { ...message, content: excerpt(message.content, Math.max(100, budget - overhead), language) };
-      selected.push({ message: shortened, index, truncated: true });
-      used += messageBlock(shortened).length + 2;
-      truncatedMessageIds.push(message.id);
-    } else omittedMessageIds.push(message.id);
+    const minimumContent = Math.min(candidate.message.content.length, excerptMarkerLength + 1);
+    const required = messageBlockOverhead(candidate.message) + minimumContent + (includedCandidates.length > 0 ? 2 : 0);
+    if (required > remainingBudget) {
+      omittedMessageIds.push(...recentCandidates.slice(includedCandidates.length).map(({ message }) => message.id));
+      break;
+    }
+    includedCandidates.push(candidate);
+    remainingBudget -= required;
   }
+  const overheadBudget = includedCandidates.reduce((total, { message }) => total + messageBlockOverhead(message), 0) + Math.max(0, includedCandidates.length - 1) * 2;
+  const contentBudgets = allocateContentBudgets(includedCandidates.map(({ message }) => message), Math.max(0, budget - overheadBudget));
+  const selected = includedCandidates.map(({ message, index }, candidateIndex) => {
+    const contentBudget = contentBudgets[candidateIndex]!;
+    const truncated = message.content.length > contentBudget;
+    return {
+      index,
+      truncated,
+      message: truncated ? { ...message, content: excerpt(message.content, contentBudget, language) } : message,
+    };
+  });
+  const truncatedMessageIds = selected.filter((item) => item.truncated).map(({ message }) => message.id);
   selected.sort((first, second) => first.index - second.index);
   result += selected.length ? selected.map(({ message }) => messageBlock(message)).join('\n\n') : labels.noRecent;
   if (omittedMessageIds.length || truncatedMessageIds.length) result += `\n\n${omittedMarker}`;
