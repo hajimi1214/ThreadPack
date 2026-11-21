@@ -118,6 +118,7 @@ test('demo cleanup controls update real results, reset defaults, and compare the
   await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
   await ready(page);
   await expect(page.locator('.demo-badge')).toHaveText('SAMPLE DATA');
+  await expect(page.getByRole('switch', { name: 'Redact email addresses' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.message-card')).toHaveCount(10);
   await expect(changes(page, 'images removed')).toHaveText('1');
   await expect(changes(page, 'outputs clipped')).toHaveText('1');
@@ -125,6 +126,7 @@ test('demo cleanup controls update real results, reset defaults, and compare the
   await expect(changes(page, 'secrets redacted')).toHaveText('1');
   expect(Number.parseFloat(await page.locator('.metric-saved strong').innerText())).toBeGreaterThan(90);
   await expect(page.locator('.messages-list')).toContainText('[SECRET_1]');
+  await expect(page.locator('.messages-list')).toContainText('[EMAIL_1]');
   await expect(page.locator('.messages-list')).toContainText('Inline image removed');
 
   await switchRecipe(page, 'Remove embedded images', false);
@@ -157,11 +159,11 @@ test('demo cleanup controls update real results, reset defaults, and compare the
   await expect(page.locator('.messages-list')).toContainText('demo_value_for_documentation_only');
   await switchRecipe(page, 'Redact common secrets', true);
   await expect(page.locator('.messages-list')).not.toContainText('demo_value_for_documentation_only');
+  await switchRecipe(page, 'Redact email addresses', false);
+  await expect(page.locator('.messages-list')).toContainText('developer@example.test');
   await switchRecipe(page, 'Redact email addresses', true);
   await expect(changes(page, 'emails redacted')).toHaveText('1');
   await expect(page.locator('.messages-list')).toContainText('[EMAIL_1]');
-  await switchRecipe(page, 'Redact email addresses', false);
-  await expect(page.locator('.messages-list')).toContainText('developer@example.test');
 
   await page.getByRole('button', { name: 'Original', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Original', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -172,11 +174,11 @@ test('demo cleanup controls update real results, reset defaults, and compare the
   await expect(page.locator('.original-warning')).not.toBeVisible();
   await expect(page.locator('.messages-list')).not.toContainText('demo_value_for_documentation_only');
 
-  await switchRecipe(page, 'Redact email addresses', true);
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
   await ready(page);
   await expect(limit).toHaveValue('4000');
-  await expect(page.getByRole('switch', { name: 'Redact email addresses' })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('switch', { name: 'Redact email addresses' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.messages-list')).toContainText('[EMAIL_1]');
   await expect(changes(page, 'outputs clipped')).toHaveText('1');
 });
 

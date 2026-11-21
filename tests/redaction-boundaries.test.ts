@@ -87,11 +87,11 @@ test('email scanning skips URL authorities even when secret scanning is switched
 
 test('normal emails including plus tags, subdomains and punctuation retain stable aliases', () => {
   const source = "Contact: <alice+alerts@sub.example.test>, bob@example.test. Again alice+alerts@sub.example.test! 'o'connor@example.test'. mailto:alice+alerts@sub.example.test";
-  const result = cleanConversation(conversation(source), { ...DEFAULT_OPTIONS, redactEmails: true });
+  const result = cleanConversation(conversation(source), DEFAULT_OPTIONS);
   assert.equal(result.conversation.messages[0]!.content, "Contact: <[EMAIL_1]>, [EMAIL_2]. Again [EMAIL_1]! '[EMAIL_3]'. mailto:[EMAIL_1]");
   assert.equal(result.stats.emailsRedacted, 5);
   assert.equal(result.stats.redactionReplacements, 5);
-  assert.equal(cleanConversation(conversation(source), DEFAULT_OPTIONS).conversation.messages[0]!.content, source);
+  assert.equal(cleanConversation(conversation(source), { ...DEFAULT_OPTIONS, redactEmails: false }).conversation.messages[0]!.content, source);
 });
 
 test('custom rule matches remain visible when a larger credential interval owns the replacement', () => {

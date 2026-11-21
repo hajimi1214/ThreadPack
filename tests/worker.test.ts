@@ -100,7 +100,7 @@ test('snippet references reject stale revisions and missing or invalid IDs witho
   await assert.rejects(engine.handle({ id: next(), type: 'query-snippets', ...selection, page: -1, pageSize: 20 }), /page number/);
   await assert.rejects(engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-10' }), /unavailable/);
   await assert.rejects(engine.handle({ id: next(), type: 'export-snippet', ...selection, snippetId: '../../private-entry' }), error => error instanceof Error && !error.message.includes('private-entry'));
-  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: false });
   await assert.rejects(engine.handle({ id: next(), type: 'query-snippets', ...selection, page: 0, pageSize: 20 }), /out of date/);
   await assert.rejects(engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-1' }), /out of date/);
   await assert.rejects(engine.handle({ id: next(), type: 'export-snippet', ...selection, snippetId: 'message-1-code-1' }), /out of date/);
@@ -241,7 +241,7 @@ test('filtered excerpt exports reject stale, empty, or invalid requests without 
   await assert.rejects(exportExcerpt(engine, archive, summary, { pinnedIds: [42 as unknown as string] }), /filters/);
   await assert.rejects(exportExcerpt(engine, archive, summary, { query: 'x'.repeat(1001) }), /filters/);
   await assert.rejects(exportExcerpt(engine, archive, summary, { format: 'report' as ExportExcerptRequest['format'] }), /supported excerpt format/);
-  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: false });
   await assert.rejects(exportExcerpt(engine, archive, summary), /out of date/);
 });
 
@@ -315,9 +315,9 @@ test('compare-message rejects stale revisions and unknown messages', async () =>
   const first = await clean(engine, archive);
   const request = { id: next(), type: 'compare-message' as const, archiveId: archive.archiveId,
     conversationId: first.conversation.id, revision: first.revision, messageId: 'message-1' };
-  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true });
+  await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: false });
   await assert.rejects(engine.handle({ ...request, id: next() }), /out of date/);
-  await assert.rejects(engine.handle({ ...request, id: next(), revision: (await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true })).revision, messageId: 'unknown' }), /unavailable/);
+  await assert.rejects(engine.handle({ ...request, id: next(), revision: (await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: false })).revision, messageId: 'unknown' }), /unavailable/);
 });
 
 test('inline image data stays hidden in either preview mode without swallowing following text', async () => {

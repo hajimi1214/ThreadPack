@@ -63,8 +63,13 @@ test('cleanup presets change the real recipe without dropping custom redactions'
 
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
   await idle(page);
-  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.messages-list')).toContainText(privateValue);
+
+  await page.getByRole('button', { name: 'Balanced', exact: true }).click();
+  await idle(page);
+  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('.messages-list')).toContainText('recipe-user@example.test');
 });
 
 test('message review shows bounded original and cleaned excerpts without rendering imported markup', async ({ page }) => {
@@ -326,6 +331,7 @@ test('rapid recipe changes settle on the current cleanup result without a stale-
   await emails.click();
   await secrets.click();
   await emails.click();
+  await emails.click();
   await expect(secrets).toHaveAttribute('aria-checked', 'false');
   await expect(emails).toHaveAttribute('aria-checked', 'true');
   await idle(page);
@@ -351,8 +357,7 @@ test('URL credentials stay redacted with email mode and overlapping custom rules
   const body = page.locator('.messages-list');
   await expect(body).toContainText('mysql://[SECRET_1]@[2001:db8::4]:3306/db');
   await expect(body).not.toContainText('browser-pass');
-  await page.getByRole('switch', { name: 'Redact email addresses', exact: true }).click();
-  await idle(page);
+  await expect(page.getByRole('switch', { name: 'Redact email addresses', exact: true })).toHaveAttribute('aria-checked', 'true');
   await expect(body).toContainText('[EMAIL_1]');
   await expect(body).toContainText(multiAt);
   await expect(body).not.toContainText('Pr0d_P@[EMAIL_');

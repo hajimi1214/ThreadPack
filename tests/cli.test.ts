@@ -376,6 +376,7 @@ test('CLI help documents the recent-message default', () => {
   assert.match(result.stdout, /--pin <N>.*repeatable/);
   assert.match(result.stdout, /--original-out <file>/);
   assert.match(result.stdout, /--language <en\|zh>/);
+  assert.match(result.stdout, /--no-redact-emails/);
   const chinese = run(['--help', '--language', 'zh']);
   assert.equal(chinese.status, 0);
   assert.match(chinese.stdout, /保存未经修改的原始输入副本/);
@@ -444,11 +445,11 @@ test('CLI redacts bare URL credentials in every cleaned format and exposes overl
   const rules = join(folder, 'url-rules.txt');
   await writeFile(rules, 'cli-fixture-user\ncli-fixture-password');
   const input = JSON.stringify({ messages: [{ role: 'user', content: `${url}\nreader@example.test` }] });
-  for (const redactEmails of [false, true]) {
+  for (const redactEmails of [true, false]) {
     for (const format of ['markdown', 'jsonl', 'handoff', 'report']) {
       const output = join(folder, `url-${format}-${redactEmails}.txt`);
       const args = ['-', '--out', output, '--format', format, '--redact-file', rules];
-      if (redactEmails) args.push('--redact-emails');
+      if (!redactEmails) args.push('--no-redact-emails');
       const result = run(args, input);
       assert.equal(result.status, 0, result.stderr);
       const exported = await readFile(output, 'utf8');
@@ -486,11 +487,23 @@ test('CLI email mode never partially labels a standalone multi-at credential as 
   const credential = 'Pr0d_P@ssw0rd_2024@10.20.30.40';
   const output = join(folder, 'multi-at.jsonl');
   const input = JSON.stringify({ messages: [{ role: 'user', content: `${credential}\nreal@example.test` }] });
-  const result = run(['-', '--out', output, '--format', 'jsonl', '--redact-emails'], input);
+  const result = run(['-', '--out', output, '--format', 'jsonl'], input);
   assert.equal(result.status, 0, result.stderr);
   const message = JSON.parse((await readFile(output, 'utf8')).trim());
   assert.equal(message.content, `${credential}\n[EMAIL_1]`);
   assert.ok(!result.stderr.includes(credential));
+});
+
+test('CLI can explicitly retain emails and rejects contradictory email flags', async () => {
+  const output = join(folder, 'keep-emails.jsonl');
+  const input = JSON.stringify({ messages: [{ role: 'user', content: 'real@example.test' }] });
+  const result = run(['-', '--out', output, '--format', 'jsonl', '--no-redact-emails'], input);
+  assert.equal(result.status, 0, result.stderr);
+  const message = JSON.parse((await readFile(output, 'utf8')).trim());
+  assert.equal(message.content, 'real@example.test');
+  const contradictory = run(['-', '--out', join(folder, 'contradictory-emails.jsonl'), '--redact-emails', '--no-redact-emails'], input);
+  assert.equal(contradictory.status, 1);
+  assert.match(contradictory.stderr, /Choose either/);
 });
 
 test('CLI custom literal redaction remains active with --no-redact and preserves significant spaces', async () => {

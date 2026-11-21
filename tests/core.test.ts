@@ -195,14 +195,14 @@ test('provider credentials, contextual secrets, bearer and emails get stable ali
   const email = ['person', 'example.test'].join('@');
   const secret = ['sample', 'password', 'value'].join('-');
   const text = `First ${fakeKey}\nRepeat ${fakeKey}\n${fakeGithub}\n${fakeAws}\nAuthorization: Bearer ${fakeBearer}\npassword="${secret}"\n${email} twice ${email}`;
-  const cleaned = cleanConversation(conversation(text), { ...DEFAULT_OPTIONS, redactEmails: true });
+  const cleaned = cleanConversation(conversation(text), DEFAULT_OPTIONS);
   assert.equal(cleaned.stats.secretsRedacted, 6);
   assert.equal(cleaned.stats.emailsRedacted, 2);
   const output = cleaned.conversation.messages[0]!.content;
   for (const value of [fakeKey, fakeGithub, fakeAws, fakeBearer, secret, email]) assert.ok(!output.includes(value));
   assert.equal(output.match(/\[SECRET_1\]/g)?.length, 2);
   assert.equal(output.match(/\[EMAIL_1\]/g)?.length, 2);
-  const again = cleanConversation(cleaned.conversation, { ...DEFAULT_OPTIONS, redactEmails: true });
+  const again = cleanConversation(cleaned.conversation, DEFAULT_OPTIONS);
   assert.equal(again.stats.secretsRedacted, 0);
   assert.equal(again.conversation.messages[0]!.content, output);
 });
