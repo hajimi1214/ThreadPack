@@ -341,3 +341,39 @@ test('rapid recipe changes settle on the current cleanup result without a stale-
   expect(report.stats.secretsRedacted).toBe(0);
   await expect(page.getByRole('alert')).not.toBeVisible();
 });
+
+test('URL credentials stay redacted with email mode and overlapping custom rules show both counts', async ({ page }) => {
+  const url = 'mysql://browser-user:browser-pass%40word@[2001:db8::4]:3306/db';
+  const multiAt = 'Pr0d_P@ssw0rd_2024@10.20.30.40';
+  const consoleMessages: string[] = [];
+  page.on('console', message => consoleMessages.push(message.text()));
+  await importMessages(page, [{ role: 'user', content: `${url}\nreal@example.test\n${multiAt}` }]);
+  const body = page.locator('.messages-list');
+  await expect(body).toContainText('mysql://[SECRET_1]@[2001:db8::4]:3306/db');
+  await expect(body).not.toContainText('browser-pass');
+  await page.getByRole('switch', { name: 'Redact email addresses', exact: true }).click();
+  await idle(page);
+  await expect(body).toContainText('[EMAIL_1]');
+  await expect(body).toContainText(multiAt);
+  await expect(body).not.toContainText('Pr0d_P@[EMAIL_');
+  await applyCustom(page, 'browser-user\nbrowser-pass');
+  await expect(page.locator('.changes-list > span').filter({ hasText: 'custom rule matches' })).toContainText('2');
+  await expect(page.locator('.changes-list > span').filter({ hasText: 'custom replacements' })).toContainText('0');
+  const rawReport = await exportText(page, 'Cleanup report');
+  const report = JSON.parse(rawReport);
+  expect(report.stats.customRuleMatches).toBe(2);
+  expect(report.stats.customRedacted).toBe(0);
+  expect(report.stats.redactionReplacements).toBe(2);
+  for (const value of ['browser-user', 'browser-pass', multiAt]) {
+    expect(rawReport).not.toContain(value);
+    expect(consoleMessages.join('\n')).not.toContain(value);
+  }
+  await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Goal', exact: true }).fill(url);
+  await expect(page.locator('.handoff-document')).toContainText('mysql://[NOTE_SECRET_1]@[2001:db8::4]:3306/db');
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download handoff', exact: true }).click();
+  const handoff = await readFile((await (await pending).path())!, 'utf8');
+  expect(handoff).not.toContain('browser-user');
+  expect(handoff).not.toContain('browser-pass');
+});

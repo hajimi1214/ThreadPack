@@ -447,9 +447,10 @@ export default function App() {
     setDialog(null);
     requestAnimationFrame(action.run);
   }
-  const changeRows: { key: 'imagesRemoved' | 'outputsTrimmed' | 'duplicatesRemoved' | 'secretsRedacted' | 'emailsRedacted' | 'customRedacted'; icon: LucideIcon }[] = [
+  const changeRows: { key: 'imagesRemoved' | 'outputsTrimmed' | 'duplicatesRemoved' | 'secretsRedacted' | 'emailsRedacted' | 'customRuleMatches' | 'customRedacted'; icon: LucideIcon }[] = [
     { key: 'imagesRemoved', icon: ImageMinus }, { key: 'outputsTrimmed', icon: Terminal }, { key: 'duplicatesRemoved', icon: Copy },
-    { key: 'secretsRedacted', icon: ShieldCheck }, { key: 'emailsRedacted', icon: Mail }, { key: 'customRedacted', icon: LockKeyhole },
+    { key: 'secretsRedacted', icon: ShieldCheck }, { key: 'emailsRedacted', icon: Mail },
+    { key: 'customRuleMatches', icon: Search }, { key: 'customRedacted', icon: LockKeyhole },
   ];
 
   const cleanupPanel = (
@@ -519,7 +520,7 @@ export default function App() {
             {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => copyMessage(message.id)} onReview={() => void reviewMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} markdownPreview={markdownPreview} t={t} />)}
           </div>
           {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(safePage + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
-          <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
+          <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (!['customRuleMatches', 'customRedacted'].includes(row.key) || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
         </section>
       </div>}
 

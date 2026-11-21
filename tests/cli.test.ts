@@ -137,6 +137,61 @@ test('CLI creates an explicitly labeled deterministic handoff', async () => {
   assert.ok(!handoff.includes(fakeSecret));
 });
 
+test('CLI redacts bare URL credentials in every cleaned format and exposes overlap counts without values', async () => {
+  const userInfo = 'cli-fixture-user:cli-fixture-password%40tail';
+  const url = `mysql://${userInfo}@[2001:db8::1]:3306/db`;
+  const rules = join(folder, 'url-rules.txt');
+  await writeFile(rules, 'cli-fixture-user\ncli-fixture-password');
+  const input = JSON.stringify({ messages: [{ role: 'user', content: `${url}\nreader@example.test` }] });
+  for (const redactEmails of [false, true]) {
+    for (const format of ['markdown', 'jsonl', 'handoff', 'report']) {
+      const output = join(folder, `url-${format}-${redactEmails}.txt`);
+      const args = ['-', '--out', output, '--format', format, '--redact-file', rules];
+      if (redactEmails) args.push('--redact-emails');
+      const result = run(args, input);
+      assert.equal(result.status, 0, result.stderr);
+      const exported = await readFile(output, 'utf8');
+      for (const value of ['cli-fixture-user', 'cli-fixture-password', userInfo, rules]) {
+        assert.ok(!exported.includes(value));
+        assert.ok(!result.stderr.includes(value));
+        assert.ok(!result.stdout.includes(value));
+      }
+      assert.match(result.stderr, /2 custom rule matches/);
+      assert.match(result.stderr, /0 custom replacements/);
+      if (format === 'report') {
+        const report = JSON.parse(exported);
+        assert.equal(report.stats.customRuleMatches, 2);
+        assert.equal(report.stats.customRedacted, 0);
+        assert.equal(report.stats.redactionReplacements, redactEmails ? 2 : 1);
+      } else {
+        assert.ok(exported.includes('mysql://[SECRET_1]@[2001:db8::1]:3306/db'));
+        assert.equal(exported.includes('reader@example.test'), !redactEmails);
+      }
+    }
+  }
+  const invalid = run(['-', '--out', join(folder, 'rejected-url.md'), '--tool-limit', userInfo], input);
+  assert.equal(invalid.status, 1);
+  assert.ok(!invalid.stderr.includes(userInfo));
+  const invalidInput = join(folder, 'private-url-input.json');
+  await writeFile(invalidInput, `{ "messages": [ ${url} }`);
+  const malformed = run([invalidInput, '--out', join(folder, 'unused.md')]);
+  assert.equal(malformed.status, 1);
+  assert.ok(!malformed.stderr.includes(userInfo));
+  assert.ok(!malformed.stdout.includes(userInfo));
+  assert.ok(!malformed.stderr.includes('private-url-input.json'));
+});
+
+test('CLI email mode never partially labels a standalone multi-at credential as an email', async () => {
+  const credential = 'Pr0d_P@ssw0rd_2024@10.20.30.40';
+  const output = join(folder, 'multi-at.jsonl');
+  const input = JSON.stringify({ messages: [{ role: 'user', content: `${credential}\nreal@example.test` }] });
+  const result = run(['-', '--out', output, '--format', 'jsonl', '--redact-emails'], input);
+  assert.equal(result.status, 0, result.stderr);
+  const message = JSON.parse((await readFile(output, 'utf8')).trim());
+  assert.equal(message.content, `${credential}\n[EMAIL_1]`);
+  assert.ok(!result.stderr.includes(credential));
+});
+
 test('CLI custom literal redaction remains active with --no-redact and preserves significant spaces', async () => {
   const exactValue = ['PRIVATE', 'PROJECT[42].*'].join('_');
   const spacedValue = '  EXPLICIT SPACES  ';

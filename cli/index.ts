@@ -180,7 +180,8 @@ async function main() {
   }
   const warnings = archive.warnings.length + result.warnings.length;
   process.stderr.write(`ThreadPack: exported ${result.conversation.messages.length} messages; ${result.stats.beforeBytes} → ${result.stats.afterBytes} bytes of message text.\n`);
-  process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails, ${result.stats.customRedacted} custom values.\n`);
+  process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails, ${result.stats.customRedacted} custom replacements.\n`);
+  process.stderr.write(`Redaction: ${result.stats.customRuleMatches} custom rule matches; ${result.stats.redactionReplacements} replacement spans in total (overlapping matches are merged).\n`);
   if (warnings) process.stderr.write(`Review needed: ${warnings} parser/cleaner warnings. Inspect the browser preview before sharing an unfamiliar format.\n`);
 }
 

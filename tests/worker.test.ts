@@ -469,6 +469,48 @@ test('exports distinguish conversations by ordinal without including source titl
   assert.equal(report.filename, 'threadpack-report-2.json');
 });
 
+test('Worker cleaned exports, code ZIPs, bundles and note aliases share URL redaction and match counts', async () => {
+  const engine = new WorkerEngine();
+  const userInfo = 'worker-user:worker-password%40tail';
+  const url = `redis://${userInfo}@[::1]:6379/0`;
+  const archive = await load(engine, JSON.stringify({ messages: [{ role: 'assistant', content: `\`\`\`sh\nredis-cli -u '${url}'\n\`\`\`` }] }));
+  const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true, customSecrets: ['worker-user', 'worker-password'] });
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  assert.equal(summary.stats.customRuleMatches, 2);
+  assert.equal(summary.stats.customRedacted, 0);
+  assert.equal(summary.stats.redactionReplacements, 1);
+  const outputTexts: string[] = [JSON.stringify(summary)];
+  for (const format of ['markdown', 'jsonl', 'report'] as const) {
+    const exported = await engine.handle({ id: next(), type: 'export', ...selection, format });
+    outputTexts.push(textOf(exported.buffer));
+    if (format === 'report') {
+      const report = JSON.parse(textOf(exported.buffer));
+      assert.equal(report.stats.customRuleMatches, 2);
+      assert.equal(report.stats.customRedacted, 0);
+    }
+  }
+  const copied = await engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: 'message-1-code-1' });
+  assert.ok(copied.text.includes('redis://[SECRET_1]@[::1]:6379/0'));
+  outputTexts.push(copied.text);
+  const excerpt = await exportExcerpt(engine, archive, summary, { mode: 'original', query: 'worker-password' });
+  outputTexts.push(textOf(excerpt.buffer));
+  const notes = { goal: url, decisions: '', constraints: '', nextSteps: '' };
+  const handoff = await engine.handle({ id: next(), type: 'handoff', ...selection, notes, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
+  assert.ok(handoff.text.includes('redis://[NOTE_SECRET_1]@[::1]:6379/0'));
+  outputTexts.push(handoff.text);
+  for (const type of ['export-snippets', 'export-bundle'] as const) {
+    const archiveOutput = await engine.handle({ id: next(), type, ...selection, notes });
+    const files = unzipSync(new Uint8Array(archiveOutput.buffer));
+    outputTexts.push(...Object.values(files).map(bytes => new TextDecoder().decode(bytes)));
+  }
+  for (const text of outputTexts) {
+    assert.ok(!text.includes('worker-password'));
+    assert.ok(!text.includes('worker-user'));
+  }
+  await assert.rejects(engine.handle({ id: next(), type: 'copy-snippet', ...selection, snippetId: userInfo }),
+    error => error instanceof Error && !error.message.includes(userInfo));
+});
+
 test('handoff cleans notes with separate aliases and retains pinned full text from the worker', async () => {
   const engine = new WorkerEngine();
   const custom = 'internal-project-label';
