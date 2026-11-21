@@ -129,7 +129,7 @@ Import [`examples/code-snippets.md`](examples/code-snippets.md) in the browser t
 After building, `npm link` makes the `threadpack` command available locally:
 
 ```sh
-threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
+threadpack session.jsonl --out cleaned.md --tool-limit 4000
 threadpack session.jsonl --out cleaned.md --original-out source-copy.jsonl --language zh
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
@@ -160,7 +160,8 @@ The notes file is a UTF-8 JSON object. Any of the four fields may be omitted and
 | `--keep-tool-outputs` | Retain full tool output |
 | `--keep-duplicates` | Retain repeated tool output |
 | `--no-redact` | Disable built-in secret recognition; custom rules stay active |
-| `--redact-emails` | Also replace email addresses |
+| `--redact-emails` | Explicitly enable email redaction; enabled by default |
+| `--no-redact-emails` | Preserve email addresses |
 | `--redact-file FILE` | Redact exact values from a local UTF-8 file, one value per line |
 | `--recent N` | Recent messages included in a handoff, from 0 to 100; defaults to 8 |
 | `--recent-mode MODE` | Select by `source` order (default) or valid timestamps; only for handoffs and reports |
@@ -174,6 +175,10 @@ For values that generic secret detectors cannot recognize, supply `--redact-file
 
 Common-secret cleanup also detects bare URL credentials, including database, Redis, and HTTP(S) URLs with IPv6 hosts or percent-encoded user information. Email cleanup excludes URL authorities and standalone multi-`@` tokens. Reports distinguish `customRuleMatches` (every custom-rule occurrence), `customRedacted` (intervals using a custom alias), and `redactionReplacements` (all merged replacement intervals). A custom substring already covered by a larger secret replacement still counts as a rule match.
 
+Strict email redaction is enabled by default in the core and CLI. Use `--no-redact-emails` to retain addresses in CLI exports; the browser email switch can be turned off explicitly. The balanced browser preset also preserves email addresses. URL user information is scanned independently, and malformed multi-`@` strings are never partially labeled as email aliases.
+
+`--no-redact` disables built-in credential patterns but leaves the default email scanner enabled. To preserve email addresses in CLI output, pass `--no-redact-emails` explicitly.
+
 Timestamp selection chooses the most recently dated messages with valid timestamps. Equal timestamps use later source positions first for selection, then selected messages are rendered in source order. Missing or invalid timestamps are excluded from timestamp selection. The browser handoff preview and CLI JSON report show the recent-context time range, complete-message count, messages outside the recent limit, budget status, budget-omitted IDs, and truncated IDs. Long messages retain an inline excerpt marker.
 
 The CLI defaults to English. `--language zh` translates reader-facing Markdown headings, handoff labels, warnings, and diagnostics. JSON property names, message roles, and machine aliases such as `[SECRET_1]` remain unchanged.
@@ -185,7 +190,7 @@ Custom values and note contents are omitted from diagnostics and reports; report
 ## Privacy and limitations
 
 - **Local processing:** the application has no upload endpoint, analytics, external model calls, or account system. Conversation data remains in tab memory; only the language preference is stored locally.
-- **Rule-based redaction:** recognized provider token formats, common credential assignments, authorization values, private keys, and optional email addresses are replaced with consistent aliases. Detection can miss secrets and can produce false positives. Review exports before sharing.
+- **Rule-based redaction:** recognized provider token formats, common credential assignments, authorization values, private keys, and email addresses are replaced with consistent aliases by default. Detection can miss secrets and can produce false positives. Review exports before sharing.
 - **Custom literal redaction:** explicit values can cover private names and internal identifiers that built-in rules do not recognize. Only exact, case-sensitive matches are replaced; encoded, reformatted, or differently cased variants require separate rules.
 - **Portable exports:** normalized JSONL is an interchange format, not a native Codex or Claude session file. ThreadPack does not repair native compaction or resume an agent directly.
 - **Lossy cleanup:** removed images no longer carry visual information; clipped output and omitted messages may contain relevant details. Keep the source export.

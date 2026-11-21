@@ -129,7 +129,7 @@ node dist-cli/threadpack.mjs examples/demo-session.jsonl --out demo-cleaned.md
 构建后执行 `npm link`，即可在本机使用 `threadpack` 命令：
 
 ```sh
-threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
+threadpack session.jsonl --out cleaned.md --tool-limit 4000
 threadpack session.jsonl --out cleaned.md --original-out source-copy.jsonl --language zh
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
@@ -160,7 +160,8 @@ threadpack --help
 | `--keep-tool-outputs` | 保留完整工具输出 |
 | `--keep-duplicates` | 保留重复工具输出 |
 | `--no-redact` | 关闭内置秘密识别，自定义规则仍生效 |
-| `--redact-emails` | 同时替换邮箱地址 |
+| `--redact-emails` | 显式开启邮箱脱敏；默认开启 |
+| `--no-redact-emails` | 保留邮箱地址 |
 | `--redact-file FILE` | 从本地 UTF-8 文件读取精确脱敏值，每行一个 |
 | `--recent N` | 交接包中的近期消息数，范围 0–100，默认 8 |
 | `--recent-mode MODE` | 按 `source` 源顺序（默认）或有效时间戳选择；适用于交接包和报告 |
@@ -174,6 +175,10 @@ threadpack --help
 
 常见密钥清理也识别裸 URL 中的用户信息，包括数据库、Redis、HTTP(S)、IPv6 主机和百分号编码凭据。邮箱清理会跳过 URL authority 区域与独立的多 `@` 字符串。报告分别提供 `customRuleMatches`（自定义规则命中次数）、`customRedacted`（采用自定义别名的替换区间数）及 `redactionReplacements`（合并后的总替换区间数）。自定义值被更长的密钥规则整体覆盖时，仍会计入命中次数。缺少 URL 或赋值上下文的多 `@` 字符串需用自定义规则完整隐藏。
 
+严格邮箱脱敏默认开启，CLI 可使用 `--no-redact-emails` 保留邮箱，浏览器也可显式关闭邮箱开关。「均衡」预设会保留邮箱。「安全分享」和新导入的默认设置会脱敏邮箱。URL 用户信息始终独立扫描；格式异常的多 `@` 字符串不会被部分替换成邮箱别名。
+
+`--no-redact` 只关闭内置凭据规则，默认开启的邮箱扫描仍会执行。若要在 CLI 产物中保留邮箱，请显式传入 `--no-redact-emails`。
+
 时间戳模式按有效时间戳选择最近消息；时间戳相同时，优先选择源序位置靠后的消息，最终仍按源顺序展示。缺失或无效时间戳不会参与此模式。浏览器交接预览和 CLI JSON 报告会显示近期上下文时间范围、完整消息数、超出近期数量的消息数、预算状态、因预算省略的消息 ID 和被截短的消息 ID。长消息正文保留节选提示。
 
 CLI 默认使用英语。传入 `--language zh` 后，Markdown 标题、交接文字、警告和 CLI 诊断会显示为中文。JSON 字段名、消息角色及 `[SECRET_1]` 等机器别名保持不变。
@@ -185,7 +190,7 @@ CLI 默认使用英语。传入 `--language zh` 后，Markdown 标题、交接�
 ## 隐私与限制
 
 - **本地处理：**没有上传接口、分析埋点、外部模型调用或账号系统。对话仅保存在标签页内存中，只有语言偏好写入本地存储。
-- **规则脱敏：**对部分已知服务商 token、常见凭据赋值、授权值、私钥及可选邮箱地址使用一致别名。可能漏检或误判，分享前应检查导出结果。
+- **规则脱敏：**对部分已知服务商 token、常见凭据赋值、授权值、私钥及默认开启的邮箱脱敏使用一致别名。可能漏检或误判，分享前应检查导出结果。
 - **自定义精确脱敏：**可以补充内置规则无法识别的私有名称或内部编号。仅替换区分大小写的精确匹配；编码、格式或大小写不同的内容需要单独提供规则。
 - **交换格式：**规范化 JSONL 不是 Codex 或 Claude 的原生会话文件，不能直接恢复代理会话；ThreadPack 不修复原生上下文压缩。
 - **有损清理：**移除图片后不再保留其视觉信息；裁剪和省略的内容可能仍有价值，应保留原始导出文件。

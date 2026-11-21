@@ -22,10 +22,7 @@ const archive = parseInput(text, 'demo-session.jsonl');
 const conversation = archive.conversations[0];
 if (!conversation) throw new Error('No conversation was imported.');
 
-const result = cleanConversation(conversation, {
-  ...DEFAULT_OPTIONS,
-  redactEmails: true,
-});
+const result = cleanConversation(conversation, DEFAULT_OPTIONS);
 
 // Review archive.warnings, result.warnings, and result.changes before sharing.
 await writeFile('example-cleaned.md', buildTranscript(result.conversation), {
@@ -106,19 +103,19 @@ cleanConversation(conversation: Conversation, options: CleanOptions): CleanResul
   toolLimit: 4000,
   deduplicate: true,
   redact: true,
-  redactEmails: false,
+  redactEmails: true,
 }
 ```
 
-The function returns a new conversation without mutating the input. Cleanup removes selected inline image payloads, replaces exact repeated tool output, scans retained content for recognized secrets and optional email addresses, and clips long tool output while retaining its beginning and end. Redaction precedes clipping so a clipping boundary cannot remove a recognized credential's prefix and leave its suffix unmasked.
+The function returns a new conversation without mutating the input. Cleanup removes selected inline image payloads, replaces exact repeated tool output, scans retained content for recognized secrets and email addresses by default, and clips long tool output while retaining its beginning and end. Set `redactEmails: false` to explicitly preserve email addresses. URL credentials are scanned independently of email matching. Redaction precedes clipping so a clipping boundary cannot remove a recognized credential's prefix and leave its suffix unmasked.
 
 Aliases are consistent within a cleaning pass, including recognized values in the conversation title and source label. They are not a reversible lookup map. The same value can receive a different alias in a separate call.
 
 With `redact: true`, bare URLs with a `scheme://userinfo@host` authority have their complete user information replaced by a secret alias. The last literal `@` in the authority delimits the host, covering passwords with literal `@` and percent-encoded user information. Protocol, host, IPv6 brackets, port, path, query, and fragment retain their source spelling unless another rule matches them. Existing credential-assignment rules can still replace a whole assigned URL.
 
-Email matching excludes URL authorities even when `redact` is off. Standalone multi-`@` strings and numeric-only domains are excluded from email matches. Such unrecognized strings require a credential context or an exact custom rule to be redacted. Email redaction remains opt-in.
+Email matching excludes URL authorities even when `redact` is off. Standalone multi-`@` strings and numeric-only domains are excluded from email matches. Such unrecognized strings require a credential context or an exact custom rule to be redacted. Email redaction is enabled by default.
 
-`customSecrets` supplies additional literal, case-sensitive values. They are replaced with consistent `[CUSTOM_1]` aliases even when `redact` and `redactEmails` are false. These values are not regular expressions; meaningful leading and trailing whitespace is preserved. Explicit values are useful for private names and internal identifiers that generic credential rules do not recognize.
+`customSecrets` supplies additional literal, case-sensitive values. They are replaced with consistent `[CUSTOM_1]` aliases even when `redact` and `redactEmails` are false. These values are not regular expressions; meaningful leading and trailing whitespace is preserved. Explicit values are useful for private names and internal identifiers that generic credential rules do not recognize. Email addresses are redacted by default. Use `redactEmails: false` only when the caller explicitly intends to preserve them.
 
 ```ts
 interface Change {
