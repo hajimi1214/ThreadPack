@@ -1,4 +1,4 @@
-import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, parseInput, validateCustomSecrets } from '../core';
+import { buildHandoffWithSummary, buildJsonl, buildTranscript, cleanConversation, parseInput, validateCustomSecrets } from '../core';
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
 import { extractCodeSnippets } from '../core/snippets';
 import type { CodeSnippet } from '../core/snippets';
@@ -402,14 +402,20 @@ export class WorkerEngine {
     return { buffer: encoder.encode(text).buffer as ArrayBuffer, filename, mimeType };
   }
 
-  private handoff(cache: CleanCache, request: HandoffRequest): { text: string } {
+  private handoff(cache: CleanCache, request: HandoffRequest): { text: string; summary: ReturnType<typeof buildHandoffWithSummary>['summary'] } {
     const keys = ['goal', 'decisions', 'constraints', 'nextSteps'] as const;
     if (!request.notes || keys.some(key => typeof request.notes[key] !== 'string' || request.notes[key].length > 12000) || !Array.isArray(request.pinnedIds) || request.pinnedIds.some(id => typeof id !== 'string')) {
       throw new Error('Valid handoff notes and pinned messages are required.');
     }
     const cleanedNotes = cleanConversation({ id: 'notes', title: '', source: 'notes', messages: keys.map(key => ({ id: key, role: 'user' as const, content: request.notes[key] })) }, { ...cache.options, trimToolOutputs: false, deduplicate: false });
     const notes = Object.fromEntries(cleanedNotes.conversation.messages.map(message => [message.id, message.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]')])) as unknown as HandoffRequest['notes'];
-    return { text: buildHandoff(cache.result.conversation, { ...notes, pinnedIds: request.pinnedIds, recentCount: request.recentCount, maxCharacters: request.maxCharacters }) };
+    return buildHandoffWithSummary(cache.result.conversation, {
+      ...notes,
+      pinnedIds: request.pinnedIds,
+      recentCount: request.recentCount,
+      recentMode: request.recentMode,
+      maxCharacters: request.maxCharacters,
+    });
   }
 
   private exportBundle(archive: ParsedArchive, cache: CleanCache, request: ExportBundleRequest): ContextBundleResult {
@@ -424,12 +430,14 @@ export class WorkerEngine {
     }
     const recentCount = request.recentCount ?? 0;
     if (!Number.isSafeInteger(recentCount) || recentCount < 0 || recentCount > 1000) throw new Error('Recent context must be between 0 and 1,000 messages.');
+    const recentMode = request.recentMode ?? 'source';
+    if (recentMode !== 'source' && recentMode !== 'timestamp') throw new Error('Recent message selection must be source or timestamp.');
     const maxCharacters = request.maxCharacters ?? 16000;
     if (!Number.isFinite(maxCharacters) || maxCharacters < 1000 || maxCharacters > 10_000_000) throw new Error('Handoff budget must be between 1,000 and 10,000,000 characters.');
     const hasNotes = keys.some(key => notes[key].trim().length > 0);
     const handoff = hasNotes ? this.handoff(cache, {
       id: request.id, type: 'handoff', archiveId: request.archiveId, conversationId: request.conversationId,
-      revision: request.revision, notes, pinnedIds, recentCount, maxCharacters,
+      revision: request.revision, notes, pinnedIds, recentCount, recentMode, maxCharacters,
     }).text : undefined;
     const conversation = cache.result.conversation;
     const snippets = cache.snippets ??= extractCodeSnippets(conversation);

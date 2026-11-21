@@ -68,5 +68,30 @@ export interface HandoffOptions {
   nextSteps: string;
   pinnedIds: string[];
   recentCount: number;
+  recentMode?: RecentSelectionMode;
   maxCharacters?: number;
+}
+
+export type RecentSelectionMode = 'source' | 'timestamp';
+
+export interface HandoffSummary {
+  selectionMode: RecentSelectionMode;
+  maxCharacters: number;
+  budgetExceeded: boolean;
+  requestedRecentCount: number;
+  eligibleMessageCount: number;
+  selectedRecentMessageCount: number;
+  completeMessageCount: number;
+  omittedMessageCount: number;
+  omittedMessageIds: string[];
+  truncatedMessageCount: number;
+  truncatedMessageIds: string[];
+  notSelectedMessageCount: number;
+  missingTimestampCount: number;
+  timeRange: { start: string; end: string } | null;
+}
+
+export interface HandoffBuildResult {
+  text: string;
+  summary: HandoffSummary;
 }

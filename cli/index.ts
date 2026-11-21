@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import {
   parseInput, cleanConversation, DEFAULT_OPTIONS, validateCustomSecrets,
-  buildTranscript, buildJsonl, buildHandoff,
+  buildTranscript, buildJsonl, buildHandoffWithSummary,
 } from '../src/core/index';
 
 declare const __THREADPACK_VERSION__: string;
@@ -24,6 +24,7 @@ Options:
   --conversation <N>                      Select a conversation, starting at 1
   --tool-limit <N>                        Characters per tool output (500–100000)
   --recent <N>                            Recent messages in a handoff (0–100, default: 8)
+  --recent-mode <source|timestamp>        Select recent messages by source order or valid timestamps (default: source)
   --notes-file <file>                    JSON handoff notes (each field up to 12000 characters)
   --pin <N>                              Pin message number N in the selected conversation (repeatable)
   --keep-images                          Keep inline image payloads
@@ -135,6 +136,7 @@ async function main() {
       options: {
         out: { type: 'string' }, format: { type: 'string' },
         conversation: { type: 'string' }, 'tool-limit': { type: 'string' }, recent: { type: 'string' },
+        'recent-mode': { type: 'string' },
         'notes-file': { type: 'string' }, pin: { type: 'string', multiple: true },
         'keep-images': { type: 'boolean' }, 'keep-tool-outputs': { type: 'boolean' },
         'keep-duplicates': { type: 'boolean' }, 'no-redact': { type: 'boolean' },
@@ -152,13 +154,18 @@ async function main() {
   }
   const format = typeof values.format === 'string' ? values.format : 'markdown';
   if (!['markdown', 'jsonl', 'handoff', 'report'].includes(format)) throw new CliError('Use --format markdown, jsonl, handoff, or report.');
+  const includesHandoff = format === 'handoff' || format === 'report';
   const pinValues = values.pin as string[] | undefined;
-  if ((values['notes-file'] !== undefined || pinValues?.length) && format !== 'handoff') {
-    throw new CliError('--notes-file and --pin require --format handoff.');
+  if ((values['notes-file'] !== undefined || pinValues?.length || values['recent-mode'] !== undefined) && !includesHandoff) {
+    throw new CliError('--notes-file, --pin, and --recent-mode require --format handoff or report.');
   }
   const selected = integer(values.conversation as string | undefined, 1, 1, 100000, '--conversation');
   const toolLimit = integer(values['tool-limit'] as string | undefined, DEFAULT_OPTIONS.toolLimit, 500, 100000, '--tool-limit');
   const recent = integer(values.recent as string | undefined, 8, 0, 100, '--recent');
+  const recentMode = values['recent-mode'] === undefined ? 'source' : values['recent-mode'];
+  if (recentMode !== 'source' && recentMode !== 'timestamp') {
+    throw new CliError('--recent-mode must be source or timestamp.');
+  }
   const input = args.positionals[0];
   const output = resolve(values.out);
   const redactionFile = values['redact-file'];
@@ -225,7 +232,7 @@ async function main() {
     const message = result.conversation.messages.find((item) => item.id === id);
     return !message || message.content.startsWith(duplicateMarker);
   }));
-  if (format === 'handoff' && restoredPinIds.size > 0) {
+  if (includesHandoff && restoredPinIds.size > 0) {
     // Restore explicitly pinned content when cleanup replaces it with a duplicate marker.
     const fullClean = cleanConversation(conversation, { ...cleanOptions, deduplicate: false }).conversation;
     const retainedMessages = new Map(result.conversation.messages
@@ -242,7 +249,7 @@ async function main() {
     };
   }
   let cleanNotes = noteValues;
-  if (format === 'handoff') {
+  if (includesHandoff) {
     const notesConversation = cleanConversation({
       id: 'cli-notes', title: '', source: 'notes',
       messages: NOTE_KEYS.map((key) => ({ id: key, role: 'user' as const, content: noteValues[key] })),
@@ -252,17 +259,19 @@ async function main() {
       message.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]'),
     ])) as CliNotes;
   }
+  const handoff = includesHandoff ? buildHandoffWithSummary(handoffConversation, {
+    ...cleanNotes, pinnedIds, recentCount: recent, recentMode,
+  }) : undefined;
   let rendered: string;
   if (format === 'jsonl') rendered = buildJsonl(result.conversation);
-  else if (format === 'handoff') rendered = buildHandoff(handoffConversation, {
-    ...cleanNotes, pinnedIds, recentCount: recent,
-  });
+  else if (format === 'handoff') rendered = handoff!.text;
   else if (format === 'report') rendered = JSON.stringify({
     tool: 'ThreadPack', version: __THREADPACK_VERSION__, format: archive.format,
     conversation: selected, conversationCount: archive.conversations.length,
     messages: result.conversation.messages.length, stats: result.stats,
     warningCount: archive.warnings.length + result.warnings.length,
     warnings: [...archive.warnings, ...result.warnings],
+    handoff: { ...handoff!.summary },
     note: 'Statistics describe normalized message text. No transcript or detected secret values are included.',
   }, null, 2);
   else rendered = buildTranscript(result.conversation);

@@ -1,4 +1,4 @@
-import type { Change, CleanOptions, CleanStats, Message, Role } from '../core';
+import type { Change, CleanOptions, CleanStats, HandoffSummary, Message, RecentSelectionMode, Role } from '../core';
 
 export interface ConversationInfo { id: string; title: string; source: string; messageCount: number }
 export interface ParseInfo {
@@ -44,7 +44,7 @@ export interface CopyMessageResult { text: string }
 export interface MessageReviewExcerpt { text: string; shortened: boolean; imageHidden: boolean }
 export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
 export interface HandoffNotes { goal: string; decisions: string; constraints: string; nextSteps: string }
-export interface HandoffResult { text: string }
+export interface HandoffResult { text: string; summary: HandoffSummary }
 export interface ImportProgress { loaded: number; total: number }
 interface RequestBase { id: number }
 interface Selection { archiveId: number; conversationId: string }
@@ -71,13 +71,14 @@ export interface CopySnippetRequest extends RequestBase, RevisionSelection { typ
 export interface ExportSnippetRequest extends RequestBase, RevisionSelection { type: 'export-snippet'; snippetId: string }
 export interface HandoffRequest extends RequestBase, RevisionSelection {
   type: 'handoff'; notes: HandoffNotes; pinnedIds: string[];
-  recentCount: number; maxCharacters: number;
+  recentCount: number; recentMode?: RecentSelectionMode; maxCharacters: number;
 }
 export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   type: 'export-bundle';
   notes?: HandoffNotes;
   pinnedIds?: string[];
   recentCount?: number;
+  recentMode?: RecentSelectionMode;
   maxCharacters?: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
