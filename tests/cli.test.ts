@@ -83,6 +83,126 @@ test('CLI report contains aggregate statistics and no message content', async ()
   assert.ok(!raw.includes('acceptance criteria'));
 });
 
+test('CLI handoff includes redacted notes and selected messages with independent NOTE aliases', async () => {
+  const repeatedSecret = ['sk-', 'NotesOnlySecret', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('');
+  const customValue = 'NOTES_PRIVATE_LITERAL_731';
+  const notesPath = join(folder, 'handoff-notes.json');
+  const rulesPath = join(folder, 'handoff-rules.txt');
+  const output = join(folder, 'notes-handoff.md');
+  const input = JSON.stringify({ messages: [
+    { role: 'user', content: 'first source message' },
+    { role: 'assistant', content: 'second source message' },
+    { role: 'user', content: 'third source message' },
+  ] });
+  await writeFile(notesPath, JSON.stringify({
+    goal: `Use ${repeatedSecret} and contact owner@example.test.`,
+    decisions: `Reuse ${repeatedSecret}; remove ${customValue}.`,
+    constraints: 'Keep the private notes local.',
+    nextSteps: 'Continue with the selected context.',
+  }));
+  await writeFile(rulesPath, customValue);
+  const result = run(['-', '--out', output, '--format', 'handoff', '--notes-file', notesPath,
+    '--redact-file', rulesPath, '--redact-emails', '--recent', '0', '--pin', '2', '--pin', '3'], input);
+  assert.equal(result.status, 0, result.stderr);
+  const handoff = await readFile(output, 'utf8');
+  assert.match(handoff, /Use \[NOTE_SECRET_1\] and contact \[NOTE_EMAIL_1\]/);
+  assert.match(handoff, /Reuse \[NOTE_SECRET_1\]; remove \[NOTE_CUSTOM_1\]/);
+  assert.ok(handoff.includes('Keep the private notes local.'));
+  assert.ok(handoff.includes('Continue with the selected context.'));
+  assert.match(handoff, /### ASSISTANT · message-2/);
+  assert.match(handoff, /### USER · message-3/);
+  assert.ok(!handoff.includes(repeatedSecret));
+  assert.ok(!handoff.includes(customValue));
+  assert.ok(!handoff.includes('owner@example.test'));
+  assert.ok(!result.stderr.includes(repeatedSecret));
+  assert.ok(!result.stderr.includes(customValue));
+  assert.ok(!result.stderr.includes('owner@example.test'));
+});
+
+test('CLI rejects malformed notes without exposing their contents', async () => {
+  const privateText = 'PRIVATE_NOTE_CONTENT_NOT_FOR_DIAGNOSTICS';
+  const cases: [string, string | Buffer][] = [
+    ['invalid-json', `{"goal":"${privateText}"`],
+    ['invalid-shape', JSON.stringify({ goal: privateText, decisions: 42 })],
+    ['null-field', JSON.stringify({ goal: null, decisions: privateText })],
+    ['long-field', JSON.stringify({ goal: 'N'.repeat(12001) })],
+    ['unknown-field', JSON.stringify({ goal: privateText, surprise: 'value' })],
+    ['invalid-utf8', Buffer.from([0xff, 0xfe, 0xff])],
+    ['too-large', Buffer.alloc(256 * 1024 + 1, 'X')],
+  ];
+  for (const [name, content] of cases) {
+    const notes = join(folder, `${name}-notes.json`);
+    const output = join(folder, `${name}-notes-rejected.md`);
+    await writeFile(notes, content);
+    const result = run(['-', '--out', output, '--format', 'handoff', '--notes-file', notes], transcript);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.ok(!result.stderr.includes(privateText));
+    assert.ok(!result.stderr.includes(notes));
+    await assert.rejects(readFile(output), { code: 'ENOENT' });
+  }
+});
+
+test('CLI validates repeated handoff message numbers against the selected conversation', async () => {
+  const output = join(folder, 'invalid-pins.md');
+  for (const value of ['0', '4', 'not-a-number', '999999999999999999999999999999']) {
+    const result = run(['-', '--out', output, '--format', 'handoff', '--pin', value], JSON.stringify({
+      messages: [{ role: 'user', content: 'one' }, { role: 'assistant', content: 'two' }],
+    }));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--pin/);
+    await assert.rejects(readFile(output), { code: 'ENOENT' });
+  }
+});
+
+test('CLI reports warning details in JSON and stderr while retaining warningCount', async () => {
+  const input = join(folder, 'warning-details.jsonl');
+  const output = join(folder, 'warning-details.json');
+  const malformedLine = '{"role":"user","content":"valid"}\nnot-json\n';
+  await writeFile(input, malformedLine);
+  const result = run([input, '--out', output, '--format', 'report']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(await readFile(output, 'utf8'));
+  assert.equal(report.warningCount, report.warnings.length);
+  assert.ok(report.warningCount > 0);
+  assert.ok(report.warnings.some((warning: string) => warning.includes('invalid JSONL line')));
+  assert.ok(result.stderr.includes('Warning:'));
+  assert.ok(result.stderr.includes('invalid JSONL line'));
+});
+
+test('CLI keeps notes, source, redaction, and output files separate across hard-linked aliases', async () => {
+  const input = join(folder, 'notes-path-input.json');
+  const inputAlias = join(folder, 'notes-path-input-alias.json');
+  const notes = join(folder, 'notes-path-notes.json');
+  const rules = join(folder, 'notes-path-rules.txt');
+  const output = join(folder, 'notes-path-output.md');
+  await writeFile(input, transcript);
+  await link(input, inputAlias);
+  await writeFile(notes, JSON.stringify({ goal: 'A local goal.' }));
+  await writeFile(rules, 'PRIVATE_RULE_VALUE');
+  for (const source of [input, inputAlias]) {
+    const result = run([source, '--out', output, '--format', 'handoff', '--notes-file', input]);
+    assert.equal(result.status, 1);
+    assert.ok(!result.stderr.includes(input));
+  }
+  const outputAlias = join(folder, 'notes-path-output-alias.md');
+  await link(notes, outputAlias);
+  const outputCollision = run([input, '--out', outputAlias, '--force', '--format', 'handoff', '--notes-file', notes]);
+  assert.equal(outputCollision.status, 1);
+  assert.equal(await readFile(notes, 'utf8'), JSON.stringify({ goal: 'A local goal.' }));
+  const rulesCollision = run([input, '--out', output, '--redact-file', rules, '--notes-file', rules, '--format', 'handoff']);
+  assert.equal(rulesCollision.status, 1);
+  assert.equal(await readFile(rules, 'utf8'), 'PRIVATE_RULE_VALUE');
+});
+
+test('CLI help documents the recent-message default', () => {
+  const result = run(['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /--recent <N>.*default: 8/);
+  assert.match(result.stdout, /--notes-file <file>/);
+  assert.match(result.stdout, /--pin <N>.*repeatable/);
+});
+
 test('CLI report uses a fixed schema format and never echoes a private source label', async () => {
   const sourceToken = ['ghp', 'S'.repeat(36)].join('_');
   const privateSource = `PRIVATE_SOURCE_LABEL:${sourceToken}`;
