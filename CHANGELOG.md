@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.0 — Markdown reading view
+
+- Add optional GFM Markdown rendering for conversation messages and handoff previews.
+- Keep raw HTML escaped, replace remote images with text labels, and preserve cleaned source text for copy and export.
+- Integrate `react-markdown` and `remark-gfm` with offline license notices.
+
 ## 1.2.0 — 2026-11-19
 
 - Open imported files in a compact workbench, keep export actions visible, and collapse mobile cleanup settings until needed.

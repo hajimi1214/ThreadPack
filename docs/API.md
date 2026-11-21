@@ -178,6 +178,8 @@ The browser adds search and allowlisted language filters over cleaned snippets, 
 
 The export dialog also offers a portable context bundle. The Worker creates a ZIP from the cleaned conversation containing `README.md`, `transcript.md`, `messages.jsonl`, `cleanup-report.json`, cleaned `code/` files, and `handoff.md` only when submitted notes contain nonblank text. The bundle uses allowlisted metadata and never includes original-view content or custom redaction values.
 
+The browser also provides an optional Markdown reading mode using `react-markdown` and `remark-gfm`. Raw HTML is not enabled, images render as text placeholders, and code is rendered as React text. This mode changes only presentation; message copy and exports continue using the full cleaned source text.
+
 ```ts
 buildTranscript(conversation: Conversation): string
 buildJsonl(conversation: Conversation): string

@@ -109,3 +109,10 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - `npm run test:e2e -- --workers=2`: 66 browser tests cover direct ZIP import, five interface languages, mobile layouts, offline behavior, and existing workflows.
 - The PWA manifest includes desktop display fallbacks, categories, and shortcuts. Media-query listeners support both modern and legacy browser APIs.
 - Production web and CLI builds, package dry-run, browser checks, and production dependency audit pass.
+
+## Version 1.7.0: Markdown reading view
+
+- `npm test`: 130 tests cover GFM rendering, escaped raw HTML, omitted remote images, safe link schemes, and runtime license notices.
+- `npm run test:e2e -- --workers=2`: 68 browser tests cover Text/Markdown switching in messages and handoff previews, source-preserving copy, ZIP import, offline mode, five languages, and responsive layouts.
+- `npm run build`, `npm audit --omit=dev`, and `npm pack --dry-run` pass. The single-file HTML is 783,342 bytes (233,531 gzip bytes at maximum compression).
+- Markdown reading changes presentation only. Imported HTML remains escaped, external images are replaced by text, and copied or exported messages retain their cleaned source.
