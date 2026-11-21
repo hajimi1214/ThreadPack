@@ -219,6 +219,28 @@ async function main() {
     }
     return conversation.messages[number - 1]!.id;
   }))];
+  let handoffConversation = result.conversation;
+  const duplicateMarker = '[ThreadPack: duplicate tool output omitted; identical to message ';
+  const restoredPinIds = new Set(pinnedIds.filter((id) => {
+    const message = result.conversation.messages.find((item) => item.id === id);
+    return !message || message.content.startsWith(duplicateMarker);
+  }));
+  if (format === 'handoff' && restoredPinIds.size > 0) {
+    // Restore explicitly pinned content when cleanup replaces it with a duplicate marker.
+    const fullClean = cleanConversation(conversation, { ...cleanOptions, deduplicate: false }).conversation;
+    const retainedMessages = new Map(result.conversation.messages
+      .filter((message) => !restoredPinIds.has(message.id)).map((message) => [message.id, message]));
+    const allCleanMessages = new Map(fullClean.messages.map((message) => [message.id, message]));
+    const pinnedSet = new Set(pinnedIds);
+    handoffConversation = {
+      ...result.conversation,
+      messages: conversation.messages.flatMap((message) => {
+        if (!retainedMessages.has(message.id) && !pinnedSet.has(message.id)) return [];
+        const cleaned = retainedMessages.get(message.id) ?? allCleanMessages.get(message.id);
+        return cleaned ? [cleaned] : [];
+      }),
+    };
+  }
   let cleanNotes = noteValues;
   if (format === 'handoff') {
     const notesConversation = cleanConversation({
@@ -232,7 +254,7 @@ async function main() {
   }
   let rendered: string;
   if (format === 'jsonl') rendered = buildJsonl(result.conversation);
-  else if (format === 'handoff') rendered = buildHandoff(result.conversation, {
+  else if (format === 'handoff') rendered = buildHandoff(handoffConversation, {
     ...cleanNotes, pinnedIds, recentCount: recent,
   });
   else if (format === 'report') rendered = JSON.stringify({

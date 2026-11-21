@@ -155,6 +155,20 @@ test('CLI validates repeated handoff message numbers against the selected conver
   }
 });
 
+test('CLI keeps a pinned duplicate tool message in the handoff', async () => {
+  const output = join(folder, 'pinned-duplicate.md');
+  const input = JSON.stringify({ messages: [
+    { role: 'tool', content: 'shared tool output' },
+    { role: 'tool', content: 'shared tool output' },
+  ] });
+  const result = run(['-', '--out', output, '--format', 'handoff', '--recent', '0', '--pin', '2'], input);
+  assert.equal(result.status, 0, result.stderr);
+  const handoff = await readFile(output, 'utf8');
+  assert.match(handoff, /### TOOL · message-2/);
+  assert.ok(handoff.includes('shared tool output'));
+  assert.ok(!handoff.includes('duplicate tool output omitted'));
+});
+
 test('CLI reports warning details in JSON and stderr while retaining warningCount', async () => {
   const input = join(folder, 'warning-details.jsonl');
   const output = join(folder, 'warning-details.json');
