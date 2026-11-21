@@ -24,7 +24,7 @@ before(async () => {
   });
 });
 after(async () => { await rm(folder, { recursive: true, force: true }); });
-const run = (args: string[], stdin?: string) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', input: stdin });
+const run = (args: string[], stdin?: string | Buffer) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', input: stdin });
 
 test('CLI exports redacted Markdown while keeping input intact and diagnostics content-free', async () => {
   const input = join(folder, 'conversation.json');
@@ -38,6 +38,108 @@ test('CLI exports redacted Markdown while keeping input intact and diagnostics c
   assert.ok(!exported.includes(fakeSecret));
   assert.ok(!result.stderr.includes(fakeSecret));
   assert.equal(await readFile(input, 'utf8'), transcript);
+});
+
+test('CLI saves a byte-for-byte original copy beside the cleaned export without changing input', async () => {
+  const input = join(folder, 'original-preservation.json');
+  const cleaned = join(folder, 'original-preservation-cleaned.md');
+  const originalCopy = join(folder, 'original-preservation-source.bin');
+  const originalBytes = Buffer.from('\uFEFF{\r\n  "messages": [\r\n    {"role":"user","content":"Keep this source byte-for-byte."}\r\n  ]\r\n}\r\n', 'utf8');
+  await writeFile(input, originalBytes);
+  const result = run([input, '--out', cleaned, '--original-out', originalCopy]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(await readFile(originalCopy), originalBytes);
+  assert.deepEqual(await readFile(input), originalBytes);
+  const exportText = await readFile(cleaned, 'utf8');
+  assert.ok(exportText.includes('Normalized transcript'));
+  assert.ok(exportText.includes('Keep this source byte-for-byte.'));
+});
+
+test('CLI preserves stdin bytes and keeps JSONL machine fields unchanged with Chinese diagnostics', async () => {
+  const cleaned = join(folder, 'stdin-chinese.jsonl');
+  const originalCopy = join(folder, 'stdin-original.bin');
+  const sourceBytes = Buffer.from(`\uFEFF${JSON.stringify({ messages: [{ role: 'user', content: fakeSecret }] })}\r\n`, 'utf8');
+  const result = run(['-', '--out', cleaned, '--original-out', originalCopy, '--format', 'jsonl', '--language', 'zh'], sourceBytes);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(await readFile(originalCopy), sourceBytes);
+  assert.match(result.stderr, /已导出/);
+  const [line] = (await readFile(cleaned, 'utf8')).trim().split('\n');
+  const message = JSON.parse(line!);
+  assert.equal(message.role, 'user');
+  assert.equal(message.content, '[SECRET_1]');
+});
+
+test('CLI protects both output destinations and all source aliases for original copies', async () => {
+  const input = join(folder, 'original-alias-input.json');
+  const alias = join(folder, 'original-alias-input-hardlink.json');
+  const cleaned = join(folder, 'original-alias-cleaned.md');
+  const originalCopy = join(folder, 'original-alias-copy.json');
+  const notes = join(folder, 'original-alias-notes.json');
+  const rules = join(folder, 'original-alias-rules.txt');
+  await writeFile(input, transcript);
+  await link(input, alias);
+  await writeFile(notes, JSON.stringify({ goal: 'Private handoff goal.' }));
+  await writeFile(rules, 'PRIVATE_REDACTION_RULE');
+  for (const source of [input, alias]) {
+    const result = run([source, '--out', cleaned, '--original-out', input]);
+    assert.equal(result.status, 1);
+    assert.ok(!result.stderr.includes(input));
+  }
+  const sameDestination = run([input, '--out', originalCopy, '--original-out', originalCopy]);
+  assert.equal(sameDestination.status, 1);
+  const notesCollision = run([input, '--out', cleaned, '--format', 'handoff', '--notes-file', notes, '--original-out', notes]);
+  assert.equal(notesCollision.status, 1);
+  const rulesCollision = run([input, '--out', cleaned, '--redact-file', rules, '--original-out', rules]);
+  assert.equal(rulesCollision.status, 1);
+  assert.equal(await readFile(notes, 'utf8'), JSON.stringify({ goal: 'Private handoff goal.' }));
+  assert.equal(await readFile(rules, 'utf8'), 'PRIVATE_REDACTION_RULE');
+  await writeFile(originalCopy, 'preserve this existing copy');
+  const blocked = run([input, '--out', cleaned, '--original-out', originalCopy]);
+  assert.equal(blocked.status, 1);
+  await assert.rejects(readFile(cleaned), { code: 'ENOENT' });
+  assert.equal(await readFile(originalCopy, 'utf8'), 'preserve this existing copy');
+  const forced = run([input, '--out', cleaned, '--original-out', originalCopy, '--force']);
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.equal(await readFile(originalCopy, 'utf8'), transcript);
+  assert.equal(await readFile(input, 'utf8'), transcript);
+});
+
+test('CLI translates Markdown headings, warnings, reports, and errors without translating JSON schema keys', async () => {
+  const input = join(folder, 'localized-warning.jsonl');
+  const output = join(folder, 'localized-report.json');
+  await writeFile(input, '{"role":"user","content":"Retained source text."}\n{"type":"unsupported"}\nmalformed-line\n');
+  const result = run([input, '--out', output, '--format', 'report', '--language', 'zh']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /已导出/);
+  assert.match(result.stderr, /警告：/);
+  assert.match(result.stderr, /无效 JSONL/);
+  const report = JSON.parse(await readFile(output, 'utf8'));
+  assert.ok(report.warnings.some((warning: string) => warning.includes('无效 JSONL')));
+  assert.ok(report.warnings.some((warning: string) => warning.includes('脱敏使用本地模式')));
+  assert.ok(Object.hasOwn(report, 'warningCount'));
+  assert.ok(Object.hasOwn(report, 'stats'));
+  assert.equal(report.note, '统计描述标准化后的消息文本。不包含对话正文或检测到的秘密值。');
+  assert.ok(!JSON.stringify(report).includes('Retained source text.'));
+
+  const markdownPath = join(folder, 'localized-transcript.md');
+  const markdown = run(['-', '--out', markdownPath, '--format', 'markdown', '--language', 'zh'], transcript);
+  assert.equal(markdown.status, 0, markdown.stderr);
+  const markdownText = await readFile(markdownPath, 'utf8');
+  assert.ok(markdownText.includes('标准化对话'));
+  assert.ok(markdownText.includes('由 ThreadPack 在本地创建'));
+
+  const error = run(['-', '--out', join(folder, 'localized-invalid-pin.md'), '--format', 'handoff', '--pin', '0', '--language', 'zh'], transcript);
+  assert.equal(error.status, 1);
+  assert.match(error.stderr, /消息序号必须在 1 到/);
+
+  const handoffPath = join(folder, 'localized-handoff.md');
+  const handoffResult = run(['-', '--out', handoffPath, '--format', 'handoff', '--recent', '1', '--language', 'zh'], transcript);
+  assert.equal(handoffResult.status, 0, handoffResult.stderr);
+  const handoff = await readFile(handoffPath, 'utf8');
+  assert.match(handoff, /^# 交接包:/);
+  assert.ok(handoff.includes('## 目标'));
+  assert.ok(handoff.includes('[SECRET_1]'));
+  assert.ok(!handoff.includes(fakeSecret));
 });
 
 test('CLI refuses overwriting output unless force is explicit', async () => {
@@ -272,6 +374,14 @@ test('CLI help documents the recent-message default', () => {
   assert.match(result.stdout, /--recent-mode <source\|timestamp>/);
   assert.match(result.stdout, /--notes-file <file>/);
   assert.match(result.stdout, /--pin <N>.*repeatable/);
+  assert.match(result.stdout, /--original-out <file>/);
+  assert.match(result.stdout, /--language <en\|zh>/);
+  const chinese = run(['--help', '--language', 'zh']);
+  assert.equal(chinese.status, 0);
+  assert.match(chinese.stdout, /保存未经修改的原始输入副本/);
+  const invalidChinese = run(['-', '--out', join(folder, 'invalid-chinese.md'), '--language', 'zh', '--unknown'], transcript);
+  assert.equal(invalidChinese.status, 1);
+  assert.match(invalidChinese.stderr, /命令行选项无效/);
 });
 
 test('CLI report uses a fixed schema format and never echoes a private source label', async () => {
