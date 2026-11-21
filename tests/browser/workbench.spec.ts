@@ -38,6 +38,22 @@ test('imports a supported conversation directly from a ZIP export', async ({ pag
   await expect(page.locator('.message-content').first()).toContainText('DIRECT_ZIP_IMPORT');
 });
 
+test('mobile handoff shows its preview and actions without opening the keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await upload(page, 'handoff.json', { messages: [{ role: 'user', content: 'Mobile handoff context.' }] });
+  await page.getByRole('button', { name: 'Handoff builder', exact: true }).click();
+  await expect(page.locator('.handoff-document')).toContainText('Mobile handoff context.');
+  await expect(page.getByRole('button', { name: 'Download handoff', exact: true })).toBeInViewport();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const preview = page.locator('.handoff-document');
+  const previousPreview = await preview.textContent();
+  await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Keep the current preview visible.');
+  expect(await preview.textContent()).toBe(previousPreview);
+  await expect(preview).toContainText('Keep the current preview visible.');
+});
+
 async function switchRecipe(page: Page, title: string, checked: boolean) {
   const control = page.getByRole('switch', { name: title, exact: true });
   await control.click();

@@ -50,6 +50,7 @@ const zh: Record<TranslationKey, string> = {
   draftHint: '切换会话时会保留各自的笔记、固定消息与交接设置。清空、更换档案或关闭页面后，这些内存草稿会被移除。',
   handoffPreview: '交接包预览', copy: '复制文本', copied: '已复制', downloadHandoff: '下载交接包',
   handoffNote: "包含笔记、固定消息和最近的对话。",
+  handoffUpdating: "正在更新预览…", handoffFailed: "预览更新失败，仍显示上一个版本。",
   exportTitle: "选择导出格式。", exportSub: "导出当前对话，并应用清理设置。",
   markdown: 'Markdown 对话', markdownHint: "适合阅读、归档或交给其他会话",
   jsonl: '标准化 JSONL', jsonlHint: '每行一条消息，便于其他工具处理',

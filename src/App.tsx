@@ -91,6 +91,7 @@ export default function App() {
   const [handoffCopyState, setHandoffCopyState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [handoffText, setHandoffText] = useState('');
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffError, setHandoffError] = useState(false);
   const [messageReview, setMessageReview] = useState<{ messageId: string; result: CompareMessageResult } | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -190,12 +191,12 @@ export default function App() {
   useLayoutEffect(() => {
     if (!archive) return;
     window.scrollTo({ top: 0 });
-    if (view === 'handoff') goalInput.current?.focus({ preventScroll: true });
+    if (view === 'handoff') { if (!isCompact) goalInput.current?.focus({ preventScroll: true }); }
     else {
       if (messageList.current) messageList.current.scrollTop = readingPositions.current.get(readingPositionKey) ?? 0;
       previewPanel.current?.focus({ preventScroll: true });
     }
-  }, [view, archive, selected]);
+  }, [view, archive, selected, isCompact]);
   useEffect(() => { if (!isCompact) setSettingsOpen(false); }, [isCompact]);
 
   useEffect(() => {
@@ -227,15 +228,17 @@ export default function App() {
   }, [preview, archive, selected, readingPositionKey]);
 
   useEffect(() => {
-    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffBusy(false); return; }
+    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffBusy(false); setHandoffError(false); return; }
     let active = true;
-    setHandoffText('');
     setHandoffBusy(true);
-    request<HandoffResult>({ type: 'handoff', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-      notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget }).then(data => {
-      if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffBusy(false); }
-    }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setHandoffText(''); setHandoffBusy(false); } });
-    return () => { active = false; };
+    setHandoffError(false);
+    const timer = setTimeout(() => {
+      request<HandoffResult>({ type: 'handoff', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
+        notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget }).then(data => {
+        if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffBusy(false); setHandoffError(false); }
+      }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setHandoffBusy(false); setHandoffError(true); } });
+    }, 120);
+    return () => { active = false; clearTimeout(timer); };
   }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, budget, request]);
 
   async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
@@ -452,7 +455,7 @@ export default function App() {
         </aside>
   );
 
-  return <div className={`app-shell ${archive ? 'has-archive' : ''}`} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
+  return <div className={`app-shell ${archive ? 'has-archive' : ''} ${view === 'handoff' ? 'handoff-view' : ''}`} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
     <header className="site-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); navigate('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><Package size={21} strokeWidth={1.7} /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
       <nav className="main-nav" aria-label={t.workbench}>
@@ -511,7 +514,7 @@ export default function App() {
         </section>
       </div>}
 
-      {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea ref={key === 'goal' ? goalInput : undefined} value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p></div></section><section className="handoff-preview panel"><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div><pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
+      {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea ref={key === 'goal' ? goalInput : undefined} value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p></div></section><section className="handoff-preview panel" aria-busy={handoffBusy}><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div>{handoffBusy && <p className="handoff-refresh" role="status"><LoaderCircle size={13} className="spin" />{t.handoffUpdating}</p>}{handoffError && <p className="handoff-refresh handoff-refresh-error" role="alert">{t.handoffFailed}</p>}<pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
 
       {archive && <section className="export-bar">{customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}<div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary handoff-copy" aria-label={t.copy} aria-busy={handoffCopyState === 'pending'} data-state={handoffCopyState} disabled={working || customDirty || handoffBusy || !handoffText || handoffCopyState === 'pending'} onClick={() => void copyHandoff()}>{handoffCopyState === 'pending' ? <LoaderCircle size={15} className="spin" /> : handoffCopyState === 'success' ? <Check size={15} /> : handoffCopyState === 'error' ? <AlertCircle size={15} /> : <Clipboard size={15} />}{handoffCopyState === 'pending' ? t.copying : handoffCopyState === 'success' ? t.copied : t.copy}</button><button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 

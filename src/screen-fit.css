@@ -64,3 +64,11 @@
 /* Tall browser chrome and display cutouts must leave room around actions. */
 .has-archive .export-bar { margin-bottom: env(safe-area-inset-bottom, 0px); }
 .dialog-backdrop { padding-bottom: max(13px, env(safe-area-inset-bottom, 0px)); }
+
+@media (max-width: 800px) {
+  /* Surface the result before the long note form and keep its actions reachable. */
+  .handoff-view .handoff-grid { display: flex; flex-direction: column; overflow: visible; }
+  .handoff-view .handoff-preview { order: -1; height: min(46dvh, 420px); min-height: 300px; margin-bottom: 10px; }
+  .handoff-view .notes-panel { order: 1; }
+  .handoff-view .export-bar { position: sticky; bottom: env(safe-area-inset-bottom, 0px); z-index: 10; box-shadow: 0 -5px 18px #233e6512; }
+}

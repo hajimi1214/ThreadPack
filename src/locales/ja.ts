@@ -54,6 +54,7 @@ const ja: Record<TranslationKey, string> = {
   draftHint: 'このアーカイブを開いている間は、会話ごとにメモ、ピン留め、引き継ぎ設定を保持します。消去、ファイルの変更、またはタブを閉じると下書きは破棄されます。',
   handoffPreview: '引き継ぎパックのプレビュー', copy: 'テキストをコピー', copied: 'コピーしました', downloadHandoff: 'パックを保存',
   handoffNote: "メモ、ピン留めしたメッセージ、最近の会話を含みます。",
+  handoffUpdating: "プレビューを更新中…", handoffFailed: "プレビューを更新できませんでした。前の内容を表示しています。",
   exportTitle: "書き出す形式を選択。", exportSub: "選択中の会話に整理設定を適用します。",
   markdown: 'Markdown の会話記録', markdownHint: "閲覧、保管、別の会話への引き継ぎに",
   jsonl: '正規化した JSONL', jsonlHint: '1 行に 1 メッセージ。独自のツールで利用できます',

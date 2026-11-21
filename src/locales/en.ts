@@ -50,6 +50,7 @@ const en = {
   draftHint: 'Notes, pins, and handoff settings stay with each conversation while this archive is open. Clearing, replacing, or closing it removes these drafts.',
   handoffPreview: 'Handoff preview', copy: 'Copy text', copied: 'Copied', downloadHandoff: 'Download handoff',
   handoffNote: "Includes your notes, pinned messages, and recent context.",
+  handoffUpdating: "Refreshing the preview…", handoffFailed: "Could not refresh the preview. The last version is still shown.",
   exportTitle: "Choose an export format.", exportSub: "The selected conversation, with cleanup applied.",
   markdown: 'Markdown transcript', markdownHint: "Readable text for review, archiving, or another conversation",
   jsonl: 'Normalized JSONL', jsonlHint: 'One message per line, for your own tools',

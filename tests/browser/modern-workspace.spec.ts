@@ -224,12 +224,12 @@ test('failed handoff regeneration disables stale output and recovers after a suc
   // Inject a worker RPC rejection while retaining normal textarea and download actions.
   await page.evaluate(() => { (window as unknown as { __threadpackFailHandoff: boolean }).__threadpackFailHandoff = true; });
   await goal.fill('NEW_HANDOFF_GOAL: run the synthetic concurrency test.');
-  await expect(page.getByRole('alert')).toContainText('Synthetic handoff failure.');
-  await expect(document).not.toContainText('OLD_HANDOFF_GOAL');
+  await expect(page.getByRole('alert').filter({ hasText: 'Synthetic handoff failure.' })).toBeVisible();
+  await expect(document).toContainText('OLD_HANDOFF_GOAL');
   await expect(document).not.toContainText('NEW_HANDOFF_GOAL');
-  await expect(document).toHaveText('');
-  await expect(downloadButton).toBeDisabled();
-  await expect(copyButton).toBeDisabled();
+  await expect(page.getByText('Could not refresh the preview. The last version is still shown.')).toBeVisible();
+  await expect(downloadButton).toBeEnabled();
+  await expect(copyButton).toBeEnabled();
 
   await page.evaluate(() => { (window as unknown as { __threadpackFailHandoff: boolean }).__threadpackFailHandoff = false; });
   await goal.fill('NEW_HANDOFF_GOAL: run the synthetic concurrency test and verify retries.');

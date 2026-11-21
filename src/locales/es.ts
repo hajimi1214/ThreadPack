@@ -123,6 +123,7 @@ const es: Record<TranslationKey, string> = {
   copied: 'Copiado',
   downloadHandoff: 'Descargar traspaso',
   handoffNote: "Incluye tus notas, los mensajes fijados y los intercambios recientes.",
+  handoffUpdating: "Actualizando la vista previa…", handoffFailed: "No se pudo actualizar la vista previa. Se mantiene la versión anterior.",
   exportTitle: "Elige un formato de exportación.",
   exportSub: "La conversación seleccionada, con tus ajustes de limpieza.",
   markdown: 'Conversación en Markdown',
