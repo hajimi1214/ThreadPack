@@ -114,6 +114,7 @@ npm run build
 node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
+node dist-cli/threadpack.mjs session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
@@ -129,7 +130,19 @@ node dist-cli/threadpack.mjs examples/demo-session.jsonl --out demo-cleaned.md
 threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
+threadpack session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
 threadpack --help
+```
+
+笔记文件使用 UTF-8 JSON 对象。四个字段都可以省略，省略时按空字符串处理：
+
+```json
+{
+  "goal": "交付兼容性修复",
+  "decisions": "保留现有导出格式",
+  "constraints": "不要包含凭据",
+  "nextSteps": "运行回归测试"
+}
 ```
 
 | 参数 | 说明 |
@@ -143,16 +156,20 @@ threadpack --help
 | `--no-redact` | 关闭内置秘密识别，自定义规则仍生效 |
 | `--redact-emails` | 同时替换邮箱地址 |
 | `--redact-file FILE` | 从本地 UTF-8 文件读取精确脱敏值，每行一个 |
-| `--recent N` | 交接包中的近期消息数，范围 0–100 |
+| `--recent N` | 交接包中的近期消息数，范围 0–100，默认 8 |
+| `--notes-file FILE` | 从 UTF-8 JSON 文件读取交接笔记，每个字段最多 12000 字符 |
+| `--pin N` | 固定所选源会话中从 1 开始计数的消息，可重复传入 |
 | `--force` | 替换已存在的输出文件 |
 
-网页文本和 ZIP 输入上限为 **100 MiB**。ZIP 最多处理 256 个条目，解压后最多 100 MiB；危险路径和不支持的文件不会泄露文件名。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入文件及其别名始终受覆盖保护。终端诊断只输出汇总数量，不打印对话原文。
+网页文本和 ZIP 输入上限为 **100 MiB**。ZIP 最多处理 256 个条目，解压后最多 100 MiB；危险路径和不支持的文件不会泄露文件名。CLI 必须指定 `--out`；输入写为 `-` 时从 stdin 读取 UTF-8 文本。已有输出默认拒绝覆盖，除非显式传入 `--force`；输入、笔记和规则文件必须彼此不同，也必须与输出文件不同，包括文件别名。解析器和清理器警告详情会写入 stderr 与 JSON 报告，但不会包含对话或笔记内容。
 
 对于通用规则无法识别的内容，可使用 `--redact-file redact-values.txt`。规则文件必须为 UTF-8，最多 **64 KiB**，包含至多 **50 个非空白行**，每项 **3–1000 个 Unicode 字符**。按字面值区分大小写匹配，不使用正则表达式。纯空白行被忽略，其他行的首尾空格有意义，会保留。重复值使用一致的 `[CUSTOM_1]` 别名；即使传入 `--no-redact`，自定义规则仍然生效，该开关只关闭内置秘密识别。
 
 常见密钥清理也识别裸 URL 中的用户信息，包括数据库、Redis、HTTP(S)、IPv6 主机和百分号编码凭据。邮箱清理会跳过 URL authority 区域与独立的多 `@` 字符串。报告分别提供 `customRuleMatches`（自定义规则命中次数）、`customRedacted`（采用自定义别名的替换区间数）及 `redactionReplacements`（合并后的总替换区间数）。自定义值被更长的密钥规则整体覆盖时，仍会计入命中次数。缺少 URL 或赋值上下文的多 `@` 字符串需用自定义规则完整隐藏。
 
-输入、输出和规则文件必须互不相同，包括文件别名；`--force` 也不能覆盖规则文件。终端诊断和清理报告不包含自定义值或规则文件路径，报告仅记录匹配数量。规则文件本身应按敏感本地资料保管，不要提交到版本控制。
+交接包的 `--notes-file` 接受 `goal`、`decisions`、`constraints` 和 `nextSteps` 字符串字段。每个字段最多 12000 字符，JSON 文件最多 256 KiB。笔记使用与对话相同的启用内置秘密、邮箱和自定义规则脱敏，但别名独立使用 `[NOTE_SECRET_n]`、`[NOTE_EMAIL_n]` 和 `[NOTE_CUSTOM_n]`。可重复传入 `--pin N`，按所选源会话中从 1 开始的消息顺序固定消息。`--notes-file` 和 `--pin` 仅适用于 `--format handoff`。
+
+诊断和报告不包含自定义值或笔记内容，但会提供警告详情和汇总匹配数量。规则文件与笔记文件应按敏感本地资料保管，不要提交到版本控制。
 
 ## 隐私与限制
 

@@ -112,6 +112,7 @@ Build the CLI separately with `npm run build:cli`, or use the CLI bundle from a 
 node dist-cli/threadpack.mjs session.jsonl --out cleaned.md
 node dist-cli/threadpack.mjs session.jsonl --out portable.jsonl --format jsonl
 node dist-cli/threadpack.mjs export.json --conversation 2 --out handoff.md --format handoff
+node dist-cli/threadpack.mjs session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
 node dist-cli/threadpack.mjs session.jsonl --out report.json --format report
 ```
 
@@ -129,7 +130,19 @@ After building, `npm link` makes the `threadpack` command available locally:
 threadpack session.jsonl --out cleaned.md --tool-limit 4000 --redact-emails
 threadpack session.jsonl --out cleaned-custom.md --redact-file redact-values.txt
 threadpack session.jsonl --out handoff.md --format handoff --recent 12
+threadpack session.jsonl --out handoff.md --format handoff --notes-file notes.json --pin 2 --pin 7
 threadpack --help
+```
+
+The notes file is a UTF-8 JSON object. Any of the four fields may be omitted and defaults to an empty string:
+
+```json
+{
+  "goal": "Ship the compatibility fix",
+  "decisions": "Keep the existing export format",
+  "constraints": "Do not include credentials",
+  "nextSteps": "Run the regression suite"
+}
 ```
 
 | Option | Description |
@@ -143,16 +156,20 @@ threadpack --help
 | `--no-redact` | Disable built-in secret recognition; custom rules stay active |
 | `--redact-emails` | Also replace email addresses |
 | `--redact-file FILE` | Redact exact values from a local UTF-8 file, one value per line |
-| `--recent N` | Recent messages included in a handoff, from 0 to 100 |
+| `--recent N` | Recent messages included in a handoff, from 0 to 100; defaults to 8 |
+| `--notes-file FILE` | Add handoff notes from UTF-8 JSON, up to 12000 characters per field |
+| `--pin N` | Pin a 1-based message number from the selected source conversation; repeatable |
 | `--force` | Replace an existing output file |
 
-The browser accepts local text exports and ZIPs up to **100 MiB**. ZIP imports allow at most 256 entries and 100 MiB of expanded content; unsafe paths and unsupported entries are rejected without exposing archive names. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. The input file and its aliases are always protected from overwrite. Diagnostics contain aggregate counts rather than transcript content.
+The browser accepts local text exports and ZIPs up to **100 MiB**. ZIP imports allow at most 256 entries and 100 MiB of expanded content; unsafe paths and unsupported entries are rejected without exposing archive names. The CLI requires `--out`; use `-` as the input to read UTF-8 text from stdin. Existing outputs are rejected unless `--force` is supplied. Input, notes, and redaction files must be distinct from each other and the output, including file aliases. Parser and cleaner warning details are printed to stderr and included in JSON reports, while transcript and note content remain excluded.
 
 For values that generic secret detectors cannot recognize, supply `--redact-file redact-values.txt`. The file must be UTF-8 and at most **64 KiB**, with up to **50 nonblank lines**, each containing **3–1000 Unicode characters**. Matching is literal and case-sensitive, not a regular expression. Blank lines are ignored; other leading and trailing spaces remain significant. Repeated values receive stable `[CUSTOM_1]` aliases. These rules remain active with `--no-redact`, which only disables built-in secret recognition.
 
 Common-secret cleanup also detects bare URL credentials, including database, Redis, and HTTP(S) URLs with IPv6 hosts or percent-encoded user information. Email cleanup excludes URL authorities and standalone multi-`@` tokens. Reports distinguish `customRuleMatches` (every custom-rule occurrence), `customRedacted` (intervals using a custom alias), and `redactionReplacements` (all merged replacement intervals). A custom substring already covered by a larger secret replacement still counts as a rule match.
 
-Input, output, and redaction files must be distinct, including file aliases; `--force` never permits replacing a redaction file. Custom values and rule-file paths are omitted from diagnostics and reports; reports expose only match counts. Treat your redaction file as sensitive local data and keep it out of version control.
+For handoffs, `--notes-file` accepts `goal`, `decisions`, `constraints`, and `nextSteps` strings. Each field is limited to 12000 characters and the JSON file to 256 KiB. Notes use the same enabled built-in, email, and custom redaction rules as the conversation, with independent `[NOTE_SECRET_n]`, `[NOTE_EMAIL_n]`, and `[NOTE_CUSTOM_n]` aliases. Repeat `--pin N` to include messages by their 1-based order in the original selected conversation. `--notes-file` and `--pin` require `--format handoff`.
+
+Custom values and note contents are omitted from diagnostics and reports; reports expose warning details and aggregate match counts. Treat redaction and notes files as sensitive local data and keep them out of version control.
 
 ## Privacy and limitations
 
