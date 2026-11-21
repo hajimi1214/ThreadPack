@@ -69,10 +69,12 @@ export interface HandoffOptions {
   pinnedIds: string[];
   recentCount: number;
   recentMode?: RecentSelectionMode;
+  language?: OutputLanguage;
   maxCharacters?: number;
 }
 
 export type RecentSelectionMode = 'source' | 'timestamp';
+export type OutputLanguage = 'en' | 'zh';
 
 export interface HandoffSummary {
   selectionMode: RecentSelectionMode;
