@@ -18,13 +18,15 @@ export const HELP_ZH = `ThreadPack — 携带 AI 对话中的重要内容。
   --keep-tool-outputs                      保留完整工具输出
   --keep-duplicates                        保留重复工具输出
   --no-redact                              关闭内置秘密识别
-  --redact-emails                          同时替换邮箱地址
+  --redact-emails                          启用邮箱脱敏（默认开启）
+  --no-redact-emails                       保留邮箱地址
   --redact-file <file>                     从 UTF-8 文件逐行读取精确脱敏值
   --force                                  替换已存在的输出文件
   --help, -h                               显示帮助
   --version                                显示版本
 
 输入为 '-' 时从 stdin 读取 UTF-8 内容，输入上限为 100 MiB。
+默认启用严格邮箱脱敏；使用 --no-redact-emails 可保留邮箱。
 笔记、规则、原始副本、清理输出和输入文件必须互不相同。
 原始副本按输入字节保存，输入文件不会被修改。
 `;
@@ -47,6 +49,7 @@ const DIAGNOSTICS_ZH: Record<string, string> = {
   '--notes-file, --pin, and --recent-mode require --format handoff or report.': '--notes-file、--pin 和 --recent-mode 仅适用于 handoff 或 report 格式。',
   '--recent-mode must be source or timestamp.': '--recent-mode 必须为 source 或 timestamp。',
   '--language must be en or zh.': '--language 必须为 en 或 zh。',
+  'Choose either --redact-emails or --no-redact-emails, not both.': '不能同时使用 --redact-emails 和 --no-redact-emails。',
   'Provide a regular UTF-8 file with --redact-file.': '请为 --redact-file 提供普通 UTF-8 文件。',
   'Input and output must be different files, including aliases.': '输入和输出必须是不同文件，包括文件别名。',
   'The redaction file must differ from input and output, including aliases.': '脱敏规则文件必须与输入和输出不同，包括文件别名。',

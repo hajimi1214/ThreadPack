@@ -5,7 +5,8 @@ export type CleanupRecipeId = 'balanced' | 'share-safe' | 'keep-text';
 type RecipeOptions = Omit<CleanOptions, 'customSecrets'>;
 
 export const CLEANUP_RECIPES: Record<CleanupRecipeId, RecipeOptions> = {
-  balanced: { ...DEFAULT_OPTIONS },
+  // Balanced is an explicit choice to retain emails. Fresh imports use DEFAULT_OPTIONS.
+  balanced: { ...DEFAULT_OPTIONS, redactEmails: false },
   'share-safe': { ...DEFAULT_OPTIONS, redactEmails: true },
   'keep-text': { ...DEFAULT_OPTIONS, trimToolOutputs: false, deduplicate: false },
 };

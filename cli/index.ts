@@ -37,7 +37,8 @@ Options:
   --keep-tool-outputs                    Keep full tool output text
   --keep-duplicates                      Keep repeated tool outputs
   --no-redact                            Disable built-in secret recognition
-  --redact-emails                        Also replace email addresses
+  --redact-emails                        Enable email redaction (enabled by default)
+  --no-redact-emails                     Keep email addresses unchanged
   --redact-file <file>                   Exact values to redact, one per UTF-8 line
   --force                                Replace existing cleaned and original outputs
   --help, -h                             Show this help
@@ -48,6 +49,7 @@ Redaction files are limited to 64 KiB, with up to 50 values of 3–1000 characte
 Blank lines are ignored. Other whitespace is significant. Custom rules stay active
 with --no-redact. Input, cleaned output, original copy, notes, and redaction files
 must be different files, including aliases.
+Email addresses are redacted by default; --no-redact-emails preserves them.
 The original copy preserves the input bytes. --force replaces both output files.
 --language zh localizes Markdown labels, warnings, and CLI diagnostics.
 Source files are never overwritten. Exports are portable copies, not native sessions.
@@ -186,7 +188,8 @@ async function main() {
         'original-out': { type: 'string' }, language: { type: 'string' },
         'keep-images': { type: 'boolean' }, 'keep-tool-outputs': { type: 'boolean' },
         'keep-duplicates': { type: 'boolean' }, 'no-redact': { type: 'boolean' },
-        'redact-emails': { type: 'boolean' }, 'redact-file': { type: 'string' }, force: { type: 'boolean' },
+        'redact-emails': { type: 'boolean' }, 'no-redact-emails': { type: 'boolean' },
+        'redact-file': { type: 'string' }, force: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' }, version: { type: 'boolean' },
       },
     });
@@ -201,6 +204,9 @@ async function main() {
   const language = values.language === undefined ? 'en' : values.language;
   if (language !== 'en' && language !== 'zh') throw new CliError('--language must be en or zh.');
   diagnosticLanguage = language;
+  if (values['redact-emails'] && values['no-redact-emails']) {
+    throw new CliError('Choose either --redact-emails or --no-redact-emails, not both.');
+  }
   if (args.positionals.length !== 1 || typeof values.out !== 'string' || !values.out.trim()) {
     throw new CliError('Provide one input and --out <file>. Run threadpack --help for usage.');
   }
@@ -289,7 +295,7 @@ async function main() {
     ...DEFAULT_OPTIONS,
     stripImages: !values['keep-images'], trimToolOutputs: !values['keep-tool-outputs'],
     deduplicate: !values['keep-duplicates'], redact: !values['no-redact'],
-    redactEmails: Boolean(values['redact-emails']), toolLimit, customSecrets,
+    redactEmails: !Boolean(values['no-redact-emails']), toolLimit, customSecrets,
   };
   const result = cleanConversation(conversation, cleanOptions);
   const pinnedIds = [...new Set((pinValues ?? []).map((value) => {

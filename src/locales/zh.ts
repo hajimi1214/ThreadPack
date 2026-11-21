@@ -14,7 +14,7 @@ const zh: Record<TranslationKey, string> = {
   sourceSize: '原始文本', cleanSize: '打包后文本', saved: '减少体积', messages: '消息条数', payloadHint: '统计 UTF-8 消息文本，不含导出元数据',
   recipe: '清理设置', recipeSub: "选择预设，或逐项调整规则。", reset: '重置',
   quickRecipes: '快速预设', balancedRecipe: '均衡', shareSafeRecipe: '安全分享', keepTextRecipe: '保留文本', customRecipe: '自定义设置',
-  balancedRecipeHint: '移除图片、裁剪过长的工具输出、合并重复内容，并隐藏常见密钥。',
+  balancedRecipeHint: '移除图片、裁剪过长的工具输出、合并重复内容，并隐藏常见密钥；保留邮箱地址。',
   shareSafeRecipeHint: '在均衡清理基础上隐藏邮箱；分享前请检查导出内容。',
   keepTextRecipeHint: '保留完整工具输出和重复内容，同时移除图片并隐藏常见密钥。', customRecipeHint: '自定义设置',
   stripImages: '移除内嵌图片', stripImagesHint: '把 base64 数据替换为说明标记',

@@ -6,7 +6,7 @@ export const DEFAULT_OPTIONS: CleanOptions = {
   toolLimit: 4000,
   deduplicate: true,
   redact: true,
-  redactEmails: false,
+  redactEmails: true,
 };
 
 const encoder = new TextEncoder();

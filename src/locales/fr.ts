@@ -37,7 +37,7 @@ const fr: Record<TranslationKey, string> = {
   shareSafeRecipe: 'Partager en sécurité',
   keepTextRecipe: 'Garder le texte',
   customRecipe: 'Réglages personnalisés',
-  balancedRecipeHint: 'Retire les images, raccourcit les sorties longues, regroupe les doublons et masque les secrets courants.',
+  balancedRecipeHint: 'Retire les images, raccourcit les sorties longues, regroupe les doublons et masque les secrets courants. Les e-mails restent visibles.',
   shareSafeRecipeHint: 'Nettoyage équilibré avec masquage des e-mails. Vérifiez chaque export avant de le partager.',
   keepTextRecipeHint: 'Conserve les sorties complètes et les répétitions ; retire les images et masque les secrets courants.',
   customRecipeHint: 'Un ou plusieurs réglages ont été modifiés.',
