@@ -52,6 +52,40 @@ test('mobile handoff shows its preview and actions without opening the keyboard'
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Keep the current preview visible.');
   expect(await preview.textContent()).toBe(previousPreview);
   await expect(preview).toContainText('Keep the current preview visible.');
+  await page.getByRole('button', { name: 'Markdown', exact: true }).click();
+  await expect(page.locator('.handoff-markdown h1')).toContainText('Handoff: handoff.json');
+  await page.getByRole('button', { name: 'Text', exact: true }).click();
+  await expect(page.locator('.handoff-document')).toContainText('Keep the current preview visible.');
+});
+
+test('Markdown reading mode renders GFM while text mode and copy retain source text', async ({ page, context }) => {
+  await page.goto('/');
+  const source = [
+    '# Retry plan', '',
+    '| Attempt | Result |', '| --- | --- |', '| 1 | **safe** |', '',
+    '- [x] Preserve the public API', '',
+    '```typescript', 'return createCharge(request);', '```',
+    '', '<img src=x onerror="window.injected = true">',
+  ].join('\n');
+  await upload(page, 'markdown.json', { messages: [{ role: 'assistant', content: source }] });
+  const message = page.locator('.message-card');
+  await expect(message.locator('.message-content')).toContainText('| Attempt | Result |');
+  await page.getByRole('button', { name: 'Markdown', exact: true }).click();
+  const rendered = message.locator('.markdown-message');
+  await expect(rendered.locator('h1')).toHaveText('Retry plan');
+  await expect(rendered.locator('table')).toBeVisible();
+  await expect(rendered.locator('strong')).toHaveText('safe');
+  await expect(rendered.locator('input[type="checkbox"]')).toBeDisabled();
+  await expect(rendered.locator('img, script')).toHaveCount(0);
+  await expect(rendered).toContainText('img src=x onerror=');
+
+  await page.getByRole('button', { name: 'Text', exact: true }).click();
+  await expect(message.locator('.message-content')).toContainText('| Attempt | Result |');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const copy = message.getByRole('button', { name: 'Copy full message', exact: true });
+  await copy.click();
+  await expect(copy).toHaveAttribute('data-state', 'success');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('| Attempt | Result |');
 });
 
 async function switchRecipe(page: Page, title: string, checked: boolean) {

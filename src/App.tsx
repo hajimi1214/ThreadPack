@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
 import type { CleanOptions, Role } from './core';
@@ -16,6 +16,7 @@ import MessageCard from './components/MessageCard';
 import LandingShowcase from './components/LandingShowcase';
 import CommandMenu from './components/CommandMenu';
 import SnippetExplorer from './components/SnippetExplorer';
+import MarkdownDocument from './components/MarkdownDocument';
 import type { QuickAction } from './components/CommandMenu';
 import THIRD_PARTY_NOTICES from '../public/third-party-licenses.txt?raw';
 import { APP_VERSION } from './version';
@@ -44,6 +45,13 @@ function Toggle({ title, hint, icon: Icon, checked, onChange }: { title: string;
     <span className="toggle-copy"><strong>{title}</strong><small>{hint}</small></span>
     <span className="switch"><span /></span>
   </button>;
+}
+
+function MarkdownViewToggle({ enabled, onChange, t }: { enabled: boolean; onChange: () => void; t: Record<TranslationKey, string> }) {
+  return <div className="segmented markdown-view-toggle" role="group" aria-label={t.viewFormat}>
+    <button aria-label={t.plainTextView} title={t.plainTextView} aria-pressed={!enabled} className={!enabled ? 'active' : ''} onClick={() => { if (enabled) onChange(); }}><FileText size={13} /><span>{t.plainTextView}</span></button>
+    <button aria-label={t.markdownView} title={t.markdownView} aria-pressed={enabled} className={enabled ? 'active' : ''} onClick={() => { if (!enabled) onChange(); }}><BookOpen size={13} /><span>{t.markdownView}</span></button>
+  </div>;
 }
 
 function Dialog({ children, close, label, closeLabel, className = '' }: { children: ReactNode; close: () => void; label: string; closeLabel: string; className?: string }) {
@@ -105,6 +113,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [options, setOptions] = useState<CleanOptions>({ ...DEFAULT_OPTIONS });
   const [mode, setMode] = useState<'cleaned' | 'original'>('cleaned');
+  const [markdownPreview, setMarkdownPreview] = useState(false);
   const [filter, setFilter] = useState<Role | 'all'>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [query, setQuery] = useState('');
@@ -501,20 +510,44 @@ export default function App() {
       {archive && view === 'workbench' && <div className="workspace-grid">
         <button className="settings-toggle button secondary" aria-label={t.recipe} aria-expanded={settingsOpen} aria-controls="cleanup-settings" onClick={() => setSettingsOpen(value => !value)}><Settings2 size={16} />{t.recipe}<ChevronDown size={14} className={settingsOpen ? 'rotate' : ''} /></button>
         {!isCompact && cleanupPanel}
-        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="preview-tools"><button className="snippet-trigger" disabled={working || customDirty || !processed} onClick={() => setDialog('snippets')}><Code2 size={14} />{t.codeSnippets}</button><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div></div>
+        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="preview-tools"><button className="snippet-trigger" disabled={working || customDirty || !processed} onClick={() => setDialog('snippets')}><Code2 size={14} />{t.codeSnippets}</button><MarkdownViewToggle enabled={markdownPreview} onChange={() => setMarkdownPreview(value => !value)} t={t} /><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div></div>
           <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool', 'system'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button><button className={`changed-filter ${pinnedOnly ? 'active' : ''}`} aria-pressed={pinnedOnly} onClick={() => setPinnedOnly(value => !value)}><Pin size={11} />{t.pinnedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label>{filtersActive && <button className="filter-clear icon-button" aria-label={t.clearFilters} title={t.clearFilters} onClick={clearFilters}><RotateCcw size={14} /></button>}<button className="excerpt-trigger" disabled={working || customDirty || !preview?.total} onClick={() => setDialog('excerpt')}><Download size={13} /><span>{t.exportExcerpt}</span><b>{preview?.total.toLocaleString() ?? 0}</b></button></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
           <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !working && !visible.length && <div className="no-results">{t.noResults}{filtersActive && <button className="button secondary small" onClick={clearFilters}>{t.clearFilters}</button>}</div>}
-            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => copyMessage(message.id)} onReview={() => void reviewMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} t={t} />)}
+            {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => copyMessage(message.id)} onReview={() => void reviewMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} markdownPreview={markdownPreview} t={t} />)}
           </div>
           {pageCount > 1 && <div className="pagination"><button className="text-button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}><ChevronLeft size={15} />{t.prev}</button><span>{safePage + 1} / {pageCount}</span><button className="text-button" disabled={safePage === pageCount - 1} onClick={() => setPage(safePage + 1)}>{t.next}<ChevronRight size={15} /></button></div>}
           <div className="changes-panel"><div className="overline">{t.changes}</div><div className="changes-list">{changeRows.filter(row => (row.key !== 'emailsRedacted' || options.redactEmails) && (row.key !== 'customRedacted' || !!options.customSecrets?.length)).map(({ key, icon: Icon }) => <span key={key} className={stats?.[key] ? 'has-changes' : ''}><Icon size={13} /><strong>{stats?.[key] ?? 0}</strong>{t[key]}</span>)}</div></div>
         </section>
       </div>}
 
-      {archive && view === 'handoff' && processed && <div className="handoff-grid"><section className="notes-panel panel"><div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div><div className="notes-body">{(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea ref={key === 'goal' ? goalInput : undefined} value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}<div className="handoff-settings"><label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label><label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label></div><p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p></div></section><section className="handoff-preview panel" aria-busy={handoffBusy}><div className="panel-heading"><div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div><span className="document-badge">.md</span></div>{handoffBusy && <p className="handoff-refresh" role="status"><LoaderCircle size={13} className="spin" />{t.handoffUpdating}</p>}{handoffError && <p className="handoff-refresh handoff-refresh-error" role="alert">{t.handoffFailed}</p>}<pre className="handoff-document">{handoffText}</pre><div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div></section></div>}
+      {archive && view === 'handoff' && processed && <div className="handoff-grid">
+        <section className="notes-panel panel">
+          <div className="panel-heading"><div><h2>{t.notes}</h2><p>{pins.length} {t.pinned}</p></div><Pin size={17} /></div>
+          <div className="notes-body">
+            {(['goal', 'decisions', 'constraints', 'nextSteps'] as const).map(key => <label className="note-field" key={key}><span>{t[key]}</span><textarea ref={key === 'goal' ? goalInput : undefined} value={notes[key]} maxLength={12000} placeholder={t[`${key}Hint`]} rows={key === 'goal' ? 2 : 3} onChange={e => setNotes(n => ({ ...n, [key]: e.target.value }))} /></label>)}
+            <div className="handoff-settings">
+              <label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+              <label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label>
+            </div>
+            <p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p>
+          </div>
+        </section>
+        <section className="handoff-preview panel" aria-busy={handoffBusy}>
+          <div className="panel-heading">
+            <div><h2>{t.handoffPreview}</h2><p>{bytes(byteLength(handoffText))} · {handoffText.length.toLocaleString()} {t.characters}</p></div>
+            <div className="handoff-preview-tools"><MarkdownViewToggle enabled={markdownPreview} onChange={() => setMarkdownPreview(value => !value)} t={t} /><span className="document-badge">.md</span></div>
+          </div>
+          {handoffBusy && <p className="handoff-refresh" role="status"><LoaderCircle size={13} className="spin" />{t.handoffUpdating}</p>}
+          {handoffError && <p className="handoff-refresh handoff-refresh-error" role="alert">{t.handoffFailed}</p>}
+          {markdownPreview
+            ? <MarkdownDocument className="handoff-document handoff-markdown" source={handoffText} imageLabel={t.imagePreviewHidden} />
+            : <pre className="handoff-document">{handoffText}</pre>}
+          <div className="handoff-note"><ShieldCheck size={15} />{t.handoffNote}</div>
+        </section>
+      </div>}
 
       {archive && <section className="export-bar">{customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}<div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary handoff-copy" aria-label={t.copy} aria-busy={handoffCopyState === 'pending'} data-state={handoffCopyState} disabled={working || customDirty || handoffBusy || !handoffText || handoffCopyState === 'pending'} onClick={() => void copyHandoff()}>{handoffCopyState === 'pending' ? <LoaderCircle size={15} className="spin" /> : handoffCopyState === 'success' ? <Check size={15} /> : handoffCopyState === 'error' ? <AlertCircle size={15} /> : <Clipboard size={15} />}{handoffCopyState === 'pending' ? t.copying : handoffCopyState === 'success' ? t.copied : t.copy}</button><button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
 

@@ -3,15 +3,16 @@ import { Check, ChevronDown, CircleAlert, Copy, Eye, LoaderCircle, Pin, ShieldCh
 import type { CleanResult, Conversation } from '../core';
 import type { TranslationKey } from '../i18n';
 import { messagePreview, searchPattern } from '../preview';
+import MarkdownDocument from './MarkdownDocument';
 
 const changeLabels = {
   image: 'imagesRemoved', tool: 'outputsTrimmed', duplicate: 'duplicatesRemoved',
   secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted',
 } as const;
 
-export default function MessageCard({ message, index, sizeLabel, pinned, onPin, onCopy, onReview, copyDisabled = false, changes, query, sourceShortened = false, t }: {
+export default function MessageCard({ message, index, sizeLabel, pinned, onPin, onCopy, onReview, copyDisabled = false, changes, query, sourceShortened = false, markdownPreview = false, t }: {
   message: Conversation['messages'][number]; index: number; sizeLabel: string; pinned: boolean; onPin: () => void; onCopy: () => Promise<boolean>; onReview: () => void; copyDisabled?: boolean;
-  changes: CleanResult['changes']; query: string; sourceShortened?: boolean; t: Record<TranslationKey, string>;
+  changes: CleanResult['changes']; query: string; sourceShortened?: boolean; markdownPreview?: boolean; t: Record<TranslationKey, string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
@@ -57,7 +58,9 @@ export default function MessageCard({ message, index, sizeLabel, pinned, onPin, 
     {changes.length > 0 && <div className="message-change-labels">{changes.map((change, n) => <span key={`${change.kind}-${n}`}>{change.count} {t[changeLabels[change.kind]]}</span>)}</div>}
     {changes.length > 0 && <button className="review-message-button" disabled={copyDisabled} onClick={onReview}><Eye size={13} />{t.reviewChanges}</button>}
     {preview.contextual && <span className="search-match-label">{t.searchMatch}</span>}
-    <pre className="message-content">{match >= 0 ? <>{preview.text.slice(0, match)}<mark>{preview.text.slice(match, match + query.length)}</mark>{preview.text.slice(match + query.length)}</> : preview.text || '—'}</pre>
+    {markdownPreview
+      ? <MarkdownDocument className={`message-content markdown-message role-content-${message.role}`} source={preview.text || '—'} imageLabel={t.imagePreviewHidden} />
+      : <pre className="message-content">{match >= 0 ? <>{preview.text.slice(0, match)}<mark>{preview.text.slice(match, match + query.length)}</mark>{preview.text.slice(match + query.length)}</> : preview.text || '—'}</pre>}
     {preview.expandable && <button className="text-button expand-button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? t.collapse : t.expand}<ChevronDown size={13} className={expanded ? 'rotate' : ''} /></button>}
     {sourceShortened && <small className="preview-footnote">{t.previewShortened}</small>}
   </article>;

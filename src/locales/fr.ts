@@ -69,6 +69,7 @@ const fr: Record<TranslationKey, string> = {
   privacyDescription: "Les fichiers restent dans cet onglet. Videz l’atelier ou fermez l’onglet pour les supprimer.",
   reviewNote: 'Le masquage par règles peut manquer des secrets. Vérifiez chaque export avant de le partager.',
   preview: 'Aperçu de la conversation',
+  viewFormat: 'Format d’affichage', plainTextView: 'Texte', markdownView: 'Markdown',
   previewSub: 'Épinglez les messages utiles pour la suite.',
   cleaned: 'Allégé',
   original: 'Original',

@@ -31,6 +31,7 @@ const en = {
   privacyTitle: "Local processing", privacyDescription: "Files stay in this tab. Clear the workspace or close the tab to remove them.",
   reviewNote: 'Rule-based redaction can miss secrets. Review every export before sharing.',
   preview: 'Transcript preview', previewSub: 'Pin the messages your next chat needs.', cleaned: 'Packed', original: 'Original',
+  viewFormat: 'Message format', plainTextView: 'Text', markdownView: 'Markdown',
   reviewChanges: 'Review changes', comparisonTitle: 'Message changes', compareOriginal: 'Original', compareCleaned: 'Cleaned',
   comparisonShortened: 'This message is long, so the comparison shows excerpts only.', imagePreviewHidden: 'Embedded images are hidden in the preview.',
   compareWarning: 'Original content may contain sensitive information.',

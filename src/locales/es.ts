@@ -69,6 +69,7 @@ const es: Record<TranslationKey, string> = {
   privacyDescription: "Los archivos permanecen en esta pestaña. Vacía el panel o cierra la pestaña para eliminarlos.",
   reviewNote: 'Las reglas pueden pasar por alto secretos. Revisa cada exportación antes de compartirla.',
   preview: 'Vista previa de la conversación',
+  viewFormat: 'Formato de vista', plainTextView: 'Texto', markdownView: 'Markdown',
   previewSub: 'Fija los mensajes que necesitará tu próxima conversación.',
   cleaned: 'Preparado',
   original: 'Original',

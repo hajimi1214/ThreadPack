@@ -34,7 +34,7 @@ const ja: Record<TranslationKey, string> = {
   searchMatch: '検索の一致箇所', previewShortened: 'プレビューは短縮されています。選択中の出力をすべて確認するには、会話をダウンロードしてください。',
   privacyTitle: "端末内で処理", privacyDescription: "ファイルはこのタブ内にのみ保持されます。内容を消去するかタブを閉じると破棄されます。",
   reviewNote: 'ルールによる検出では認証情報を見落とす場合があります。共有前に必ず出力を確認してください。',
-  preview: '会話のプレビュー', previewSub: '次の会話に必要なメッセージをピン留め。', cleaned: '整理後', original: '元の内容',
+  preview: '会話のプレビュー', previewSub: '次の会話に必要なメッセージをピン留め。', cleaned: '整理後', original: '元の内容', viewFormat: '表示形式', plainTextView: 'テキスト', markdownView: 'Markdown',
   reviewChanges: '変更を確認', comparisonTitle: 'メッセージの変更', compareOriginal: '元の内容', compareCleaned: '整理後',
   comparisonShortened: 'メッセージが長いため、比較では一部のみ表示します。', imagePreviewHidden: 'プレビューでは埋め込み画像は表示されません。',
   compareWarning: '元の内容には機密情報が含まれる場合があります。',

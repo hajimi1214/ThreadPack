@@ -30,7 +30,7 @@ const zh: Record<TranslationKey, string> = {
   searchMatch: '搜索命中位置', previewShortened: '预览已缩短，下载对话可获取当前导出设置下的完整内容。',
   privacyTitle: "本地处理", privacyDescription: "文件仅保留在当前标签页，清空工作区或关闭页面后移除。",
   reviewNote: '规则脱敏可能遗漏密钥，分享前请检查导出内容。',
-  preview: '对话预览', previewSub: '固定新会话需要记住的消息。', cleaned: '打包后', original: '原始内容',
+  preview: '对话预览', previewSub: '固定新会话需要记住的消息。', cleaned: '打包后', original: '原始内容', viewFormat: '显示格式', plainTextView: '文本', markdownView: 'Markdown',
   reviewChanges: '查看变更', comparisonTitle: '消息变更', compareOriginal: '原始内容', compareCleaned: '清理后',
   comparisonShortened: '消息过长，对比中仅显示节选。', imagePreviewHidden: '预览中不显示内嵌图片。',
   compareWarning: '原始内容可能包含敏感信息。',
