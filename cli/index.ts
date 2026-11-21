@@ -11,6 +11,9 @@ import {
 declare const __THREADPACK_VERSION__: string;
 const MAX_BYTES = 100 * 1024 * 1024;
 const MAX_REDACTION_BYTES = 64 * 1024;
+const MAX_NOTES_BYTES = 256 * 1024;
+const NOTE_KEYS = ['goal', 'decisions', 'constraints', 'nextSteps'] as const;
+type CliNotes = Record<typeof NOTE_KEYS[number], string>;
 class CliError extends Error {}
 const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
@@ -20,7 +23,9 @@ Options:
   --format <markdown|jsonl|handoff|report>  Output format (default: markdown)
   --conversation <N>                      Select a conversation, starting at 1
   --tool-limit <N>                        Characters per tool output (500–100000)
-  --recent <N>                            Recent messages in a handoff (0–100)
+  --recent <N>                            Recent messages in a handoff (0–100, default: 8)
+  --notes-file <file>                    JSON handoff notes (each field up to 12000 characters)
+  --pin <N>                              Pin message number N in the selected conversation (repeatable)
   --keep-images                          Keep inline image payloads
   --keep-tool-outputs                    Keep full tool output text
   --keep-duplicates                      Keep repeated tool outputs
@@ -91,6 +96,37 @@ async function readRedactionFile(path: string): Promise<string[]> {
   catch { throw new CliError('Redaction rules require at most 50 values of 3–1000 Unicode characters.'); }
 }
 
+async function readNotesFile(path: string): Promise<CliNotes> {
+  const info = await stat(path);
+  if (!info.isFile()) throw new CliError('The notes file must be a regular UTF-8 JSON file.');
+  if (info.size > MAX_NOTES_BYTES) throw new CliError('The notes file exceeds the 256 KiB limit.');
+  const content = await readFile(path);
+  if (content.byteLength > MAX_NOTES_BYTES) throw new CliError('The notes file exceeds the 256 KiB limit.');
+  let parsed: unknown;
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(content).replace(/^\uFEFF/, '');
+    parsed = JSON.parse(text);
+  } catch {
+    throw new CliError('The notes file must contain valid UTF-8 JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new CliError('The notes file must be a JSON object containing goal, decisions, constraints, and nextSteps.');
+  }
+  const fields = parsed as Record<string, unknown>;
+  if (Object.keys(fields).some((key) => !NOTE_KEYS.includes(key as typeof NOTE_KEYS[number]))) {
+    throw new CliError('The notes file contains an unsupported field.');
+  }
+  const notes = {} as CliNotes;
+  for (const key of NOTE_KEYS) {
+    const value = Object.hasOwn(fields, key) ? fields[key] : '';
+    if (typeof value !== 'string' || value.length > 12000) {
+      throw new CliError('Each notes field must be text containing at most 12000 characters.');
+    }
+    notes[key] = value;
+  }
+  return notes;
+}
+
 async function main() {
   let args: ReturnType<typeof parseArgs>;
   try {
@@ -99,6 +135,7 @@ async function main() {
       options: {
         out: { type: 'string' }, format: { type: 'string' },
         conversation: { type: 'string' }, 'tool-limit': { type: 'string' }, recent: { type: 'string' },
+        'notes-file': { type: 'string' }, pin: { type: 'string', multiple: true },
         'keep-images': { type: 'boolean' }, 'keep-tool-outputs': { type: 'boolean' },
         'keep-duplicates': { type: 'boolean' }, 'no-redact': { type: 'boolean' },
         'redact-emails': { type: 'boolean' }, 'redact-file': { type: 'string' }, force: { type: 'boolean' },
@@ -115,12 +152,17 @@ async function main() {
   }
   const format = typeof values.format === 'string' ? values.format : 'markdown';
   if (!['markdown', 'jsonl', 'handoff', 'report'].includes(format)) throw new CliError('Use --format markdown, jsonl, handoff, or report.');
+  const pinValues = values.pin as string[] | undefined;
+  if ((values['notes-file'] !== undefined || pinValues?.length) && format !== 'handoff') {
+    throw new CliError('--notes-file and --pin require --format handoff.');
+  }
   const selected = integer(values.conversation as string | undefined, 1, 1, 100000, '--conversation');
   const toolLimit = integer(values['tool-limit'] as string | undefined, DEFAULT_OPTIONS.toolLimit, 500, 100000, '--tool-limit');
   const recent = integer(values.recent as string | undefined, 8, 0, 100, '--recent');
   const input = args.positionals[0];
   const output = resolve(values.out);
   const redactionFile = values['redact-file'];
+  const notesFile = values['notes-file'];
   if (redactionFile !== undefined && (typeof redactionFile !== 'string' || !redactionFile.trim())) {
     throw new CliError('Provide a regular UTF-8 file with --redact-file.');
   }
@@ -133,7 +175,20 @@ async function main() {
       throw new CliError('The redaction file must differ from input and output, including aliases.');
     }
   }
+  if (notesFile !== undefined && (typeof notesFile !== 'string' || !notesFile.trim())) {
+    throw new CliError('Provide a UTF-8 JSON file with --notes-file.');
+  }
+  if (typeof notesFile === 'string') {
+    const notesPath = resolve(notesFile);
+    if ((input !== '-' && await sameFile(notesPath, resolve(input))) || await sameFile(notesPath, output) ||
+        (typeof redactionFile === 'string' && await sameFile(notesPath, resolve(redactionFile)))) {
+      throw new CliError('The notes file must differ from input, output, and redaction files, including aliases.');
+    }
+  }
   const customSecrets = typeof redactionFile === 'string' ? await readRedactionFile(resolve(redactionFile)) : [];
+  const noteValues = typeof notesFile === 'string' ? await readNotesFile(resolve(notesFile)) : {
+    goal: '', decisions: '', constraints: '', nextSteps: '',
+  };
   let text: string;
   if (input === '-') {
     text = await readStdin();
@@ -149,22 +204,43 @@ async function main() {
   const archive = parseInput(text, input === '-' ? 'stdin.txt' : basename(input));
   const conversation = archive.conversations[selected - 1];
   if (!conversation) throw new CliError(`Conversation ${selected} is unavailable; this input contains ${archive.conversations.length}.`);
-  const result = cleanConversation(conversation, {
+  const cleanOptions = {
     ...DEFAULT_OPTIONS,
     stripImages: !values['keep-images'], trimToolOutputs: !values['keep-tool-outputs'],
     deduplicate: !values['keep-duplicates'], redact: !values['no-redact'],
     redactEmails: Boolean(values['redact-emails']), toolLimit, customSecrets,
-  });
+  };
+  const result = cleanConversation(conversation, cleanOptions);
+  const pinnedIds = [...new Set((pinValues ?? []).map((value) => {
+    if (!/^\d+$/.test(value)) throw new CliError('--pin requires a message number within the selected conversation.');
+    const number = Number(value);
+    if (!Number.isSafeInteger(number) || number < 1 || number > conversation.messages.length) {
+      throw new CliError(`--pin message number must be between 1 and ${conversation.messages.length}.`);
+    }
+    return conversation.messages[number - 1]!.id;
+  }))];
+  let cleanNotes = noteValues;
+  if (format === 'handoff') {
+    const notesConversation = cleanConversation({
+      id: 'cli-notes', title: '', source: 'notes',
+      messages: NOTE_KEYS.map((key) => ({ id: key, role: 'user' as const, content: noteValues[key] })),
+    }, { ...cleanOptions, trimToolOutputs: false, deduplicate: false });
+    cleanNotes = Object.fromEntries(notesConversation.conversation.messages.map((message) => [
+      message.id,
+      message.content.replace(/\[(SECRET|EMAIL|CUSTOM)_(\d+)\]/g, '[NOTE_$1_$2]'),
+    ])) as CliNotes;
+  }
   let rendered: string;
   if (format === 'jsonl') rendered = buildJsonl(result.conversation);
   else if (format === 'handoff') rendered = buildHandoff(result.conversation, {
-    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: recent,
+    ...cleanNotes, pinnedIds, recentCount: recent,
   });
   else if (format === 'report') rendered = JSON.stringify({
     tool: 'ThreadPack', version: __THREADPACK_VERSION__, format: archive.format,
     conversation: selected, conversationCount: archive.conversations.length,
     messages: result.conversation.messages.length, stats: result.stats,
     warningCount: archive.warnings.length + result.warnings.length,
+    warnings: [...archive.warnings, ...result.warnings],
     note: 'Statistics describe normalized message text. No transcript or detected secret values are included.',
   }, null, 2);
   else rendered = buildTranscript(result.conversation);
@@ -178,11 +254,14 @@ async function main() {
   } else {
     await writeFile(output, rendered, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
   }
-  const warnings = archive.warnings.length + result.warnings.length;
+  const warnings = [...archive.warnings, ...result.warnings];
   process.stderr.write(`ThreadPack: exported ${result.conversation.messages.length} messages; ${result.stats.beforeBytes} → ${result.stats.afterBytes} bytes of message text.\n`);
   process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails, ${result.stats.customRedacted} custom replacements.\n`);
   process.stderr.write(`Redaction: ${result.stats.customRuleMatches} custom rule matches; ${result.stats.redactionReplacements} replacement spans in total (overlapping matches are merged).\n`);
-  if (warnings) process.stderr.write(`Review needed: ${warnings} parser/cleaner warnings. Inspect the browser preview before sharing an unfamiliar format.\n`);
+  if (warnings.length) {
+    process.stderr.write(`Review needed: ${warnings.length} parser/cleaner warnings.\n`);
+    for (const warning of warnings) process.stderr.write(`Warning: ${warning}\n`);
+  }
 }
 
 main().catch((error: unknown) => {
