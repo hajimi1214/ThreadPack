@@ -34,6 +34,11 @@ const PROJECT_URL = 'https://hajimi1214.github.io/ThreadPack/';
 const reviewChangeLabels = { image: 'imagesRemoved', tool: 'outputsTrimmed', duplicate: 'duplicatesRemoved', secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted' } as const;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
+function handoffSummaryTimeRange(range: HandoffResult['summary']['timeRange'] | undefined, lang: Lang, fallback: string) {
+  if (!range) return fallback;
+  const format = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' });
+  return `${format.format(new Date(range.start))} – ${format.format(new Date(range.end))}`;
+}
 
 function ThirdPartyNotices({ t }: { t: Record<TranslationKey, string> }) {
   return <details className="third-party-notices"><summary>{t.thirdPartyNotices}</summary><pre>{THIRD_PARTY_NOTICES}</pre></details>;
@@ -98,6 +103,7 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState<'markdown' | 'jsonl' | 'report' | 'bundle' | null>(null);
   const [handoffCopyState, setHandoffCopyState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [handoffText, setHandoffText] = useState('');
+  const [handoffSummary, setHandoffSummary] = useState<HandoffResult['summary'] | null>(null);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState(false);
   const [messageReview, setMessageReview] = useState<{ messageId: string; result: CompareMessageResult } | null>(null);
@@ -122,7 +128,7 @@ export default function App() {
   const [customText, setCustomText] = useState('');
   const [customError, setCustomError] = useState('');
   const [page, setPage] = useState(0);
-  const { pins, notes, recent, budget, setPins, setNotes, setRecent, setBudget, clearDrafts, hasNotes } = useConversationDrafts(selected);
+  const { pins, notes, recent, recentMode, budget, setPins, setNotes, setRecent, setRecentMode, setBudget, clearDrafts, hasNotes } = useConversationDrafts(selected);
   const [pasteText, setPasteText] = useState('');
   const [toast, setToast] = useState<{ text: string; tone: 'success' | 'error'; id: number } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -148,6 +154,7 @@ export default function App() {
   const optionsKey = JSON.stringify(options);
   const customDirty = isRedactionDraftDirty(customText, options.customSecrets);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
+  const handoffTimeRange = handoffSummaryTimeRange(handoffSummary?.timeRange, lang, t.noTimeRange);
   const activeRecipe = identifyCleanupRecipe(options);
   const activeRecipeHint: TranslationKey = activeRecipe === 'share-safe' ? 'shareSafeRecipeHint'
     : activeRecipe === 'keep-text' ? 'keepTextRecipeHint' : activeRecipe === 'balanced' ? 'balancedRecipeHint' : 'customRecipeHint';
@@ -156,7 +163,7 @@ export default function App() {
   const actionContext = JSON.stringify([archive?.archiveId, selected, processed?.revision, mode, customDirty, optionsKey]);
   const actionContextRef = useRef(actionContext);
   actionContextRef.current = actionContext;
-  const handoffCopyContext = JSON.stringify([actionContext, handoffText, notes, recent, budget]);
+  const handoffCopyContext = JSON.stringify([actionContext, handoffText, notes, recent, recentMode, budget]);
   const handoffCopyContextRef = useRef(handoffCopyContext);
   handoffCopyContextRef.current = handoffCopyContext;
   const overlayOpen = dialog !== null || !!pendingAction || isCompact && settingsOpen;
@@ -237,18 +244,18 @@ export default function App() {
   }, [preview, archive, selected, readingPositionKey]);
 
   useEffect(() => {
-    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffBusy(false); setHandoffError(false); return; }
+    if (!archive || !processed || busy || processed.generation !== cleanupGeneration.current || processed.optionsKey !== optionsKey) { setHandoffText(''); setHandoffSummary(null); setHandoffBusy(false); setHandoffError(false); return; }
     let active = true;
     setHandoffBusy(true);
     setHandoffError(false);
     const timer = setTimeout(() => {
       request<HandoffResult>({ type: 'handoff', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-        notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget }).then(data => {
-        if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffBusy(false); setHandoffError(false); }
+        notes, pinnedIds: pins, recentCount: recent, recentMode, maxCharacters: budget }).then(data => {
+        if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffSummary(data.summary); setHandoffBusy(false); setHandoffError(false); }
       }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setHandoffBusy(false); setHandoffError(true); } });
     }, 120);
     return () => { active = false; clearTimeout(timer); };
-  }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, budget, request]);
+  }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, recentMode, budget, request]);
 
   async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
     ++exportGeneration.current; exportLock.current = false; setExporting(false); setExportFormat(null);
@@ -351,7 +358,7 @@ export default function App() {
           format, mode, query: deferredQuery, role: filter, changedOnly, pinnedOnly, pinnedIds: queryPinnedIds })
         : format === 'bundle'
           ? await request<ContextBundleResult>({ type: 'export-bundle', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-            notes, pinnedIds: pins, recentCount: recent, maxCharacters: budget })
+            notes, pinnedIds: pins, recentCount: recent, recentMode, maxCharacters: budget })
           : await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format });
       if (operation !== exportGeneration.current || generation !== importGeneration.current || context !== actionContextRef.current) return;
       download(result.buffer, result.filename, result.mimeType); setDialog(null);
@@ -532,6 +539,10 @@ export default function App() {
             <div className="handoff-settings">
               <label>{t.recent}<select value={recent} onChange={e => setRecent(Number(e.target.value))}>{[0, 4, 8, 12, 20].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
               <label>{t.budget}<select value={budget} onChange={e => setBudget(Number(e.target.value))}>{[6000, 12000, 24000, 48000].map(n => <option key={n} value={n}>{n.toLocaleString()} {t.characters}</option>)}</select></label>
+              <div className="handoff-mode-control"><span>{t.recentMode}</span><div className="segmented" role="group" aria-label={t.recentMode}>
+                <button type="button" className={recentMode === 'source' ? 'active' : ''} aria-pressed={recentMode === 'source'} onClick={() => setRecentMode('source')}>{t.sourceOrder}</button>
+                <button type="button" className={recentMode === 'timestamp' ? 'active' : ''} aria-pressed={recentMode === 'timestamp'} onClick={() => setRecentMode('timestamp')}>{t.timestampOrder}</button>
+              </div></div>
             </div>
             <p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p>
           </div>
@@ -543,6 +554,20 @@ export default function App() {
           </div>
           {handoffBusy && <p className="handoff-refresh" role="status"><LoaderCircle size={13} className="spin" />{t.handoffUpdating}</p>}
           {handoffError && <p className="handoff-refresh handoff-refresh-error" role="alert">{t.handoffFailed}</p>}
+          {handoffSummary && <div className="handoff-summary" role="group" aria-label={t.handoffSummary}>
+            <div className="handoff-summary-grid">
+              <div><span>{t.recentMode}</span><strong>{handoffSummary.selectionMode === 'timestamp' ? t.timestampOrder : t.sourceOrder}</strong></div>
+              <div><span>{t.timeRange}</span><strong>{handoffTimeRange}</strong></div>
+              <div><span>{t.completeMessages}</span><strong>{handoffSummary.completeMessageCount}</strong></div>
+              <div><span>{t.budgetStatus}</span><strong>{handoffSummary.budgetExceeded ? t.budgetExceeded : t.budgetWithinLimit}</strong></div>
+              <div><span>{t.omittedMessages}</span><strong>{handoffSummary.omittedMessageCount}</strong></div>
+              <div><span>{t.truncatedMessages}</span><strong>{handoffSummary.truncatedMessageCount}</strong></div>
+              <div><span>{t.notSelectedMessages}</span><strong>{handoffSummary.notSelectedMessageCount}</strong></div>
+              {handoffSummary.selectionMode === 'timestamp' && <div><span>{t.missingTimestamps}</span><strong>{handoffSummary.missingTimestampCount}</strong></div>}
+            </div>
+            {handoffSummary.omittedMessageIds.length > 0 && <p><strong>{t.omittedMessages}</strong> {handoffSummary.omittedMessageIds.join(', ')}</p>}
+            {handoffSummary.truncatedMessageIds.length > 0 && <p><strong>{t.truncatedMessages}</strong> {handoffSummary.truncatedMessageIds.join(', ')}</p>}
+          </div>}
           {markdownPreview
             ? <MarkdownDocument className="handoff-document handoff-markdown" source={handoffText} imageLabel={t.imagePreviewHidden} />
             : <pre className="handoff-document">{handoffText}</pre>}

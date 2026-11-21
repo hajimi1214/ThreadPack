@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { SetStateAction } from 'react';
+import type { RecentSelectionMode } from '../core';
 import { hasNonblankNotes } from '../draft-state';
 
 export interface HandoffNotes {
@@ -13,12 +14,13 @@ interface ConversationDraft {
   notes: HandoffNotes;
   pins: string[];
   recent: number;
+  recentMode: RecentSelectionMode;
   budget: number;
 }
 
 const freshDraft = (): ConversationDraft => ({
   notes: { goal: '', decisions: '', constraints: '', nextSteps: '' },
-  pins: [], recent: 8, budget: 12000,
+  pins: [], recent: 8, recentMode: 'source', budget: 12000,
 });
 
 /** Drafts live only in this mounted workspace; importing or clearing resets them. */
@@ -42,7 +44,8 @@ export function useConversationDrafts(conversationId: string) {
   const setNotes = useCallback((action: SetStateAction<HandoffNotes>) => update('notes', action), [update]);
   const setPins = useCallback((action: SetStateAction<string[]>) => update('pins', action), [update]);
   const setRecent = useCallback((action: SetStateAction<number>) => update('recent', action), [update]);
+  const setRecentMode = useCallback((action: SetStateAction<RecentSelectionMode>) => update('recentMode', action), [update]);
   const setBudget = useCallback((action: SetStateAction<number>) => update('budget', action), [update]);
   const clearDrafts = useCallback(() => setDrafts(new Map()), []);
-  return { ...draft, hasNotes, setNotes, setPins, setRecent, setBudget, clearDrafts };
+  return { ...draft, hasNotes, setNotes, setPins, setRecent, setRecentMode, setBudget, clearDrafts };
 }
