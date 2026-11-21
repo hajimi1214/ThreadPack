@@ -116,3 +116,9 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - `npm run test:e2e -- --workers=2`: 68 browser tests cover Text/Markdown switching in messages and handoff previews, source-preserving copy, ZIP import, offline mode, five languages, and responsive layouts.
 - `npm run build`, `npm audit --omit=dev`, and `npm pack --dry-run` pass. The single-file HTML is 783,342 bytes (233,531 gzip bytes at maximum compression).
 - Markdown reading changes presentation only. Imported HTML remains escaped, external images are replaced by text, and copied or exported messages retain their cleaned source.
+
+## Version 1.7.1: URL credential redaction
+
+- `npm test`: 141 tests cover URL user information, percent encoding, IPv6 authorities, email boundaries, overlap counters, and secret-free exports.
+- `npm run test:e2e -- --workers=2`: 69 browser tests cover URL credential cleanup in the workbench, reports, and handoff output, along with the full existing workflow suite.
+- `npm run check`, `npm run build`, and `npm audit --omit=dev` pass.

@@ -1,6 +1,6 @@
 {
   "name": "threadpack",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Local tools for Codex, Claude Code, ChatGPT and Claude exports: import ZIPs, clean, read Markdown, extract code, and export portable context bundles.",
   "type": "module",
   "license": "MIT",

@@ -43,7 +43,7 @@ test('structured application data and the JavaScript-free fallback describe the 
   assert.equal(schema['@context'], 'https://schema.org');
   assert.equal(schema['@type'], 'SoftwareApplication');
   assert.equal(schema.name, 'ThreadPack');
-  assert.equal(schema.softwareVersion, '1.7.0');
+  assert.equal(schema.softwareVersion, '1.7.1');
   assert.equal(schema.url, site);
   assert.equal(schema.isAccessibleForFree, true);
   assert.deepEqual(schema.inLanguage, ['en', 'zh-CN', 'ja', 'fr', 'es']);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 — URL credential redaction boundaries
+
+- Redact credentials in bare database, Redis, and HTTP(S) URLs, including percent-encoded user information and IPv6 hosts.
+- Prevent optional email detection from partially matching multi-`@` credential strings or URL authorities.
+- Report custom-rule occurrences separately from custom replacements and total replacement spans.
+
 ## 1.7.0 — Markdown reading view
 
 - Add optional GFM Markdown rendering for conversation messages and handoff previews.
