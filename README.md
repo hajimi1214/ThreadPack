@@ -150,6 +150,8 @@ The browser accepts local text exports and ZIPs up to **100 MiB**. ZIP imports a
 
 For values that generic secret detectors cannot recognize, supply `--redact-file redact-values.txt`. The file must be UTF-8 and at most **64 KiB**, with up to **50 nonblank lines**, each containing **3–1000 Unicode characters**. Matching is literal and case-sensitive, not a regular expression. Blank lines are ignored; other leading and trailing spaces remain significant. Repeated values receive stable `[CUSTOM_1]` aliases. These rules remain active with `--no-redact`, which only disables built-in secret recognition.
 
+Common-secret cleanup also detects bare URL credentials, including database, Redis, and HTTP(S) URLs with IPv6 hosts or percent-encoded user information. Email cleanup excludes URL authorities and standalone multi-`@` tokens. Reports distinguish `customRuleMatches` (every custom-rule occurrence), `customRedacted` (intervals using a custom alias), and `redactionReplacements` (all merged replacement intervals). A custom substring already covered by a larger secret replacement still counts as a rule match.
+
 Input, output, and redaction files must be distinct, including file aliases; `--force` never permits replacing a redaction file. Custom values and rule-file paths are omitted from diagnostics and reports; reports expose only match counts. Treat your redaction file as sensitive local data and keep it out of version control.
 
 ## Privacy and limitations

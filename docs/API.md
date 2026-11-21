@@ -114,6 +114,10 @@ The function returns a new conversation without mutating the input. Cleanup remo
 
 Aliases are consistent within a cleaning pass, including recognized values in the conversation title and source label. They are not a reversible lookup map. The same value can receive a different alias in a separate call.
 
+With `redact: true`, bare URLs with a `scheme://userinfo@host` authority have their complete user information replaced by a secret alias. The last literal `@` in the authority delimits the host, covering passwords with literal `@` and percent-encoded user information. Protocol, host, IPv6 brackets, port, path, query, and fragment retain their source spelling unless another rule matches them. Existing credential-assignment rules can still replace a whole assigned URL.
+
+Email matching excludes URL authorities even when `redact` is off. Standalone multi-`@` strings and numeric-only domains are excluded from email matches. Such unrecognized strings require a credential context or an exact custom rule to be redacted. Email redaction remains opt-in.
+
 `customSecrets` supplies additional literal, case-sensitive values. They are replaced with consistent `[CUSTOM_1]` aliases even when `redact` and `redactEmails` are false. These values are not regular expressions; meaningful leading and trailing whitespace is preserved. Explicit values are useful for private names and internal identifiers that generic credential rules do not recognize.
 
 ```ts
@@ -134,6 +138,8 @@ interface CleanStats {
   secretsRedacted: number;
   emailsRedacted: number;
   customRedacted: number;
+  customRuleMatches: number;
+  redactionReplacements: number;
 }
 
 interface CleanResult {
@@ -146,6 +152,8 @@ interface CleanResult {
 
 Byte statistics measure UTF-8 message bodies, excluding metadata and export formatting. Redaction counters count recognized occurrences; changes can include multiple categories for a message. These measurements do not estimate provider tokens or cost. The core accepts a finite tool limit from 200 to 1,000,000 characters; browser and CLI controls intentionally expose narrower ranges.
 
+`customRuleMatches` counts each occurrence of each deduplicated custom rule, including overlapping matches. `customRedacted` retains its existing meaning: replacement intervals whose winning alias category is `CUSTOM`. `redactionReplacements` counts disjoint replacement intervals across all categories and equals `secretsRedacted + emailsRedacted + customRedacted`. These counters include message bodies after image removal and before tool truncation/deduplication, plus the title and source label. They count processing events, so aliases later omitted by tool cleanup still contribute. For example, two custom substrings inside one longer URL credential produce two custom rule matches, zero custom replacements, and one total replacement.
+
 ### `validateCustomSecrets(value)`
 
 ```ts
@@ -154,7 +162,7 @@ validateCustomSecrets(value: unknown): string[]
 
 Validates an array with at most 50 values. Each must be a nonblank string containing 3–1000 Unicode code points. The original array length is checked before duplicate values are removed. Accepted strings retain their original whitespace; repeated values are deduplicated. An invalid input throws a fixed error that does not echo the rejected value. `cleanConversation` also validates supplied custom values.
 
-Report integrations must omit `customSecrets` and any original rule-file path from public output. Export aggregate `stats.customRedacted` instead. The CLI's `--redact-file` parses a UTF-8 file of at most 64 KiB, ignores blank lines, and passes the remaining lines through this validator.
+Report integrations must omit `customSecrets` and any original rule-file path from public output. Export aggregate `stats.customRuleMatches`, `stats.customRedacted`, and `stats.redactionReplacements`. The CLI's `--redact-file` parses a UTF-8 file of at most 64 KiB, ignores blank lines, and passes the remaining lines through this validator.
 
 ## Export functions
 
