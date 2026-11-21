@@ -1,7 +1,7 @@
 {
   "name": "threadpack",
-  "version": "1.6.0",
-  "description": "Local tools for Codex, Claude Code, ChatGPT and Claude exports: import ZIPs, clean, review, extract code, and export portable context bundles.",
+  "version": "1.7.0",
+  "description": "Local tools for Codex, Claude Code, ChatGPT and Claude exports: import ZIPs, clean, read Markdown, extract code, and export portable context bundles.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://hajimi1214.github.io/ThreadPack/",
@@ -60,7 +60,9 @@
     "lowlight": "3.3.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",

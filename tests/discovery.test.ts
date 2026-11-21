@@ -43,7 +43,7 @@ test('structured application data and the JavaScript-free fallback describe the 
   assert.equal(schema['@context'], 'https://schema.org');
   assert.equal(schema['@type'], 'SoftwareApplication');
   assert.equal(schema.name, 'ThreadPack');
-  assert.equal(schema.softwareVersion, '1.4.0');
+  assert.equal(schema.softwareVersion, '1.7.0');
   assert.equal(schema.url, site);
   assert.equal(schema.isAccessibleForFree, true);
   assert.deepEqual(schema.inLanguage, ['en', 'zh-CN', 'ja', 'fr', 'es']);
@@ -77,7 +77,7 @@ test('crawler assets retain the GitHub Pages project prefix', async () => {
 test('third-party license notices cover the offline highlighter and ZIP compressor', async () => {
   const notices = await readFile(new URL('THIRD_PARTY_NOTICES.md', root), 'utf8');
   const publicNotices = await readFile(new URL('public/third-party-licenses.txt', root), 'utf8');
-  for (const packageName of ['lowlight 3.3.0', 'highlight.js 11.11.1', 'fflate 0.8.3', 'devlop 1.1.0', 'react 19.3.1', 'react-dom 19.3.1', 'scheduler 0.28.0', 'lucide-react 0.468.0']) {
+  for (const packageName of ['lowlight 3.3.0', 'highlight.js 11.11.1', 'fflate 0.8.3', 'devlop 1.1.0', 'react 19.3.1', 'react-dom 19.3.1', 'scheduler 0.28.0', 'lucide-react 0.468.0', 'react-markdown 10.1.0', 'remark-gfm 4.0.1']) {
     assert.ok(notices.includes(packageName));
     assert.ok(publicNotices.includes(packageName));
   }
