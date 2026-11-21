@@ -75,6 +75,54 @@ function* assignmentMatches(content: string): Generator<Match> {
   }
 }
 
+/** Read authority offsets without decoding or reserializing any source text. */
+function* urlAuthorities(content: string): Generator<{ start: number; end: number }> {
+  const terminator = /[\s/?#<>"`\\]/;
+  for (const scheme of content.matchAll(/(?:^|[^a-z\d+.-])[a-z][a-z\d+.-]*:\/\//gi)) {
+    const start = scheme.index + scheme[0].length;
+    let end = start;
+    while (end < content.length && !terminator.test(content[end]!)) end++;
+    yield { start, end };
+  }
+}
+
+function* urlCredentialMatches(content: string): Generator<Match> {
+  for (const authority of urlAuthorities(content)) {
+    // The last literal @ separates the host, including passwords with raw @.
+    // Percent-encoded delimiters remain part of the original user information.
+    const authorityText = content.slice(authority.start, authority.end);
+    const at = authorityText.lastIndexOf('@');
+    if (at <= 0) continue;
+    const userInfo = authorityText.slice(0, at);
+    if (/^\[(?:SECRET|EMAIL|CUSTOM)_\d+\]$/.test(userInfo)) continue;
+    yield { start: authority.start, end: authority.start + at, category: 'SECRET' };
+  }
+}
+
+function* emailMatches(content: string): Generator<Match> {
+  const authorities = urlAuthorities(content);
+  let authority = authorities.next();
+  // Consume complete ASCII email-like tokens so a failed address cannot be
+  // retried from a suffix after an @ or other local-part character.
+  const tokens = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~@-]+/g;
+  const domainPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
+  for (const token of content.matchAll(tokens)) {
+    const candidate = token[0].replace(/^'+/, '');
+    const at = candidate.indexOf('@');
+    if (at < 1 || at !== candidate.lastIndexOf('@')) continue;
+    const local = candidate.slice(0, at);
+    const domain = candidate.slice(at + 1).replace(/[.!?']+$/, '');
+    if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) continue;
+    if (!domainPattern.test(domain) || !/[A-Za-z]/.test(domain.slice(domain.lastIndexOf('.') + 1))) continue;
+    const start = token.index + token[0].length - candidate.length;
+    const end = start + at + 1 + domain.length;
+    while (!authority.done && authority.value.end <= start) authority = authorities.next();
+    // Also skip URL authorities when secret redaction was explicitly disabled.
+    if (!authority.done && authority.value.start < end && authority.value.end > start) continue;
+    yield { start, end, category: 'EMAIL' };
+  }
+}
+
 /** Merge sorted match streams without allocating one object per occurrence up front. */
 function* orderedMatches(sources: Generator<Match>[]): Generator<Match> {
   const heap: { match: Match; source: Generator<Match> }[] = [];
@@ -114,7 +162,7 @@ function* orderedMatches(sources: Generator<Match>[]): Generator<Match> {
   }
 }
 
-function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolean, scanEmails: boolean, customSecrets: string[]): { content: string; secretCount: number; emailCount: number; customCount: number } {
+function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolean, scanEmails: boolean, customSecrets: string[]): { content: string; secretCount: number; emailCount: number; customCount: number; customRuleMatches: number } {
   const sources: Generator<Match>[] = customSecrets.map((value) => literalMatches(content, value));
   if (scanSecrets) {
     // Provider-shaped credentials plus contextual assignments. This is a heuristic scanner,
@@ -122,15 +170,16 @@ function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolea
     sources.push(regexMatches(content, /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g, 'SECRET'));
     sources.push(regexMatches(content, /\b(?:sk-(?:proj-|ant-(?:api\d{2}-)?)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/g, 'SECRET'));
     sources.push(regexMatches(content, /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, 'SECRET'));
-    sources.push(bearerMatches(content), assignmentMatches(content));
+    sources.push(bearerMatches(content), assignmentMatches(content), urlCredentialMatches(content));
   }
-  if (scanEmails) sources.push(regexMatches(content, /\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+\b/g, 'EMAIL'));
+  if (scanEmails) sources.push(emailMatches(content));
 
   let cursor = 0;
   let result = '';
   let secretCount = 0;
   let emailCount = 0;
   let customCount = 0;
+  let customRuleMatches = 0;
   let cluster: { start: number; end: number; primary: Match } | undefined;
   const priority = { CUSTOM: 2, SECRET: 1, EMAIL: 0 };
   const emit = (): void => {
@@ -147,6 +196,7 @@ function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolea
     else customCount++;
   };
   for (const match of orderedMatches(sources)) {
+    if (match.category === 'CUSTOM') customRuleMatches++;
     if (!cluster || match.start >= cluster.end) {
       emit();
       cluster = { start: match.start, end: match.end, primary: match };
@@ -160,7 +210,7 @@ function redactContent(content: string, maps: RedactionMaps, scanSecrets: boolea
     if (length > longest || (length === longest && priority[match.category] > priority[cluster.primary.category])) cluster.primary = match;
   }
   emit();
-  return { content: result + content.slice(cursor), secretCount, emailCount, customCount };
+  return { content: result + content.slice(cursor), secretCount, emailCount, customCount, customRuleMatches };
 }
 
 function stripImages(content: string): { content: string; count: number } {
@@ -209,6 +259,7 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
   let secretsRedacted = 0;
   let emailsRedacted = 0;
   let customRedacted = 0;
+  let customRuleMatches = 0;
   const messages = conversation.messages.map((message) => {
     const original = message.content;
     beforeBytes += bytes(original);
@@ -237,6 +288,7 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
       secretsRedacted += redacted.secretCount;
       emailsRedacted += redacted.emailCount;
       customRedacted += redacted.customCount;
+      customRuleMatches += redacted.customRuleMatches;
       if (redacted.secretCount) change('secret', redacted.secretCount, previous);
       if (redacted.emailCount) change('email', redacted.emailCount, previous);
       if (redacted.customCount) change('custom', redacted.customCount, previous);
@@ -271,11 +323,13 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
   secretsRedacted += metadataSecretCount;
   emailsRedacted += metadataEmailCount;
   customRedacted += metadataCustomCount;
+  customRuleMatches += titleResult.customRuleMatches + sourceResult.customRuleMatches;
   if (metadataSecretCount || metadataEmailCount || metadataCustomCount) warnings.push('Sensitive patterns in the conversation title or source label were also redacted. Byte totals describe message bodies only.');
   return {
     conversation: { ...conversation, title: titleResult.content, source: sourceResult.content, messages },
     changes,
-    stats: { beforeBytes, afterBytes, removedBytes: Math.max(0, beforeBytes - afterBytes), imagesRemoved, outputsTrimmed, duplicatesRemoved, secretsRedacted, emailsRedacted, customRedacted },
+    stats: { beforeBytes, afterBytes, removedBytes: Math.max(0, beforeBytes - afterBytes), imagesRemoved, outputsTrimmed, duplicatesRemoved, secretsRedacted, emailsRedacted, customRedacted,
+      customRuleMatches, redactionReplacements: secretsRedacted + emailsRedacted + customRedacted },
     warnings,
   };
 }

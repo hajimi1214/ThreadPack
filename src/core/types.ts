@@ -48,6 +48,10 @@ export interface CleanStats {
   secretsRedacted: number;
   emailsRedacted: number;
   customRedacted: number;
+  /** Occurrences of deduplicated custom rules, including overlapping matches. */
+  customRuleMatches: number;
+  /** Disjoint replacement spans across body/title/source before tool truncation. */
+  redactionReplacements: number;
 }
 
 export interface CleanResult {
