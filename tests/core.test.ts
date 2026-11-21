@@ -425,6 +425,27 @@ test('handoff summary identifies recent messages omitted by the text budget', ()
   for (const id of [...result.summary.omittedMessageIds, ...result.summary.truncatedMessageIds]) assert.ok(['m2', 'm3'].includes(id));
 });
 
+test('handoff budget shares excerpts across multiple long recent messages', () => {
+  const input: Conversation = { ...conversation(''), messages: Array.from({ length: 4 }, (_, index) => ({
+    id: `m${index + 1}`,
+    role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+    content: `MESSAGE_${index + 1}_HEAD ${'context '.repeat(1500)} ${index === 2 ? '`'.repeat(10) : ''} MESSAGE_${index + 1}_TAIL`,
+  })) };
+  const result = buildHandoffWithSummary(input, {
+    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: 4, maxCharacters: 3000,
+  });
+  assert.ok(result.text.length <= 3000);
+  assert.equal(result.summary.truncatedMessageCount, 4);
+  assert.equal(result.summary.omittedMessageCount, 0);
+  for (let index = 1; index <= 4; index++) {
+    assert.ok(result.text.includes(`### ${index % 2 ? 'USER' : 'ASSISTANT'} · m${index}`));
+    assert.ok(result.text.includes(`MESSAGE_${index}_HEAD`));
+    assert.ok(result.text.includes('[ThreadPack: excerpt shortened'));
+  }
+  assert.ok(result.text.indexOf('### USER · m1') < result.text.indexOf('### ASSISTANT · m2'));
+  assert.deepEqual(result.summary.truncatedMessageIds, ['m1', 'm2', 'm3', 'm4']);
+});
+
 test('fenced exports cannot be broken by backticks inside message bodies', () => {
   const output = buildTranscript(conversation('```\n# Untrusted heading\n```'));
   assert.match(output, /````text/);

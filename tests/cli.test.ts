@@ -218,7 +218,7 @@ test('CLI timestamp mode selects valid recent messages and reports the handoff r
   assert.ok(handoff.indexOf('LATEST_SOURCE_MESSAGE') < handoff.indexOf('SECOND_LATEST_MESSAGE'));
 });
 
-test('CLI report names messages omitted or shortened by the handoff budget', async () => {
+test('CLI report names every message shortened or omitted by the handoff budget', async () => {
   const output = join(folder, 'budget-report.json');
   const messages = Array.from({ length: 4 }, (_, index) => ({
     role: index % 2 ? 'assistant' : 'user', content: `BUDGET_MESSAGE_${index + 1} ${'x'.repeat(20000)}`,
@@ -227,10 +227,10 @@ test('CLI report names messages omitted or shortened by the handoff budget', asy
   assert.equal(result.status, 0, result.stderr);
   const raw = await readFile(output, 'utf8');
   const report = JSON.parse(raw);
-  assert.deepEqual(report.handoff.truncatedMessageIds, ['message-4']);
-  assert.deepEqual(report.handoff.omittedMessageIds, ['message-1', 'message-2', 'message-3']);
-  assert.equal(report.handoff.omittedMessageCount, 3);
-  assert.equal(report.handoff.truncatedMessageCount, 1);
+  assert.deepEqual(report.handoff.truncatedMessageIds, ['message-1', 'message-2', 'message-3', 'message-4']);
+  assert.deepEqual(report.handoff.omittedMessageIds, []);
+  assert.equal(report.handoff.omittedMessageCount, 0);
+  assert.equal(report.handoff.truncatedMessageCount, 4);
   assert.equal(report.handoff.completeMessageCount, 0);
   assert.equal(report.handoff.budgetExceeded, false);
   assert.ok(!raw.includes('BUDGET_MESSAGE_'));
