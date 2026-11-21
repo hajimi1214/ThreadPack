@@ -216,6 +216,8 @@ Creates a Markdown document containing explicit notes, pinned messages, and rece
 
 `recentMode` defaults to `source`, which preserves the existing source window and renders messages in source order. `timestamp` selects only messages with valid timestamps, resolving equal timestamps by preferring the later source position. Both modes render selected messages in source order. `buildHandoffWithSummary` returns the same Markdown plus selection mode, included time range, complete/omitted/truncated counts and message IDs, timestamp exclusions, and budget overflow status. `buildHandoff` remains a text-only wrapper.
 
+The remaining recent-context budget is distributed across as many priority-ordered messages as can fit their message structure and excerpt marker. Short messages release unused allocation to longer excerpts. Messages that cannot fit a marked excerpt are reported as omitted. This is deterministic excerpt selection, not semantic summarization or compression.
+
 - `maxCharacters` defaults to 16000; valid budgets range from 1000 to 10,000,000.
 - User notes and pinned messages are retained in full. If they exceed the budget, the output explicitly reports the overflow.
 - Recent context is shortened or omitted to fit the remaining budget, with explanatory markers.
