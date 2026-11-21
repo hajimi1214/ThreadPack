@@ -17,8 +17,10 @@ test('conversation drafts survive switching and are discarded with the archive',
   await page.getByRole('textbox', { name: 'Constraints', exact: true }).fill('Alpha constraints.');
   await page.getByRole('combobox', { name: 'Recent messages', exact: true }).selectOption('0');
   await page.getByRole('combobox', { name: 'Handoff text budget', exact: true }).selectOption('6000');
+  await page.getByRole('button', { name: 'Latest timestamps', exact: true }).click();
   await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('beta');
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Source order', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.handoff-document')).not.toContainText('Alpha draft');
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Beta separate draft.');
   await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('alpha');
@@ -26,6 +28,7 @@ test('conversation drafts survive switching and are discarded with the archive',
   await expect(page.getByRole('textbox', { name: 'Constraints', exact: true })).toHaveValue('Alpha constraints.');
   await expect(page.getByRole('combobox', { name: 'Recent messages', exact: true })).toHaveValue('0');
   await expect(page.getByRole('combobox', { name: 'Handoff text budget', exact: true })).toHaveValue('6000');
+  await expect(page.getByRole('button', { name: 'Latest timestamps', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.handoff-document')).toContainText('Alpha context to pin.');
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual(['threadpack-language']);
   await page.getByRole('button', { name: 'Workbench', exact: true }).click(); await ready();

@@ -83,6 +83,62 @@ test('CLI report contains aggregate statistics and no message content', async ()
   assert.ok(!raw.includes('acceptance criteria'));
 });
 
+test('CLI timestamp mode selects valid recent messages and reports the handoff range and budget counts', async () => {
+  const input = join(folder, 'timestamped-conversation.json');
+  const reportPath = join(folder, 'timestamped-report.json');
+  const handoffPath = join(folder, 'timestamped-handoff.md');
+  await writeFile(input, JSON.stringify({ messages: [
+    { role: 'user', content: 'LATEST_SOURCE_MESSAGE', timestamp: '2026-01-04T00:00:00Z' },
+    { role: 'assistant', content: 'OLDEST_SOURCE_MESSAGE', timestamp: '2026-01-01T00:00:00Z' },
+    { role: 'user', content: 'SECOND_LATEST_MESSAGE', timestamp: '2026-01-03T00:00:00Z' },
+    { role: 'assistant', content: 'NO_TIMESTAMP_MESSAGE' },
+  ] }));
+  const reportResult = run([input, '--out', reportPath, '--format', 'report', '--recent', '2', '--recent-mode', 'timestamp']);
+  assert.equal(reportResult.status, 0, reportResult.stderr);
+  const rawReport = await readFile(reportPath, 'utf8');
+  const report = JSON.parse(rawReport);
+  assert.equal(report.handoff.selectionMode, 'timestamp');
+  assert.equal(report.handoff.completeMessageCount, 2);
+  assert.equal(report.handoff.omittedMessageCount, 0);
+  assert.equal(report.handoff.truncatedMessageCount, 0);
+  assert.equal(report.handoff.notSelectedMessageCount, 1);
+  assert.equal(report.handoff.missingTimestampCount, 1);
+  assert.deepEqual(report.handoff.timeRange, { start: '2026-01-03T00:00:00.000Z', end: '2026-01-04T00:00:00.000Z' });
+  for (const content of ['LATEST_SOURCE_MESSAGE', 'SECOND_LATEST_MESSAGE', 'NO_TIMESTAMP_MESSAGE']) assert.ok(!rawReport.includes(content));
+
+  const handoffResult = run([input, '--out', handoffPath, '--format', 'handoff', '--recent', '2', '--recent-mode', 'timestamp']);
+  assert.equal(handoffResult.status, 0, handoffResult.stderr);
+  const handoff = await readFile(handoffPath, 'utf8');
+  assert.ok(handoff.includes('LATEST_SOURCE_MESSAGE'));
+  assert.ok(handoff.includes('SECOND_LATEST_MESSAGE'));
+  assert.ok(!handoff.includes('OLDEST_SOURCE_MESSAGE'));
+  assert.ok(!handoff.includes('NO_TIMESTAMP_MESSAGE'));
+  assert.ok(handoff.indexOf('LATEST_SOURCE_MESSAGE') < handoff.indexOf('SECOND_LATEST_MESSAGE'));
+});
+
+test('CLI report names messages omitted or shortened by the handoff budget', async () => {
+  const output = join(folder, 'budget-report.json');
+  const messages = Array.from({ length: 4 }, (_, index) => ({
+    role: index % 2 ? 'assistant' : 'user', content: `BUDGET_MESSAGE_${index + 1} ${'x'.repeat(20000)}`,
+  }));
+  const result = run(['-', '--out', output, '--format', 'report', '--recent', '4'], JSON.stringify({ messages }));
+  assert.equal(result.status, 0, result.stderr);
+  const raw = await readFile(output, 'utf8');
+  const report = JSON.parse(raw);
+  assert.deepEqual(report.handoff.truncatedMessageIds, ['message-4']);
+  assert.deepEqual(report.handoff.omittedMessageIds, ['message-1', 'message-2', 'message-3']);
+  assert.equal(report.handoff.omittedMessageCount, 3);
+  assert.equal(report.handoff.truncatedMessageCount, 1);
+  assert.equal(report.handoff.completeMessageCount, 0);
+  assert.equal(report.handoff.budgetExceeded, false);
+  assert.ok(!raw.includes('BUDGET_MESSAGE_'));
+
+  const pinnedOutput = join(folder, 'pinned-over-budget-report.json');
+  const pinnedResult = run(['-', '--out', pinnedOutput, '--format', 'report', '--recent', '4', '--pin', '4'], JSON.stringify({ messages }));
+  assert.equal(pinnedResult.status, 0, pinnedResult.stderr);
+  assert.equal(JSON.parse(await readFile(pinnedOutput, 'utf8')).handoff.budgetExceeded, true);
+});
+
 test('CLI handoff includes redacted notes and selected messages with independent NOTE aliases', async () => {
   const repeatedSecret = ['sk-', 'NotesOnlySecret', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('');
   const customValue = 'NOTES_PRIVATE_LITERAL_731';
@@ -213,6 +269,7 @@ test('CLI help documents the recent-message default', () => {
   const result = run(['--help']);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /--recent <N>.*default: 8/);
+  assert.match(result.stdout, /--recent-mode <source\|timestamp>/);
   assert.match(result.stdout, /--notes-file <file>/);
   assert.match(result.stdout, /--pin <N>.*repeatable/);
 });

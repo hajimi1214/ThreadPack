@@ -520,12 +520,35 @@ test('handoff cleans notes with separate aliases and retains pinned full text fr
   const summary = await clean(engine, archive, { ...DEFAULT_OPTIONS, redactEmails: true, customSecrets: [custom] });
   const handoff = await engine.handle({ id: next(), type: 'handoff', archiveId: 1, conversationId: summary.conversation.id, revision: summary.revision,
     notes: { goal: `${custom} ${fakeToken}`, decisions: 'Already decided', constraints: email, nextSteps: 'Continue' }, pinnedIds: ['message-1'], recentCount: 1, maxCharacters: 24000 });
+  assert.equal(handoff.summary.selectionMode, 'source');
+  assert.equal(handoff.summary.completeMessageCount, 2);
   assert.ok(handoff.text.includes('important '.repeat(1800)));
   assert.match(handoff.text, /Newest progress/);
   assert.ok(!handoff.text.includes(custom));
   assert.ok(!handoff.text.includes(fakeToken));
   assert.ok(!handoff.text.includes(email));
   for (const marker of ['[NOTE_CUSTOM_1]', '[NOTE_SECRET_1]', '[NOTE_EMAIL_1]']) assert.ok(handoff.text.includes(marker));
+});
+
+test('worker handoff returns the same timestamp-selection summary used by the preview', async () => {
+  const engine = new WorkerEngine();
+  const archive = await load(engine, JSON.stringify({ messages: [
+    { role: 'user', content: 'latest physically first', timestamp: '2026-03-04T00:00:00Z' },
+    { role: 'assistant', content: 'oldest physically second', timestamp: '2026-03-01T00:00:00Z' },
+    { role: 'user', content: 'newer physically third', timestamp: '2026-03-03T00:00:00Z' },
+    { role: 'assistant', content: 'without timestamp' },
+  ] }));
+  const cleaned = await clean(engine, archive);
+  const handoff = await engine.handle({ id: next(), type: 'handoff', archiveId: archive.archiveId,
+    conversationId: cleaned.conversation.id, revision: cleaned.revision,
+    notes: { goal: '', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 2,
+    recentMode: 'timestamp', maxCharacters: 6000 });
+  assert.equal(handoff.summary.selectionMode, 'timestamp');
+  assert.equal(handoff.summary.completeMessageCount, 2);
+  assert.equal(handoff.summary.missingTimestampCount, 1);
+  assert.deepEqual(handoff.summary.omittedMessageIds, []);
+  assert.deepEqual(handoff.summary.timeRange, { start: '2026-03-03T00:00:00.000Z', end: '2026-03-04T00:00:00.000Z' });
+  assert.ok(handoff.text.indexOf('latest physically first') < handoff.text.indexOf('newer physically third'));
 });
 
 test('File Web Streams preserve split UTF-8 characters and report original byte progress', async () => {

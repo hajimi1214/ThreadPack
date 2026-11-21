@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildHandoff, buildJsonl, buildTranscript, cleanConversation, DEFAULT_OPTIONS, parseInput } from '../src/core/index';
+import { buildHandoff, buildHandoffWithSummary, buildJsonl, buildTranscript, cleanConversation, DEFAULT_OPTIONS, parseInput } from '../src/core/index';
 import type { Conversation } from '../src/core/types';
 
 const conversation = (content: string, role: 'user' | 'assistant' | 'tool' = 'user'): Conversation => ({
@@ -335,15 +335,94 @@ test('handoff includes explicit notes, pinned clean content and recent context',
   assert.equal(result.match(/Preserve this decision/g)?.length, 1);
 });
 
+test('source-order mode keeps the existing recent window when messages are pinned', () => {
+  const input: Conversation = { ...conversation(''), messages: [
+    { id: 'old', role: 'user', content: 'outside the source window' },
+    { id: 'pinned', role: 'assistant', content: 'pinned inside the source window' },
+    { id: 'recent', role: 'user', content: 'recent source message' },
+  ] };
+  const result = buildHandoffWithSummary(input, {
+    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: ['pinned'], recentCount: 2,
+  });
+  assert.ok(result.text.includes('pinned inside the source window'));
+  assert.ok(result.text.includes('recent source message'));
+  assert.ok(!result.text.includes('outside the source window'));
+  assert.equal(result.summary.selectedRecentMessageCount, 1);
+  assert.equal(result.summary.notSelectedMessageCount, 1);
+});
+
+test('timestamp mode selects by valid timestamps and restores source order for display', () => {
+  const input: Conversation = { ...conversation(''), messages: [
+    { id: 'm1', role: 'user', content: 'latest timestamp', timestamp: '2026-01-04T00:00:00Z' },
+    { id: 'm2', role: 'assistant', content: 'oldest timestamp', timestamp: '2026-01-01T00:00:00Z' },
+    { id: 'm3', role: 'user', content: 'second latest timestamp', timestamp: '2026-01-03T00:00:00Z' },
+    { id: 'm4', role: 'assistant', content: 'middle timestamp', timestamp: '2026-01-02T00:00:00Z' },
+  ] };
+  const result = buildHandoffWithSummary(input, {
+    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: 2, recentMode: 'timestamp',
+  });
+  assert.ok(result.text.includes('latest timestamp'));
+  assert.ok(result.text.includes('second latest timestamp'));
+  assert.ok(!result.text.includes('oldest timestamp'));
+  assert.ok(result.text.indexOf('latest timestamp') < result.text.indexOf('second latest timestamp'));
+  assert.equal(result.summary.selectionMode, 'timestamp');
+  assert.equal(result.summary.completeMessageCount, 2);
+  assert.equal(result.summary.notSelectedMessageCount, 2);
+  assert.deepEqual(result.summary.timeRange, { start: '2026-01-03T00:00:00.000Z', end: '2026-01-04T00:00:00.000Z' });
+});
+
+test('timestamp ties use later source position and missing or invalid timestamps are excluded', () => {
+  const input: Conversation = { ...conversation(''), messages: [
+    { id: 'first-tie', role: 'user', content: 'first equal timestamp', timestamp: '2026-02-02T10:00:00Z' },
+    { id: 'missing-time', role: 'assistant', content: 'missing timestamp' },
+    { id: 'second-tie', role: 'user', content: 'second equal timestamp', timestamp: '2026-02-02T10:00:00Z' },
+    { id: 'invalid-time', role: 'assistant', content: 'invalid timestamp', timestamp: 'not a timestamp' },
+    { id: 'older', role: 'assistant', content: 'older timestamp', timestamp: '2026-02-01T10:00:00Z' },
+  ] };
+  const result = buildHandoffWithSummary(input, {
+    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: 1, recentMode: 'timestamp',
+  });
+  assert.ok(result.text.includes('second equal timestamp'));
+  assert.ok(!result.text.includes('first equal timestamp'));
+  assert.ok(!result.text.includes('missing timestamp'));
+  assert.ok(!result.text.includes('invalid timestamp'));
+  assert.equal(result.summary.missingTimestampCount, 2);
+  assert.equal(result.summary.eligibleMessageCount, 3);
+  assert.deepEqual(result.summary.timeRange, { start: '2026-02-02T10:00:00.000Z', end: '2026-02-02T10:00:00.000Z' });
+});
+
 test('handoff honors budget for recent content and explicitly preserves oversized pins', () => {
   const input = conversation('x'.repeat(20_000), 'assistant');
   const options = { goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: 1, maxCharacters: 2500 };
   const result = buildHandoff(input, options);
   assert.ok(result.length <= 2500, `Expected budget <=2500, got ${result.length}`);
   assert.match(result, /excerpt shortened/);
+  const reported = buildHandoffWithSummary(input, options);
+  assert.equal(reported.summary.completeMessageCount, 0);
+  assert.equal(reported.summary.truncatedMessageCount, 1);
+  assert.deepEqual(reported.summary.truncatedMessageIds, ['m1']);
+  assert.match(reported.text, /excerpt shortened/);
   const pinned = buildHandoff(input, { ...options, pinnedIds: ['m1'] });
   assert.ok(pinned.includes(input.messages[0]!.content));
   assert.match(pinned, /Budget exceeded/);
+  assert.equal(buildHandoffWithSummary(input, { ...options, pinnedIds: ['m1'] }).summary.budgetExceeded, true);
+});
+
+test('handoff summary identifies recent messages omitted by the text budget', () => {
+  const input: Conversation = { ...conversation(''), messages: [
+    { id: 'm1', role: 'user', content: 'old context '.repeat(20) },
+    { id: 'm2', role: 'assistant', content: 'middle context '.repeat(20) },
+    { id: 'm3', role: 'user', content: 'latest context '.repeat(20) },
+  ] };
+  const result = buildHandoffWithSummary(input, {
+    goal: '', decisions: '', constraints: '', nextSteps: '', pinnedIds: [], recentCount: 2, maxCharacters: 1000,
+  });
+  assert.ok(result.summary.omittedMessageCount + result.summary.truncatedMessageCount > 0);
+  assert.equal(result.summary.selectedRecentMessageCount, 2);
+  assert.equal(result.summary.notSelectedMessageCount, 1);
+  assert.equal(result.summary.omittedMessageCount, result.summary.omittedMessageIds.length);
+  assert.equal(result.summary.truncatedMessageCount, result.summary.truncatedMessageIds.length);
+  for (const id of [...result.summary.omittedMessageIds, ...result.summary.truncatedMessageIds]) assert.ok(['m2', 'm3'].includes(id));
 });
 
 test('fenced exports cannot be broken by backticks inside message bodies', () => {

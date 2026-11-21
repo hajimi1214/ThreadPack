@@ -288,6 +288,39 @@ test('handoff notes are redacted, pinning is preserved, and the text budget expl
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual(['threadpack-language']);
 });
 
+test('handoff timestamp mode reports its range and keeps selected messages in source order', async ({ page }) => {
+  await page.goto('/');
+  await upload(page, 'timestamp-order.json', { messages: [
+    { role: 'user', content: 'LATEST_TIMESTAMP', timestamp: '2026-01-05T00:00:00Z' },
+    { role: 'assistant', content: 'VERY_OLD_TIMESTAMP', timestamp: '2026-01-01T00:00:00Z' },
+    { role: 'user', content: 'SECOND_NEWEST_TIMESTAMP', timestamp: '2026-01-04T00:00:00Z' },
+    { role: 'assistant', content: 'MIDDLE_TIMESTAMP', timestamp: '2026-01-03T00:00:00Z' },
+    { role: 'user', content: 'NEXT_OLDEST_TIMESTAMP', timestamp: '2026-01-02T00:00:00Z' },
+    { role: 'assistant', content: 'NO_TIMESTAMP_MESSAGE' },
+  ] });
+  await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Recent messages', exact: true }).selectOption('4');
+  const document = page.locator('.handoff-document');
+  await expect(document).toContainText('SECOND_NEWEST_TIMESTAMP');
+  await expect(document).toContainText('NEXT_OLDEST_TIMESTAMP');
+  await expect(document).not.toContainText('VERY_OLD_TIMESTAMP');
+  await expect(document).toContainText('NO_TIMESTAMP_MESSAGE');
+  await expect(document).not.toContainText('LATEST_TIMESTAMP');
+
+  await page.getByRole('button', { name: 'Latest timestamps', exact: true }).click();
+  await expect(document).toContainText('LATEST_TIMESTAMP');
+  await expect(document).toContainText('SECOND_NEWEST_TIMESTAMP');
+  await expect(document).not.toContainText('VERY_OLD_TIMESTAMP');
+  await expect(document).not.toContainText('NO_TIMESTAMP_MESSAGE');
+  await expect(document).toContainText('LATEST_TIMESTAMP');
+  await expect(page.locator('.handoff-summary')).toContainText('Latest timestamps');
+  await expect(page.locator('.handoff-summary')).toContainText('Recent context time range');
+  await expect(page.locator('.handoff-summary')).toContainText('Complete messages');
+  await expect(page.locator('.handoff-summary')).toContainText('Within limit');
+  await expect(page.locator('.handoff-summary')).toContainText('Without valid timestamps');
+  expect(await document.evaluate((element) => element.textContent!.indexOf('LATEST_TIMESTAMP') < element.textContent!.indexOf('SECOND_NEWEST_TIMESTAMP'))).toBeTruthy();
+});
+
 test('paste, malformed JSON, clearing, language, and help keyboard focus all work', async ({ page }) => {
   await page.goto('/');
   const help = page.getByRole('button', { name: 'How it works', exact: true });
