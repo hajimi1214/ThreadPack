@@ -45,6 +45,8 @@ export interface MessageReviewExcerpt { text: string; shortened: boolean; imageH
 export interface CompareMessageResult { original: MessageReviewExcerpt; cleaned: MessageReviewExcerpt; changes: Change[] }
 export interface HandoffNotes { goal: string; decisions: string; constraints: string; nextSteps: string }
 export interface HandoffResult { text: string; summary: HandoffSummary }
+export interface PinNumbersResult { pinnedMessages: { number: number; fingerprint: string }[] }
+export interface PinIdsResult { pinnedIds: string[] }
 export interface ImportProgress { loaded: number; total: number }
 interface RequestBase { id: number }
 interface Selection { archiveId: number; conversationId: string }
@@ -53,6 +55,8 @@ export interface ParseRequest extends RequestBase {
   type: 'parse'; archiveId: number; keepArchiveId: number | null;
   text?: string; filename?: string; file?: File;
 }
+export interface PinNumbersRequest extends RequestBase, Selection { type: 'pin-numbers'; pinnedIds: string[] }
+export interface PinIdsRequest extends RequestBase, Selection { type: 'pin-ids'; pinnedMessages: { number: number; fingerprint: string }[] }
 export interface CleanRequest extends RequestBase, Selection { type: 'clean'; options: CleanOptions }
 export interface PreviewFilters {
   mode: 'cleaned' | 'original'; query: string; role: 'all' | Role;
@@ -83,7 +87,7 @@ export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   maxCharacters?: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
-export type WorkerResult = ParseInfo | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | PinNumbersRequest | PinIdsRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
+export type WorkerResult = ParseInfo | PinNumbersResult | PinIdsResult | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; 'pin-numbers': PinNumbersResult; 'pin-ids': PinIdsResult; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }

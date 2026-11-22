@@ -11,6 +11,8 @@ import { useConversationDrafts } from './hooks/useConversationDrafts';
 import { useWorkerClient } from './hooks/useWorkerClient';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { isRedactionDraftDirty } from './redaction-draft';
+import { MAX_HANDOFF_DRAFT_BYTES, parseHandoffDraft, serializeHandoffDraft, sha256Fingerprint } from './handoff-draft';
+import type { HandoffDraft } from './handoff-draft';
 import { applyCleanupRecipe, identifyCleanupRecipe } from './cleanup-recipes';
 import { localizeDiagnostic, localizeWarning } from '../cli/i18n';
 import MessageCard from './components/MessageCard';
@@ -22,13 +24,14 @@ import type { QuickAction } from './components/CommandMenu';
 import THIRD_PARTY_NOTICES from '../public/third-party-licenses.txt?raw';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
-import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult } from './worker/types';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult, PinIdsResult, PinNumbersResult } from './worker/types';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean };
+type PendingHandoffDraft = HandoffDraft & { resolvedPins: string[] };
 const MAX_BYTES = 100 * 1024 * 1024;
 const NO_PIN_FILTER: string[] = [];
 const PROJECT_URL = 'https://hajimi1214.github.io/ThreadPack/';
@@ -93,7 +96,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(() => { try { return resolveLanguage(localStorage.getItem('threadpack-language'), navigator.languages); } catch { return resolveLanguage(null, navigator.languages); } });
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
-  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | null>(null);
+  const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | 'draft-confirm' | null>(null);
   const [shareState, setShareState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [archive, setArchive] = useState<ParseInfo | null>(null);
   const [originalSource, setOriginalSource] = useState<{ blob: Blob; name: string } | null>(null);
@@ -108,11 +111,13 @@ export default function App() {
   const [handoffSummary, setHandoffSummary] = useState<HandoffResult['summary'] | null>(null);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState(false);
+  const [draftOperation, setDraftOperation] = useState<'import' | 'export' | null>(null);
   const [messageReview, setMessageReview] = useState<{ messageId: string; result: CompareMessageResult } | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingHandoffDraft, setPendingHandoffDraft] = useState<PendingHandoffDraft | null>(null);
   const isCompact = useMediaQuery('(max-width: 800px)');
   const [filename, setFilename] = useState('');
   const [demo, setDemo] = useState(false);
@@ -137,6 +142,7 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
   const [updateReady, setUpdateReady] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const handoffDraftInput = useRef<HTMLInputElement>(null);
   const messageList = useRef<HTMLDivElement>(null);
   const previewPanel = useRef<HTMLElement>(null);
   const goalInput = useRef<HTMLTextAreaElement>(null);
@@ -155,6 +161,8 @@ export default function App() {
   const cleanupGeneration = useRef(0);
   const optionsKey = JSON.stringify(options);
   const customDirty = isRedactionDraftDirty(customText, options.customSecrets);
+  const handoffDraftDirty = pins.length > 0 || Object.values(notes).some(value => value.length > 0)
+    || recent !== 8 || recentMode !== 'source' || budget !== 12000;
   const currentConversation = archive?.conversations.find(c => c.id === selected);
   const visibleWarnings = [...(archive?.warnings ?? []), ...(processed?.warnings ?? [])];
   const handoffTimeRange = handoffSummaryTimeRange(handoffSummary?.timeRange, lang, t.noTimeRange);
@@ -169,6 +177,9 @@ export default function App() {
   const handoffCopyContext = JSON.stringify([actionContext, handoffText, notes, recent, recentMode, budget]);
   const handoffCopyContextRef = useRef(handoffCopyContext);
   handoffCopyContextRef.current = handoffCopyContext;
+  const handoffDraftContext = JSON.stringify([actionContext, notes, pins, recent, recentMode, budget]);
+  const handoffDraftContextRef = useRef(handoffDraftContext);
+  handoffDraftContextRef.current = handoffDraftContext;
   const overlayOpen = dialog !== null || !!pendingAction || isCompact && settingsOpen;
 
   useEffect(() => {
@@ -345,14 +356,89 @@ export default function App() {
   function clearCustomRules() { setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); }
   function resetRecipe() { setOptions({ ...DEFAULT_OPTIONS }); setCustomText(''); setCustomError(''); notify(t.recipeReset); }
 
-  function download(content: BlobPart, name: string, type: string) {
+  function download(content: BlobPart, name: string, type: string, feedback = t.downloaded) {
     const url = URL.createObjectURL(new Blob([content], { type }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; document.body.append(anchor); anchor.click(); anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500); notify(t.downloaded);
+    setTimeout(() => URL.revokeObjectURL(url), 1500); notify(feedback);
   }
   function downloadOriginalSource() {
     if (!originalSource) return;
     download(originalSource.blob, originalSource.name, originalSource.blob.type || 'application/octet-stream');
+  }
+  async function exportHandoffDraft() {
+    if (!archive || !currentConversation || draftOperation) return;
+    const generation = importGeneration.current;
+    const archiveId = archive.archiveId;
+    const conversationId = selected;
+    const context = handoffDraftContext;
+    setDraftOperation('export');
+    try {
+      const mapped = pins.length
+        ? await request<PinNumbersResult>({ type: 'pin-numbers', archiveId, conversationId, pinnedIds: pins })
+        : { pinnedMessages: [] };
+      if (generation !== importGeneration.current || archiveId !== activeArchiveId.current || conversationId !== selected || context !== handoffDraftContextRef.current) return;
+      const sourceFingerprint = await sha256Fingerprint(`${archive.format}\0${conversationId}\0${currentConversation.title}\0${currentConversation.messageCount}`);
+      if (generation !== importGeneration.current || archiveId !== activeArchiveId.current || conversationId !== selected || context !== handoffDraftContextRef.current) return;
+      const draft: HandoffDraft = {
+        format: 'threadpack-handoff-draft', version: 1,
+        source: {
+          format: archive.format,
+          fingerprint: sourceFingerprint,
+          messageCount: currentConversation.messageCount,
+        },
+        notes, pinnedMessages: mapped.pinnedMessages,
+        recentCount: recent, recentMode, maxCharacters: budget as HandoffDraft['maxCharacters'],
+      };
+      const text = serializeHandoffDraft(draft);
+      download(text, 'threadpack-handoff-draft.json', 'application/json;charset=utf-8', t.draftExported);
+    } catch {
+      if (generation === importGeneration.current && archiveId === activeArchiveId.current && conversationId === selected
+        && context === handoffDraftContextRef.current) notify(t.draftExportFailed, 'error');
+    } finally { setDraftOperation(null); }
+  }
+  async function importHandoffDraft(file: File) {
+    if (!archive || !currentConversation || draftOperation) return;
+    if (file.size > MAX_HANDOFF_DRAFT_BYTES) { notify(t.draftTooLarge, 'error'); return; }
+    const generation = importGeneration.current;
+    const archiveId = archive.archiveId;
+    const conversationId = selected;
+    const context = handoffDraftContext;
+    setDraftOperation('import');
+    try {
+      const buffer = await file.arrayBuffer();
+      if (generation !== importGeneration.current || archiveId !== activeArchiveId.current || conversationId !== selected || context !== handoffDraftContextRef.current) return;
+      if (buffer.byteLength > MAX_HANDOFF_DRAFT_BYTES) { notify(t.draftTooLarge, 'error'); return; }
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+      const draft = parseHandoffDraft(text);
+      const hasPins = draft.pinnedMessages.length > 0;
+      const sourceFingerprint = await sha256Fingerprint(`${archive.format}\0${conversationId}\0${currentConversation.title}\0${currentConversation.messageCount}`);
+      if (generation !== importGeneration.current || archiveId !== activeArchiveId.current || conversationId !== selected || context !== handoffDraftContextRef.current) return;
+      if (hasPins && (draft.source.format !== archive.format || draft.source.messageCount !== currentConversation.messageCount
+        || draft.source.fingerprint !== sourceFingerprint)) {
+        throw new Error('draft-source-mismatch');
+      }
+      const mapped = hasPins
+        ? await request<PinIdsResult>({ type: 'pin-ids', archiveId, conversationId, pinnedMessages: draft.pinnedMessages })
+        : { pinnedIds: [] };
+      if (generation !== importGeneration.current || archiveId !== activeArchiveId.current || conversationId !== selected) return;
+      const pending: PendingHandoffDraft = { ...draft, resolvedPins: mapped.pinnedIds };
+      if (handoffDraftDirty) { setPendingHandoffDraft(pending); setDialog('draft-confirm'); }
+      else applyHandoffDraft(pending);
+    } catch (error) {
+      if (generation === importGeneration.current && archiveId === activeArchiveId.current && conversationId === selected && context === handoffDraftContextRef.current) {
+        notify((error as Error).message === 'draft-source-mismatch' ? t.draftSourceMismatch : t.draftInvalid, 'error');
+      }
+    } finally { setDraftOperation(null); }
+  }
+  function applyHandoffDraft(draft: PendingHandoffDraft) {
+    setNotes(draft.notes);
+    setPins(draft.resolvedPins);
+    setRecent(draft.recentCount);
+    setRecentMode(draft.recentMode);
+    setBudget(draft.maxCharacters);
+    setPendingHandoffDraft(null);
+    setDialog(null);
+    notify(t.draftImported);
   }
   async function exportFile(format: 'markdown' | 'jsonl' | 'report' | 'bundle', excerpt = false) {
     if (!archive || !processed || working || customDirty || exportLock.current || excerpt && (format === 'report' || format === 'bundle' || !preview?.total)) return;
@@ -553,6 +639,22 @@ export default function App() {
               </div></div>
             </div>
             <p className="field-note">{t.pinsHint}</p><p className="field-note draft-note">{t.draftHint}</p>
+            <div className="draft-actions">
+              <input ref={handoffDraftInput} type="file" className="file-input" accept=".json,application/json" aria-label={t.importDraft} onChange={event => {
+                const file = event.target.files?.[0];
+                if (file) void importHandoffDraft(file);
+                event.target.value = '';
+              }} />
+              <div className="draft-actions-buttons">
+                <button className="button secondary small" disabled={!!draftOperation} aria-busy={draftOperation === 'import'} onClick={() => handoffDraftInput.current?.click()}>
+                  {draftOperation === 'import' ? <LoaderCircle size={14} className="spin" /> : <Upload size={14} />}{draftOperation === 'import' ? t.draftImporting : t.importDraft}
+                </button>
+                <button className="button secondary small" disabled={!!draftOperation} aria-busy={draftOperation === 'export'} onClick={() => void exportHandoffDraft()}>
+                  {draftOperation === 'export' ? <LoaderCircle size={14} className="spin" /> : <Download size={14} />}{draftOperation === 'export' ? t.draftExporting : t.exportDraft}
+                </button>
+              </div>
+              <p className="field-note">{t.draftFileHint}</p>
+            </div>
           </div>
         </section>
         <section className="handoff-preview panel" aria-busy={handoffBusy}>
@@ -614,6 +716,7 @@ export default function App() {
     {dialog === 'commands' && <Dialog close={() => setDialog(null)} label={t.quickActions} closeLabel={t.close} className="command-dialog"><CommandMenu actions={quickActions} t={t} execute={executeQuickAction} /></Dialog>}
     {isCompact && settingsOpen && <Dialog close={() => setSettingsOpen(false)} label={t.recipe} closeLabel={t.close} className="settings-sheet"><div className="settings-sheet-content">{cleanupPanel}</div><div className="settings-sheet-actions"><button className="button primary" onClick={finishSettings}>{t.doneSettings}<Check size={16} /></button></div></Dialog>}
     {dialog === 'compare' && <Dialog close={closeMessageReview} label={t.comparisonTitle} closeLabel={t.close} className="message-review-dialog"><div className="dialog-eyebrow"><Eye size={17} />{t.comparisonTitle}</div><h2>{t.comparisonTitle}</h2><p className="review-message-warning"><ShieldCheck size={14} />{t.compareWarning}</p>{reviewBusy && <p className="review-message-loading" role="status"><LoaderCircle size={16} className="spin" />{t.processing}</p>}{messageReview && <><div className="review-change-list">{messageReview.result.changes.map((change, index) => <span key={`${change.kind}-${index}`}>{change.count} {t[reviewChangeLabels[change.kind]]}</span>)}</div><div className="review-columns"><section className="review-column"><h3>{t.compareOriginal}</h3><pre>{messageReview.result.original.text || '—'}</pre>{messageReview.result.original.shortened && <small>{t.comparisonShortened}</small>}</section><section className="review-column"><h3>{t.compareCleaned}</h3><pre>{messageReview.result.cleaned.text || '—'}</pre>{messageReview.result.cleaned.shortened && <small>{t.comparisonShortened}</small>}</section></div>{(messageReview.result.original.imageHidden || messageReview.result.cleaned.imageHidden) && <p className="review-message-note">{t.imagePreviewHidden}</p>}</>}</Dialog>}
+    {dialog === 'draft-confirm' && pendingHandoffDraft && <Dialog close={() => { setDialog(null); setPendingHandoffDraft(null); }} label={t.draftReplaceTitle} closeLabel={t.close}><div className="dialog-eyebrow"><FileJson size={17} />{t.importDraft}</div><h2>{t.draftReplaceTitle}</h2><p className="dialog-subtitle">{t.draftReplaceHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => { setDialog(null); setPendingHandoffDraft(null); }}>{t.cancel}</button><button className="button primary" onClick={() => applyHandoffDraft(pendingHandoffDraft)}>{t.draftReplaceAction}</button></div></Dialog>}
     {pendingAction && <Dialog close={() => setPendingAction(null)} label={t.unsavedNotes} closeLabel={t.close}><div className="dialog-eyebrow"><FileText size={17} />{t.unsavedNotes}</div><h2>{t.unsavedNotes}</h2><p className="dialog-subtitle">{t.discardHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => setPendingAction(null)}>{t.keepWorking}</button><button className="button danger" onClick={discardNotes}>{t.discardNotes}</button></div></Dialog>}
     {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div><div className="help-project-actions"><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a><button className="button secondary small" aria-label={t.shareProject} aria-busy={shareState === 'pending'} disabled={shareState === 'pending'} title={t.shareProjectHint} onClick={() => void shareProject()}>{shareState === 'pending' ? <LoaderCircle size={14} className="spin" /> : shareState === 'success' ? <Check size={14} /> : <Link size={14} />}{shareState === 'success' ? t.copied : t.shareProject}</button></div><ThirdPartyNotices t={t} /></Dialog>}
     {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}

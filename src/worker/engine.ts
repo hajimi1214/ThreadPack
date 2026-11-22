@@ -8,6 +8,7 @@ import { APP_VERSION } from '../version';
 import { buildCodeArchive, codeSnippetFilename, normalizedSnippetLanguage } from './code-archive';
 import { buildContextBundle } from './context-bundle';
 import { extractZipText } from './zip-import';
+import { sha256Fingerprint } from '../handoff-draft';
 import { localizeWarning } from '../../cli/i18n';
 import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
@@ -19,6 +20,10 @@ const CANCELLED_IMPORT = 'This import was cancelled or replaced by a newer impor
 const IMAGE_DATA = /data:image\/[a-z0-9.+-]+;base64,(?:[a-z0-9+/=_-]|\\[rn])+/gi;
 const encoder = new TextEncoder();
 const byteLength = (value: string): number => encoder.encode(value).byteLength;
+
+async function messageFingerprint(message: Conversation['messages'][number]): Promise<string> {
+  return sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`);
+}
 
 interface CleanCache {
   revision: number;
@@ -89,6 +94,41 @@ export class WorkerEngine {
     const state = this.archives.get(request.archiveId);
     const original = state?.archive.conversations.find(conversation => conversation.id === request.conversationId);
     if (!state || !original) throw new Error('This conversation is unavailable. Import the conversation again.');
+    if (request.type === 'pin-numbers') {
+      if (!Array.isArray(request.pinnedIds) || request.pinnedIds.length > original.messages.length
+        || request.pinnedIds.some(id => typeof id !== 'string' || id.length < 1 || id.length > 500)) {
+        throw new Error('Valid pinned message references are required.');
+      }
+      const messageIndexes = new Map<string, number>();
+      original.messages.forEach((message, index) => {
+        if (messageIndexes.has(message.id)) messageIndexes.set(message.id, -1);
+        else messageIndexes.set(message.id, index);
+      });
+      const indexes = request.pinnedIds.map(id => messageIndexes.get(id) ?? -1);
+      if (indexes.some(index => index < 0) || new Set(indexes).size !== indexes.length) {
+        throw new Error('Pinned messages could not be matched to this conversation.');
+      }
+      const pinnedMessages = await Promise.all(indexes.map(async index => ({
+        number: index + 1,
+        fingerprint: await messageFingerprint(original.messages[index]!),
+      })));
+      return { pinnedMessages };
+    }
+    if (request.type === 'pin-ids') {
+      if (!Array.isArray(request.pinnedMessages) || request.pinnedMessages.length > original.messages.length
+        || request.pinnedMessages.some(pin => !pin || !Number.isSafeInteger(pin.number) || pin.number < 1 || pin.number > original.messages.length
+          || typeof pin.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(pin.fingerprint))
+        || new Set(request.pinnedMessages.map(pin => pin.number)).size !== request.pinnedMessages.length) {
+        throw new Error('Valid pinned message numbers are required.');
+      }
+      const pinnedIds = await Promise.all(request.pinnedMessages.map(async pin => {
+        const message = original.messages[pin.number - 1]!;
+        return await messageFingerprint(message) === pin.fingerprint ? message.id : '';
+      }));
+      if (new Set(pinnedIds).size !== pinnedIds.length) throw new Error('Pinned messages could not be matched to this conversation.');
+      if (pinnedIds.some(id => !id)) throw new Error('Pinned messages could not be matched to this conversation.');
+      return { pinnedIds };
+    }
     if (request.type === 'clean') {
       const options = snapshotOptions(request.options);
       const optionsKey = JSON.stringify(options);

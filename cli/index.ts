@@ -45,14 +45,16 @@ Options:
   --version                              Show the installed version
 
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.
+Browser ZIP imports allow up to 256 entries and 100 MiB expanded content.
 Redaction files are limited to 64 KiB, with up to 50 values of 3–1000 characters.
+Notes files are limited to 256 KiB, with up to 12000 characters in each field.
 Blank lines are ignored. Other whitespace is significant. Custom rules stay active
 with --no-redact. Input, cleaned output, original copy, notes, and redaction files
 must be different files, including aliases.
 Email addresses are redacted by default; --no-redact-emails preserves them.
 The original copy preserves the input bytes. --force replaces both output files.
 --language selects English, Chinese, Japanese, French, or Spanish for reader-facing CLI output, reports, and handoffs.
-Source files are never overwritten. Exports are portable copies, not native sessions.
+Source files are never overwritten. Normalized JSONL is for data exchange, not native session recovery.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 `;
 

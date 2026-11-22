@@ -26,10 +26,14 @@ export const HELP_ZH = `ThreadPack — 携带 AI 对话中的重要内容。
   --version                                显示版本
 
 输入为 '-' 时从 stdin 读取 UTF-8 内容，输入上限为 100 MiB。
+浏览器 ZIP 导入最多 256 个条目，解压后内容最多 100 MiB。
+规则文件最多 64 KiB，含至多 50 项，每项 3–1000 个字符。
+笔记文件最多 256 KiB，每个字段最多 12000 个字符。
 --language 也会本地化 Markdown、交接包、报告说明和警告。
 默认启用严格邮箱脱敏；使用 --no-redact-emails 可保留邮箱。
 笔记、规则、原始副本、清理输出和输入文件必须互不相同。
 原始副本按输入字节保存，输入文件不会被修改。
+标准化 JSONL 用于数据交换，不是原生会话恢复文件。
 `;
 
 export const HELP_JA = `ThreadPack — AI 会話の要点を持ち運ぶツール。
@@ -58,6 +62,9 @@ export const HELP_JA = `ThreadPack — AI 会話の要点を持ち運ぶツー�
   --version                               バージョンを表示
 
 入力に '-' を指定すると stdin から UTF-8 を読み込みます。上限は 100 MiB です。
+ブラウザーの ZIP は 256 エントリー、展開後 100 MiB までです。
+マスキングルールは 64 KiB、最大 50 件（各 3～1000 文字）です。
+メモファイルは 256 KiB、各項目は最大 12000 文字です。
 メールアドレスは既定でマスキングされます。--no-redact-emails で保持できます。
 入力、出力、元ファイルのコピー、メモ、マスキングルールは別々のファイルにしてください。
 `;
@@ -88,6 +95,9 @@ Options :
   --version                               Afficher la version
 
 Avec '-' en entrée, le texte UTF-8 est lu depuis stdin. Limite : 100 MiB.
+Dans le navigateur, les ZIP sont limités à 256 entrées et 100 Mio décompressés.
+Les règles sont limitées à 64 Kio et 50 valeurs de 3 à 1 000 caractères.
+Les notes sont limitées à 256 Kio et 12 000 caractères par champ.
 Les adresses e-mail sont masquées par défaut. --no-redact-emails les conserve.
 L’entrée, les sorties, la copie originale, les notes et les règles doivent être distinctes.
 `;
@@ -118,6 +128,9 @@ Opciones:
   --version                               Mostrar la versión
 
 Usa '-' como entrada para leer texto UTF-8 desde stdin. Límite: 100 MiB.
+En el navegador, los ZIP admiten hasta 256 entradas y 100 MiB descomprimidos.
+Las reglas se limitan a 64 KiB y 50 valores de 3 a 1000 caracteres.
+Las notas se limitan a 256 KiB y 12000 caracteres por campo.
 Los correos se ocultan de forma predeterminada. --no-redact-emails los conserva.
 La entrada, las salidas, la copia original, las notas y las reglas deben ser archivos distintos.
 `;
