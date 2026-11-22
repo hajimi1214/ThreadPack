@@ -224,8 +224,25 @@ test('CLI report contains aggregate statistics and no message content', async ()
   const report = JSON.parse(raw);
   assert.equal(report.tool, 'ThreadPack');
   assert.ok(report.stats.beforeBytes > 0);
+  assert.equal(report.sourcePlatform, 'generic');
+  assert.equal(report.integrity.importedMessageCount, 2);
   assert.ok(!raw.includes(fakeSecret));
   assert.ok(!raw.includes('acceptance criteria'));
+});
+
+test('CLI report carries content-free integrity codes for unknown provider records', async () => {
+  const privateEvent = 'PRIVATE_UNKNOWN_EVENT_BODY_7482';
+  const input = join(folder, 'integrity.jsonl');
+  const output = join(folder, 'integrity-report.json');
+  await writeFile(input, `${JSON.stringify({ role: 'user', content: 'Known message.' })}\n${JSON.stringify({ type: 'future-provider-event', payload: { content: privateEvent } })}\n`);
+  const result = run([input, '--out', output, '--format', 'report']);
+  assert.equal(result.status, 0, result.stderr);
+  const text = await readFile(output, 'utf8');
+  const report = JSON.parse(text);
+  assert.equal(report.sourcePlatform, 'generic');
+  assert.equal(report.integrity.status, 'partial');
+  assert.ok(report.integrity.issues.some((issue: { code: string }) => issue.code === 'unknown-record'));
+  assert.ok(!text.includes(privateEvent));
 });
 
 test('CLI timestamp mode selects valid recent messages and reports the handoff range and budget counts', async () => {

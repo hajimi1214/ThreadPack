@@ -13,12 +13,15 @@ test('Codex JSONL imports response records once, converts images and preserves t
     { type: 'session_meta', payload: { id: 'session-1' } },
     { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Fix the parser.' }, { type: 'input_image', image_url: 'data:image/png;base64,' + 'QUJD'.repeat(1000) }] } },
     { type: 'event_msg', payload: { type: 'user_message', message: 'Fix the parser.' } },
-    { type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"cmd":"npm test"}' } },
-    { type: 'response_item', timestamp: '2026-01-01T00:00:00Z', payload: { type: 'function_call_output', output: 'All tests passed.' } },
+    { type: 'response_item', payload: { type: 'function_call', call_id: 'shell-call', name: 'shell', arguments: '{"cmd":"npm test"}' } },
+    { type: 'response_item', timestamp: '2026-01-01T00:00:00Z', payload: { type: 'function_call_output', call_id: 'shell-call', output: 'All tests passed.' } },
     { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] } },
   ), 'rollout.jsonl');
   assert.equal(result.format, 'Codex JSONL');
   assert.equal(result.conversations[0]!.messages.length, 4);
+  assert.equal(result.conversations[0]!.messages[1]!.kind, 'tool-call');
+  assert.equal(result.conversations[0]!.messages[1]!.toolCallId, result.conversations[0]!.messages[2]!.toolCallId);
+  assert.equal(result.conversations[0]!.messages[0]!.provenance?.platform, 'codex');
   assert.equal(result.conversations[0]!.messages[2]!.role, 'tool');
   assert.match(result.conversations[0]!.messages[1]!.content, /npm test/);
   const cleaned = cleanConversation(result.conversations[0]!, DEFAULT_OPTIONS);
@@ -27,19 +30,38 @@ test('Codex JSONL imports response records once, converts images and preserves t
   assert.match(cleaned.conversation.messages[0]!.content, /Fix the parser/);
 });
 
+test('Codex reasoning records and non-message events retain distinct timeline meaning', () => {
+  const archive = parseInput(jsonl(
+    { type: 'session_meta', payload: { id: 'session-fixture' } },
+    { type: 'response_item', timestamp: '2026-02-03T04:05:06Z', payload: { id: 'reasoning-1', type: 'reasoning', summary: [{ type: 'summary_text', text: 'Compare the two implementations.' }] } },
+    { type: 'event_msg', payload: { type: 'turn_started' } },
+    { type: 'response_item', payload: { id: 'answer-1', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'The second implementation is correct.' }] } },
+  ), 'rollout.jsonl');
+  const conversation = archive.conversations[0]!;
+  assert.deepEqual(conversation.messages.map(message => message.kind), ['reasoning', 'message']);
+  assert.equal(conversation.messages[0]!.timestamp, '2026-02-03T04:05:06.000Z');
+  assert.equal(conversation.messages[0]!.provenance?.platformId, 'reasoning-1');
+  assert.equal(conversation.events?.length, 2);
+  assert.equal(archive.integrity?.timelineEventCount, 2);
+});
+
 test('Claude Code tool_result is a tool output even inside a user envelope', () => {
   const result = parseInput(jsonl(
     { type: 'user', uuid: 'user-1', message: { role: 'user', content: 'Run tests.' } },
-    { type: 'assistant', uuid: 'assistant-1', message: { role: 'assistant', content: [{ type: 'text', text: 'Checking.' }, { type: 'tool_use', name: 'Bash', input: { command: 'npm test' } }] } },
+    { type: 'assistant', uuid: 'assistant-1', message: { role: 'assistant', content: [{ type: 'text', text: 'Checking.' }, { type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'npm test' } }] } },
     { type: 'user', uuid: 'tool-1', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'x'.repeat(15000) + '\nERROR: final failure' }] } },
   ), 'session.jsonl');
   assert.equal(result.format, 'Claude Code JSONL');
-  assert.deepEqual(result.conversations[0]!.messages.map((message) => message.role), ['user', 'assistant', 'tool']);
+  assert.deepEqual(result.conversations[0]!.messages.map((message) => message.role), ['user', 'assistant', 'assistant', 'tool']);
+  assert.deepEqual(result.conversations[0]!.messages.map((message) => message.kind), ['message', 'message', 'tool-call', 'tool-result']);
+  assert.equal(result.conversations[0]!.messages[2]!.toolName, 'Bash');
+  assert.equal(result.conversations[0]!.messages[2]!.toolCallId, result.conversations[0]!.messages[3]!.toolCallId);
+  assert.equal(result.conversations[0]!.messages[0]!.provenance?.platformId, 'user-1');
   const cleaned = cleanConversation(result.conversations[0]!, { ...DEFAULT_OPTIONS, toolLimit: 500 });
   assert.equal(cleaned.stats.outputsTrimmed, 1);
-  assert.ok(cleaned.conversation.messages[2]!.content.length <= 500);
-  assert.match(cleaned.conversation.messages[2]!.content, /ERROR: final failure/);
-  assert.match(cleaned.conversation.messages[2]!.content, /characters omitted/);
+  assert.ok(cleaned.conversation.messages[3]!.content.length <= 500);
+  assert.match(cleaned.conversation.messages[3]!.content, /ERROR: final failure/);
+  assert.match(cleaned.conversation.messages[3]!.content, /characters omitted/);
 });
 
 test('ChatGPT follows only the active branch in parent order', () => {
@@ -47,12 +69,160 @@ test('ChatGPT follows only the active branch in parent order', () => {
     root: { parent: null, message: { id: 'm0', author: { role: 'system' }, content: { parts: ['System prompt'] } } },
     a: { parent: 'root', message: { id: 'm1', author: { role: 'user' }, content: { parts: ['Question'] } } },
     abandoned: { parent: 'a', message: { id: 'wrong', author: { role: 'assistant' }, content: { parts: ['Abandoned branch'] } } },
-    b: { parent: 'a', message: { id: 'm2', author: { role: 'assistant' }, content: { parts: ['Active answer'] } } },
+    middle: { parent: 'a', message: null },
+    b: { parent: 'middle', message: { id: 'm2', author: { role: 'assistant' }, content: { parts: ['Active answer'] } } },
   } }]), 'conversations.json');
   assert.equal(result.conversations.length, 1);
   assert.deepEqual(result.conversations[0]!.messages.map((message) => message.id), ['message-1', 'message-2', 'message-3']);
   assert.deepEqual(result.conversations[0]!.messages.map((message) => message.content), ['System prompt', 'Question', 'Active answer']);
+  assert.deepEqual(result.conversations[0]!.history?.messages.map(message => message.content), ['System prompt', 'Question', 'Active answer', 'Abandoned branch']);
+  assert.equal(result.conversations[0]!.history?.branches.length, 2);
+  assert.equal(result.conversations[0]!.history?.activeBranchId, 'branch-2');
+  assert.equal(result.conversations[0]!.history?.branches[0]!.headMessageId, 'message-4');
+  assert.equal(result.conversations[0]!.history?.branches[1]!.headMessageId, 'message-3');
+  assert.deepEqual(result.conversations[0]!.history?.branches[1]!.sourceNodeIds, ['root', 'a', 'middle', 'b']);
+  assert.equal(result.conversations[0]!.history?.messages[3]!.parentId, 'message-2');
+  assert.equal(result.conversations[0]!.history?.messages[2]!.parentId, 'message-2');
+  assert.equal(result.integrity?.status, 'complete');
   assert.doesNotMatch(buildTranscript(result.conversations[0]!), /Abandoned/);
+});
+
+test('generic OpenAI tool calls retain arguments and pair with their result', () => {
+  const result = parseInput(jsonl(
+    { id: 'assistant-turn', role: 'assistant', content: 'Checking the repository.', tool_calls: [
+      { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/App.tsx"}' } },
+    ], timestamp: '2026-01-02T03:04:05+02:00' },
+    { id: 'tool-result-1', role: 'tool', tool_call_id: 'call-1', content: 'File content follows.' },
+  ), 'openai.jsonl');
+  const messages = result.conversations[0]!.messages;
+  assert.deepEqual(messages.map(message => message.kind), ['message', 'tool-call', 'tool-result']);
+  assert.equal(result.provenance?.platform, 'openai');
+  assert.equal(messages[1]!.toolName, 'read_file');
+  assert.match(messages[1]!.content, /\{"path":"src\/App.tsx"\}/);
+  assert.equal(messages[1]!.toolCallId, messages[2]!.toolCallId);
+  assert.equal(messages[0]!.timestamp, '2026-01-02T01:04:05.000Z');
+  assert.equal(messages[0]!.provenance?.rawTimestamp, '2026-01-02T03:04:05+02:00');
+  assert.equal(result.integrity?.issues.length, 0);
+  const openAiJson = parseInput(JSON.stringify({ id: 'openai-session', messages: [
+    { id: 'assistant-json', role: 'assistant', content: null, tool_calls: [{ id: 'json-call', function: { name: 'lookup', arguments: '{"query":"x"}' } }] },
+    { id: 'tool-json', role: 'tool', tool_call_id: 'json-call', content: 'result' },
+  ] }), 'openai.json');
+  assert.equal(openAiJson.provenance?.platform, 'openai');
+  assert.deepEqual(openAiJson.conversations[0]!.messages.map(message => message.kind), ['tool-call', 'tool-result']);
+  assert.equal(openAiJson.conversations[0]!.provenance?.sourceId, 'openai-session');
+  const repeatedResults = parseInput(jsonl(
+    { role: 'assistant', content: null, tool_calls: [
+      { id: 'call-a', function: { name: 'read', arguments: '{}' } },
+      { id: 'call-b', function: { name: 'read', arguments: '{}' } },
+    ] },
+    { role: 'tool', tool_call_id: 'call-a', content: 'same result' },
+    { role: 'tool', tool_call_id: 'call-b', content: 'same result' },
+  ), 'tools.jsonl');
+  const cleaned = cleanConversation(repeatedResults.conversations[0]!, DEFAULT_OPTIONS);
+  assert.equal(cleaned.stats.duplicatesRemoved, 0);
+  assert.equal(cleaned.conversation.messages.filter(message => message.kind === 'tool-result').length, 2);
+});
+
+test('integrity checks report duplicate IDs, missing parents, cycles, and unmatched tool events', () => {
+  const result = parseInput(jsonl(
+    { id: 'duplicate-source', role: 'assistant', content: null, tool_calls: [{ id: 'call-known', function: { name: 'run', arguments: '{}' } }] },
+    { id: 'duplicate-source', role: 'tool', tool_call_id: 'call-missing', content: 'orphan result' },
+    { id: 'child', role: 'user', content: 'missing parent', parent_id: 'missing' },
+    { id: 'cycle-a', role: 'assistant', content: 'A', parent_id: 'cycle-b' },
+    { id: 'cycle-b', role: 'assistant', content: 'B', parent_id: 'cycle-a' },
+  ), 'integrity.jsonl');
+  assert.equal(result.integrity?.status, 'partial');
+  assert.equal(result.integrity?.sourceRecordCount, 5);
+  assert.deepEqual(new Set(result.integrity?.issues.map(issue => issue.code)), new Set([
+    'duplicate-source-id', 'missing-parent', 'cyclic-parent', 'orphan-tool-result', 'unmatched-tool-call',
+  ]));
+  assert.ok(result.integrity!.issueCount >= 5);
+});
+
+test('malformed and unknown JSONL records are reported and unknown records remain in the timeline', () => {
+  const result = parseInput(jsonl(
+    { role: 'user', content: 'Known message.' },
+    { type: 'future_provider_event', payload: { state: 'synthetic state' } },
+  ) + '\n{broken', 'future.jsonl');
+  assert.equal(result.integrity?.status, 'partial');
+  assert.deepEqual(result.integrity?.issues.map(issue => issue.code).sort(), ['malformed-record', 'unknown-record']);
+  assert.equal(result.conversations[0]!.events?.length, 1);
+  assert.equal(result.conversations[0]!.events?.[0]!.type, 'future_provider_event');
+  assert.match(result.conversations[0]!.events?.[0]!.content ?? '', /synthetic state/);
+});
+
+test('Codex session metadata and unknown records survive cleaned interchange exports', () => {
+  const sessionId = ['ghp', 'R'.repeat(36)].join('_');
+  const source = jsonl(
+    { type: 'session_meta', payload: { id: sessionId } },
+    { type: 'response_item', payload: { id: 'provider-message-1', type: 'message', role: 'user', content: 'Preserve this question.' } },
+    { type: 'future_provider_event', payload: { status: 'synthetic event data' } },
+  );
+  const imported = parseInput(source, 'rollout.jsonl');
+  assert.equal(imported.provenance?.platform, 'codex');
+  assert.equal(imported.integrity?.status, 'partial');
+  assert.equal(imported.conversations[0]!.events?.length, 2);
+  assert.equal(imported.conversations[0]!.messages[0]!.provenance?.platformId, 'provider-message-1');
+  const cleaned = cleanConversation(imported.conversations[0]!, DEFAULT_OPTIONS).conversation;
+  const exported = buildJsonl(cleaned);
+  assert.ok(!exported.includes(sessionId));
+  const roundTrip = parseInput(exported, 'session-v2.jsonl');
+  assert.equal(roundTrip.conversations[0]!.events?.length, 2);
+  assert.equal(roundTrip.conversations[0]!.events?.[1]!.type, 'future_provider_event');
+  assert.equal(roundTrip.conversations[0]!.provenance?.sourceId, '[SECRET_1]');
+});
+
+test('cleaned ThreadPack session JSONL round-trips branches and source provenance', () => {
+  const providerSecret = ['ghp', 'T'.repeat(36)].join('_');
+  const rootNode = providerSecret;
+  const source = JSON.stringify({
+    id: providerSecret,
+    current_node: 'answer',
+    mapping: {
+      [rootNode]: { parent: null, message: { id: 'root-source', author: { role: 'user' }, content: { parts: ['Question with ' + providerSecret] } } },
+      call: { parent: rootNode, message: { id: 'call-source', author: { role: 'assistant' }, content: { parts: [{ type: 'tool_use', id: 'tool-source', name: 'read', input: { file: 'README.md' } }] } } },
+      tool: { parent: 'call', message: { id: 'tool-result-source', author: { role: 'tool' }, content: { parts: ['Read complete.'] } } },
+      answer: { parent: 'tool', message: { id: 'answer-source', author: { role: 'assistant' }, content: { parts: ['Continue.'] } } },
+      alternate: { parent: rootNode, message: { id: 'alternate-source', author: { role: 'assistant' }, content: { parts: ['Alternate branch.'] } } },
+    },
+  });
+  const imported = parseInput(source, 'branches.json');
+  const conversation = imported.conversations[0]!;
+  const cleaned = cleanConversation(conversation, DEFAULT_OPTIONS).conversation;
+  const exported = buildJsonl(cleaned);
+  assert.doesNotMatch(exported, new RegExp(providerSecret));
+  const roundTrip = parseInput(exported, 'threadpack-session.jsonl').conversations[0]!;
+  assert.deepEqual(roundTrip.history?.branches, cleaned.history?.branches);
+  assert.deepEqual(roundTrip.history?.messages.map(message => [message.role, message.kind, message.content, message.toolCallId]),
+    cleaned.history?.messages.map(message => [message.role, message.kind, message.content, message.toolCallId]));
+  assert.equal(roundTrip.provenance?.platform, 'chatgpt');
+  assert.equal(roundTrip.provenance?.sourceId, '[SECRET_1]');
+  assert.equal(roundTrip.history?.branches[0]?.sourceNodeIds?.[0], '[SECRET_1]');
+});
+
+test('malformed ChatGPT mapping entries remain reviewable timeline records', () => {
+  const result = parseInput(JSON.stringify({ current_node: 'root', mapping: {
+    malformed: null,
+    root: { parent: null, message: { author: { role: 'user' }, content: { parts: ['Visible message.'] } } },
+  } }), 'malformed-map.json');
+  assert.equal(result.conversations[0]!.events?.length, 1);
+  assert.equal(result.conversations[0]!.events?.[0]!.type, 'invalid-mapping-node');
+  assert.ok(result.integrity?.issues.some(issue => issue.code === 'unknown-record'));
+});
+
+test('unrecognized conversation entries in a mixed archive are retained as timeline events', () => {
+  const privateText = ['ghp', 'V'.repeat(36)].join('_');
+  const result = parseInput(JSON.stringify([
+    { id: 'known', messages: [{ role: 'user', content: 'Known conversation.' }] },
+    { future_conversation_type: privateText, metadata: { tag: 'synthetic' } },
+  ]), 'mixed-archive.json');
+  assert.equal(result.conversations.length, 1);
+  assert.equal(result.conversations[0]!.events?.[0]!.type, 'unrecognized-conversation');
+  assert.equal(result.integrity?.sourceRecordCount, 2);
+  assert.ok(result.integrity?.issues.some(issue => issue.code === 'unknown-record'));
+  const cleaned = cleanConversation(result.conversations[0]!, DEFAULT_OPTIONS).conversation;
+  assert.doesNotMatch(buildJsonl(cleaned), new RegExp(privateText));
+  assert.match(cleaned.events?.[0]!.content ?? '', /\[SECRET_1\]/);
 });
 
 test('ChatGPT image asset pointers are labeled without pretending to contain image bytes', () => {
@@ -78,6 +248,19 @@ test('Claude exports support multiple conversations and human sender', () => {
   assert.equal(result.conversations.length, 2);
   assert.equal(result.conversations[0]!.messages[0]!.role, 'user');
   assert.equal(result.conversations[0]!.messages[1]!.content, 'Hi');
+});
+
+test('Claude message UUIDs, parent links, and original timestamps remain traceable', () => {
+  const imported = parseInput(JSON.stringify({ uuid: 'claude-chat', chat_messages: [
+    { uuid: 'human-turn', sender: 'human', text: 'Question.', created_at: '2026-03-01T09:30:00-05:00' },
+    { uuid: 'assistant-turn', parent_message_uuid: 'human-turn', sender: 'assistant', content: [{ type: 'text', text: 'Answer.' }] },
+  ] }), 'claude.json');
+  const [user, assistant] = imported.conversations[0]!.messages;
+  assert.equal(imported.provenance?.platform, 'claude');
+  assert.equal(user!.provenance?.platformId, 'human-turn');
+  assert.equal(user!.timestamp, '2026-03-01T14:30:00.000Z');
+  assert.equal(user!.provenance?.rawTimestamp, '2026-03-01T09:30:00-05:00');
+  assert.equal(assistant!.parentId, user!.id);
 });
 
 test('canonical JSONL round-trips without losing content or Unicode', () => {
@@ -144,6 +327,19 @@ test('known JSON schemas preserve unknown role content with content-free warning
     assert.ok(archive.warnings.some((warning) => warning.includes('1 message(s) with unrecognized roles')));
     assert.ok(archive.warnings.every((warning) => !warning.includes(important)));
   }
+});
+
+test('normalized JSONL preserves partial-import integrity for a forward-compatible role', () => {
+  const imported = parseInput(JSON.stringify({ messages: [
+    { role: 'user', content: 'Known historical text.' },
+    { role: 'future_assistant', content: 'Preserved future-role text.' },
+  ] }), 'future-role.json');
+  assert.equal(imported.integrity?.status, 'partial');
+  const cleaned = cleanConversation(imported.conversations[0]!, DEFAULT_OPTIONS).conversation;
+  const roundTrip = parseInput(buildJsonl(cleaned), 'forward-compatible.jsonl');
+  assert.equal(roundTrip.integrity?.status, 'partial');
+  assert.ok(roundTrip.integrity?.issues.some(issue => issue.code === 'unknown-record'));
+  assert.match(roundTrip.conversations[0]!.messages[1]!.content, /Preserved future-role text/);
 });
 
 test('empty known conversations warn, while empty ChatGPT root nodes do not become fake messages', () => {
@@ -466,6 +662,7 @@ test('fenced exports cannot be broken by backticks inside message bodies', () =>
 test('IDs normalize to deterministic sequential references regardless of provider identifiers', () => {
   const result = parseInput(jsonl({ id: 'same', role: 'user', content: 'One' }, { id: 'same', role: 'assistant', content: 'Two' }), 'test.jsonl');
   assert.deepEqual(result.conversations[0]!.messages.map((message) => message.id), ['message-1', 'message-2']);
+  assert.ok(result.integrity?.issues.some(issue => issue.code === 'duplicate-source-id'));
 });
 
 test('provider credentials in identifiers or invalid timestamps cannot leak through normalized exports', () => {

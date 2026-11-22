@@ -150,7 +150,7 @@ test('replacement protects notes from another conversation before importing the 
   ], 'original-notes.json');
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('CROSS_CONVERSATION_NOTE');
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('beta');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '2. Beta' });
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
   const newFile = file({ messages: [{ role: 'user', content: 'REPLACEMENT_ARCHIVE' }] }, 'replacement.json');
   const input = page.getByLabel('Import file', { exact: true });
@@ -159,7 +159,7 @@ test('replacement protects notes from another conversation before importing the 
   await expect(confirm).toBeVisible();
   await expect(page.locator('.file-details > strong')).toHaveText('original-notes.json');
   await confirm.getByRole('button', { name: 'Keep working', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('alpha');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '1. Alpha' });
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('CROSS_CONVERSATION_NOTE');
   await input.setInputFiles(newFile);
   await confirm.getByRole('button', { name: 'Discard notes', exact: true }).click();
@@ -180,7 +180,7 @@ test('switching conversations resets old filters and exposes system-message filt
   await page.locator('.role-filter').getByRole('button', { name: 'User', exact: true }).click();
   await page.getByRole('button', { name: 'Changed only', exact: true }).click();
   await expect(page.locator('.message-card')).toHaveCount(1);
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('beta');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '2. Beta' });
   await ready(page);
   await expect(search).toHaveValue('');
   await expect(page.locator('.role-filter').getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');

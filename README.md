@@ -32,7 +32,7 @@ Use **Export filtered results** to download every matching message as Markdown o
 
 Open **Code snippets** to collect fenced code blocks across the selected conversation. Search code, filter by language, switch between wrapping and horizontal scrolling, and preview, copy, or download cleaned code. Long code stays complete when copied or downloaded. Use **Download ZIP** for every matching block across pages. The offline app bundles [lowlight](https://github.com/wooorm/lowlight), selected BSD-3-Clause [highlight.js](https://github.com/highlightjs/highlight.js) grammars, [fflate](https://github.com/101arrowz/fflate), and the [react-markdown](https://github.com/remarkjs/react-markdown) GFM renderer. Full license notices appear in Help and release downloads. Try the built-in demo or [this Markdown sample](examples/code-snippets.md).
 
-Use **Portable context bundle** to download one safe ZIP containing the cleaned Markdown transcript, normalized JSONL, aggregate cleanup report, a short manifest, code files, and an optional handoff note. It is designed for issue reports, team handoffs, and archives; the bundle is created in the Worker and never includes original-view content or custom redaction values. Normalized JSONL is an interchange format, not a native session or resume file.
+Use **Portable context bundle** to download one safe ZIP containing the cleaned Markdown transcript, normalized JSONL, aggregate cleanup report, a short manifest, code files, and an optional handoff note. It is designed for issue reports, team handoffs, and archives; the bundle is created in the Worker and never includes original-view content or custom redaction values. Normalized JSONL preserves source references, tool-call links, timeline events, and branches where available. It is an interchange format, not a native session or resume file.
 
 Useful for restarting a long coding session, collecting generated code, or preparing a smaller transcript to share. The **Share ThreadPack** button copies only the tool's public address, with no conversation text or current-page parameters.
 
@@ -57,14 +57,15 @@ The interface supports **English, 简体中文, 日本語, Français, and Españ
 
 | Input | Handling |
 | --- | --- |
-| Codex rollout JSONL | Message, function-call, and tool-result records |
-| Claude Code JSONL | User and assistant messages, including tool results |
-| ChatGPT export JSON | Single or multiple conversations; follows the active branch |
+| Codex rollout JSONL | Messages, function calls and results, session metadata, compaction, and timeline records |
+| Claude Code JSONL | User and assistant messages, ordered tool-use/result blocks, summaries, and source links |
+| ChatGPT export JSON | Single or multiple conversations; shows `current_node` and retains all mapped branches |
 | Claude export JSON | Conversations containing `chat_messages` |
+| OpenAI-compatible JSON / JSONL | `messages` with `tool_calls`, function arguments, and linked tool results |
 | Generic JSON / JSONL | `messages` arrays or records with `role` and `content` |
 | Markdown / plain text | Explicit role headings where present; otherwise retained as text |
 
-Provider exports change over time. Unsupported records and partial imports produce warnings. Asset references without embedded image data cannot recover the original image.
+Provider exports change over time. Unsupported records and partial imports produce warnings and content-free integrity issue counts. Normalized JSONL retains branch graphs and timeline events when present. Asset references without embedded image data cannot recover the original image.
 
 ## Processing workflow
 

@@ -136,7 +136,30 @@ export function buildTranscript(conversation: Conversation, language: OutputLang
 }
 
 export function buildJsonl(conversation: Conversation): string {
-  return conversation.messages.map((message) => JSON.stringify(message)).join('\n') + (conversation.messages.length ? '\n' : '');
+  if (conversation.history || conversation.events?.length
+    || conversation.integrity?.status === 'partial' || conversation.provenance && !conversation.messages.length) {
+    const records = [{
+      type: 'threadpack_session', version: 2,
+      id: conversation.id, title: conversation.title, source: conversation.source,
+      ...(conversation.provenance ? { provenance: conversation.provenance } : {}),
+      ...(conversation.integrity ? { integrity: conversation.integrity } : {}),
+      branches: conversation.history?.branches ?? [],
+      activeBranchId: conversation.history?.activeBranchId ?? '',
+    }, ...(conversation.history?.messages ?? conversation.messages).map(message => ({ type: 'threadpack_message', message })),
+    ...(conversation.events ?? []).map(event => ({ type: 'threadpack_event', event }))];
+    return records.map(record => JSON.stringify(record)).join('\n') + '\n';
+  }
+  return conversation.messages.map(message => {
+    if (!conversation.provenance) return JSON.stringify(message);
+    return JSON.stringify({ ...message, provenance: {
+      ...message.provenance,
+      platform: message.provenance?.platform ?? conversation.provenance.platform,
+      ...(conversation.provenance.sourceId ? { conversationSourceId: conversation.provenance.sourceId } : {}),
+      ...(conversation.provenance.sourceRecordCount !== undefined ? { conversationSourceRecordCount: conversation.provenance.sourceRecordCount } : {}),
+      conversationTitle: conversation.title,
+      conversationSource: conversation.source,
+    } });
+  }).join('\n') + (conversation.messages.length ? '\n' : '');
 }
 
 function excerpt(content: string, budget: number, language: OutputLanguage): string {

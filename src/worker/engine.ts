@@ -273,6 +273,7 @@ export class WorkerEngine {
     this.archives.set(request.archiveId, { archive, cleaned: new Map() });
     return {
       archiveId: request.archiveId, format: archive.format, warnings: [...archive.warnings], sourceBytes,
+      integrity: archive.integrity!,
       conversations: archive.conversations.map(info),
     };
   }
@@ -320,7 +321,8 @@ export class WorkerEngine {
     if (!matches.length) throw new Error('No messages match the current filters.');
     // Match against the active view, but exports always use cleaned bodies and metadata.
     const ids = new Set(matches.map(index => conversation.messages[index]!.id));
-    const excerpt = { ...cache.result.conversation, messages: cache.result.conversation.messages.filter(message => ids.has(message.id)) };
+    const excerpt = { ...cache.result.conversation, history: undefined, events: undefined,
+      messages: cache.result.conversation.messages.filter(message => ids.has(message.id)) };
     const messageCount = excerpt.messages.length;
     const text = request.format === 'markdown'
       ? buildFilteredTranscript(excerpt, messageCount, request.language ?? 'en')
@@ -437,7 +439,8 @@ export class WorkerEngine {
     else if (format === 'jsonl') { text = buildJsonl(conversation); filename = `threadpack-transcript${suffix}.jsonl`; mimeType = 'application/x-ndjson;charset=utf-8'; }
     else if (format === 'report') {
       const warnings = [...archive.warnings, ...cache.result.warnings];
-      text = JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive.format, messageCount: conversation.messages.length, stats: cache.result.stats,
+      text = JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive.format, sourcePlatform: archive.provenance?.platform ?? 'unknown',
+        sourceBytes: archive.sourceBytes, integrity: archive.integrity, messageCount: conversation.messages.length, stats: cache.result.stats,
         warningCount: warnings.length, warnings: warnings.map(warning => localizeWarning(warning, language)),
         options: { stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit, deduplicate: options.deduplicate,
           redact: options.redact, redactEmails: options.redactEmails, customRuleCount: options.customSecrets?.length ?? 0 },
@@ -493,6 +496,7 @@ export class WorkerEngine {
     const warnings = [...archive.warnings, ...cache.result.warnings];
     const report = JSON.stringify({
       tool: 'ThreadPack', version: APP_VERSION, format: archive.format,
+      sourcePlatform: archive.provenance?.platform ?? 'unknown', sourceBytes: archive.sourceBytes, integrity: archive.integrity,
       messageCount: conversation.messages.length, codeSnippetCount: snippets.length,
       handoffIncluded: hasNotes, stats: cache.result.stats,
       warningCount: warnings.length, warnings: warnings.map(warning => localizeWarning(warning, language)),

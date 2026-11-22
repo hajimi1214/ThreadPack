@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Preserve ChatGPT branch graphs, active-branch selection, source references, raw timestamps, and linked tool-call/result events.
+- Retain unknown provider records as timeline events and report content-free integrity issue codes in browser, CLI, and context-bundle reports.
+- Add a versioned ThreadPack JSONL envelope for branch graphs and timeline events while keeping ordinary conversations in message-per-line JSONL.
+- Extend import support for OpenAI-compatible tool calls, Claude Code tool-use blocks, Claude/OpenAI timestamps, and parent references.
+
 ## 1.7.1 — URL credential redaction boundaries
 
 - Redact credentials in bare database, Redis, and HTTP(S) URLs, including percent-encoded user information and IPv6 hosts.

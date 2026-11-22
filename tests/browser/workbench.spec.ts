@@ -29,6 +29,25 @@ function changes(page: Page, label: string) {
   return page.locator('.changes-list > span').filter({ hasText: label }).locator('strong');
 }
 
+test('import status and cleanup report expose content-free source integrity issues', async ({ page }) => {
+  await page.goto('/');
+  const source = [
+    JSON.stringify({ role: 'user', content: 'Known message.' }),
+    JSON.stringify({ type: 'future_provider_event', payload: { content: 'PRIVATE_TIMELINE_TEXT' } }),
+  ].join('\n');
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({ name: 'integrity.jsonl', mimeType: 'application/x-ndjson', buffer: Buffer.from(source) });
+  await ready(page);
+  await expect(page.locator('.integrity-status')).toContainText('Review import');
+  await page.getByRole('button', { name: 'Export transcript', exact: true }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('dialog', { name: 'Export transcript', exact: true }).getByRole('button', { name: /Cleanup report/ }).click();
+  const reportText = await readFile((await (await downloading).path())!, 'utf8');
+  const report = JSON.parse(reportText);
+  expect(report.sourcePlatform).toBe('generic');
+  expect(report.integrity.issues).toContainEqual({ code: 'unknown-record', severity: 'warning', count: 1 });
+  expect(reportText).not.toContain('PRIVATE_TIMELINE_TEXT');
+});
+
 test('imports a supported conversation directly from a ZIP export', async ({ page }) => {
   const zip = zipSync({ 'conversations.json': Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: 'DIRECT_ZIP_IMPORT' }] })) });
   const originalZip = Buffer.from(zip);
@@ -275,8 +294,11 @@ test('ChatGPT archive switches conversations, filters, pins, and downloads actua
   expect(markdown).not.toContain('ALPHA_GOAL');
   expect(markdown).toContain('not a resumable provider session');
   const jsonl = await exported(page, 'Normalized JSONL');
-  const messages = jsonl.trim().split('\n').map(line => JSON.parse(line));
+  const records = jsonl.trim().split('\n').map(line => JSON.parse(line));
+  expect(records[0]).toMatchObject({ type: 'threadpack_session', version: 2, activeBranchId: 'branch-1' });
+  const messages = records.filter(record => record.type === 'threadpack_message').map(record => record.message);
   expect(messages.map(message => message.role)).toEqual(['user', 'assistant']);
+  expect(records[0].branches).toHaveLength(1);
   expect(messages[1].content).toContain('BETA_DECISION');
   const report = JSON.parse(await exported(page, 'Cleanup report'));
   expect(report.tool).toBe('ThreadPack');

@@ -37,19 +37,62 @@ The example uses exclusive file creation. It will not replace an existing output
 
 ```ts
 type Role = 'system' | 'user' | 'assistant' | 'tool';
+type SourcePlatform = 'chatgpt' | 'codex' | 'claude' | 'claude-code' | 'openai' | 'generic' | 'text' | 'threadpack' | 'unknown';
 
 interface Message {
   id: string;
   role: Role;
   content: string;
   timestamp?: string;
+  kind?: 'message' | 'tool-call' | 'tool-result' | 'reasoning' | 'summary' | 'compaction' | 'metadata';
+  parentId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  provenance?: MessageProvenance;
+}
+
+interface MessageProvenance {
+  platform: SourcePlatform;
+  platformId?: string;
+  recordIndex?: number;
+  recordType?: string;
+  sourceNodeId?: string;
+  parentSourceId?: string;
+  toolCallSourceId?: string;
+  conversationSourceId?: string;
+  rawTimestamp?: string | number;
+}
+
+interface ConversationBranch { id: string; headMessageId: string; messageIds: string[]; sourceNodeIds?: string[] }
+interface ConversationProvenance { platform: SourcePlatform; sourceId?: string; sourceRecordCount?: number }
+interface SessionEvent { id: string; type: string; recordIndex: number; platform: SourcePlatform; content: string }
+
+interface ConversationHistory {
+  messages: Message[];
+  branches: ConversationBranch[];
+  activeBranchId: string;
+}
+
+interface IntegrityReport {
+  status: 'complete' | 'partial';
+  sourceRecordCount: number;
+  importedMessageCount: number;
+  branchCount: number;
+  timelineEventCount: number;
+  toolCallCount: number;
+  issueCount: number;
+  issues: { code: string; severity: 'warning' | 'error'; count: number }[];
 }
 
 interface Conversation {
   id: string;
   title: string;
   source: string;
+  provenance?: ConversationProvenance;
   messages: Message[];
+  history?: ConversationHistory;
+  events?: SessionEvent[];
+  integrity?: IntegrityReport;
 }
 
 interface ParsedArchive {
@@ -57,10 +100,14 @@ interface ParsedArchive {
   conversations: Conversation[];
   warnings: string[];
   sourceBytes: number;
+  provenance?: { platform: SourcePlatform; format: string; byteLength: number };
+  integrity?: IntegrityReport;
 }
 ```
 
-`parseInput` assigns normalized sequential message references instead of exporting provider message IDs. Valid timestamps are normalized; unsupported timestamps are omitted. `sourceBytes` measures the UTF-8 input string unless the caller supplies its original byte length. `format` is derived from supported structural schemas, rather than arbitrary source metadata.
+`parseInput` assigns normalized sequential message and conversation references and keeps provider identifiers separately in provenance. Original platform references can contain sensitive data, so clean the conversation before exporting provenance. Valid timestamps are normalized for ordering while original timestamp values are retained as provenance; unsupported timestamps are omitted from the ordering field. `Conversation.messages` is the active branch used by existing workbench callers. ChatGPT mapping imports also expose every mapped message and branch through `Conversation.history`; branch `sourceNodeIds` retains mapping nodes that did not have a message body. Tool-call and tool-result records carry normalized call references, while source call IDs remain in provenance. Message kinds distinguish ordinary messages, tool calls/results, reasoning, summaries, compaction, and preserved metadata. `Conversation.events` retains non-message timeline records and malformed mapping/archive records for review and round-trip export.
+
+`ParsedArchive.integrity` contains content-free issue codes and counts for malformed or unknown records, empty conversations, duplicate source IDs, missing or cyclic parent links, invalid branch references, and unmatched tool calls/results. Counts also include imported messages, branches, timeline events, and tool calls. `sourceBytes` measures the input string as UTF-8 unless the caller supplies its original byte length. Integrity checks validate structure and references, but do not provide a cryptographic checksum or prove that an export is authentic.
 
 ## `parseInput(text, filename, inputByteLength?)`
 
@@ -70,15 +117,18 @@ parseInput(text: string, filename: string, inputByteLength?: number): ParsedArch
 
 Pass the original byte length when it is already known to avoid encoding the complete input again for statistics. The value must be a nonnegative safe integer.
 
-Imports Codex and Claude Code JSONL, ChatGPT and Claude JSON exports, generic messages JSON/JSONL, Markdown, plain text, and browser ZIP files containing one of those text exports. A filename extension informs detection; complete JSON and valid pasted JSONL are also recognized from text. Browser ZIP imports apply entry-count, expanded-size, and safe-path limits before selecting a supported export.
+Imports Codex and Claude Code JSONL, ChatGPT and Claude JSON exports, OpenAI-compatible tool-call JSON/JSONL, generic messages JSON/JSONL, Markdown, plain text, and browser ZIP files containing one of those text exports. A filename extension informs detection; complete JSON and valid pasted JSONL are also recognized from text. Browser ZIP imports apply entry-count, expanded-size, and safe-path limits before selecting a supported export.
 
-- ChatGPT imports follow `current_node` and its parent chain. Other branches are not included.
+- ChatGPT imports follow `current_node` in `Conversation.messages` and preserve all mapped nodes, parent links, and leaf branches in `Conversation.history`.
 - Explicit `.json` input must be valid JSON; invalid input throws.
 - JSONL can import valid records while warning that malformed lines were skipped. No recognized records produces an error.
+- Unknown JSONL records are retained as timeline events. Tool calls, results, and source references remain linked in the normalized model.
 - An unknown JSON schema is preserved as one text message with a warning.
 - Plain-text role headings are recognized outside fenced code blocks.
 
-The caller must review warnings before treating an import as complete. The browser and CLI enforce a 100 MiB input limit; a direct core integration should apply its own size and memory limits.
+The caller must review warnings and `integrity` before treating an import as complete. The browser and CLI enforce a 100 MiB input limit; a direct core integration should apply its own size and memory limits.
+
+`buildJsonl` emits ordinary message-per-line JSONL when the conversation has no branch graph, timeline events, or partial-import issues. It adds optional `provenance` fields to those message rows. Conversations with branch history, timeline events, or partial integrity use a versioned `threadpack_session`, `threadpack_message`, and `threadpack_event` record envelope so those relationships and content-free issue codes round-trip. The result is an interchange format, not a native provider session or resume file. Apply `cleanConversation` before exporting untrusted source provenance.
 
 ## `cleanConversation(conversation, options)`
 
@@ -194,7 +244,7 @@ buildTranscript(conversation: Conversation, language?: OutputLanguage): string
 buildJsonl(conversation: Conversation): string
 ```
 
-`buildTranscript` returns Markdown with message bodies in code fences and localized reader-facing headings. `language` accepts `en`, `zh`, `ja`, `fr`, or `es` and defaults to `en`. `buildJsonl` returns one normalized `Message` object per line and does not translate its JSON keys or message roles. Both accept the conversation passed to them without applying cleanup; pass `result.conversation` to export cleaned data.
+`buildTranscript` returns Markdown with message bodies in code fences and localized reader-facing headings. `language` accepts `en`, `zh`, `ja`, `fr`, or `es` and defaults to `en`. Ordinary `buildJsonl` rows remain normalized messages with unchanged role and JSON key conventions; session envelopes use the `threadpack_session`, `threadpack_message`, and `threadpack_event` record types. Both accept the conversation passed to them without applying cleanup; pass `result.conversation` to export cleaned data.
 
 Neither format is a native provider session file or a mechanism for resuming an agent.
 

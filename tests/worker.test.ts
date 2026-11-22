@@ -436,6 +436,8 @@ test('Worker reader-facing exports and bundle documents follow all supported out
     const parsedReport = JSON.parse(reportText);
     assert.ok(Object.hasOwn(parsedReport, 'scope'));
     assert.ok(Object.hasOwn(parsedReport, 'warningCount'));
+    assert.equal(parsedReport.sourcePlatform, 'generic');
+    assert.equal(parsedReport.integrity.importedMessageCount, 1);
     assert.ok(!Object.hasOwn(parsedReport, 'note'));
     assert.ok(parsedReport.warnings.some((warning: string) => warning.includes(item.warning)), item.language);
     assert.ok(!reportText.includes(fakeToken));

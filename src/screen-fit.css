@@ -69,6 +69,8 @@
 /* Tall browser chrome and display cutouts must leave room around actions. */
 .has-archive .export-bar { margin-bottom: env(safe-area-inset-bottom, 0px); }
 .dialog-backdrop { padding-bottom: max(13px, env(safe-area-inset-bottom, 0px)); }
+.integrity-status { color: #558062 !important; }
+.integrity-status.partial { color: #9a6540 !important; }
 
 @media (max-width: 800px) {
   /* Surface the result before the long note form and keep its actions reachable. */

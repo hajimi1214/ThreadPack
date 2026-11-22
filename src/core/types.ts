@@ -1,10 +1,87 @@
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
+export type MessageKind = 'message' | 'tool-call' | 'tool-result' | 'reasoning' | 'summary' | 'compaction' | 'metadata';
+
+export type SourcePlatform = 'chatgpt' | 'codex' | 'claude' | 'claude-code' | 'openai' | 'generic' | 'text' | 'threadpack' | 'unknown';
+
+export interface MessageProvenance {
+  platform: SourcePlatform;
+  platformId?: string;
+  recordIndex?: number;
+  recordType?: string;
+  sourceNodeId?: string;
+  parentSourceId?: string;
+  toolCallSourceId?: string;
+  conversationSourceId?: string;
+  conversationSourceRecordCount?: number;
+  conversationTitle?: string;
+  conversationSource?: string;
+  rawTimestamp?: string | number;
+}
+
+export interface SessionEvent {
+  id: string;
+  type: string;
+  recordIndex: number;
+  platform: SourcePlatform;
+  sourceId?: string;
+  rawTimestamp?: string | number;
+  timestamp?: string;
+  content: string;
+}
+
 export interface Message {
   id: string;
   role: Role;
   content: string;
   timestamp?: string;
+  kind?: MessageKind;
+  parentId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  provenance?: MessageProvenance;
+}
+
+export interface ConversationBranch {
+  id: string;
+  headMessageId: string;
+  messageIds: string[];
+  sourceNodeIds?: string[];
+}
+
+export interface ConversationHistory {
+  messages: Message[];
+  branches: ConversationBranch[];
+  activeBranchId: string;
+}
+
+export interface ConversationProvenance {
+  platform: SourcePlatform;
+  sourceId?: string;
+  sourceRecordCount?: number;
+}
+
+export interface SourceProvenance {
+  platform: SourcePlatform;
+  format: string;
+  byteLength: number;
+}
+
+export interface IntegrityIssue {
+  code: 'malformed-record' | 'unknown-record' | 'empty-conversation' | 'missing-parent' | 'cyclic-parent' | 'duplicate-source-id' | 'orphan-tool-result' | 'unmatched-tool-call' | 'invalid-branch-reference' | 'invalid-provenance';
+  severity: 'warning' | 'error';
+  count: number;
+}
+
+export interface IntegrityReport {
+  status: 'complete' | 'partial';
+  sourceRecordCount: number;
+  importedMessageCount: number;
+  branchCount: number;
+  timelineEventCount: number;
+  toolCallCount: number;
+  issueCount: number;
+  issues: IntegrityIssue[];
 }
 
 export interface Conversation {
@@ -12,6 +89,10 @@ export interface Conversation {
   title: string;
   source: string;
   messages: Message[];
+  events?: SessionEvent[];
+  provenance?: ConversationProvenance;
+  history?: ConversationHistory;
+  integrity?: IntegrityReport;
 }
 
 export interface ParsedArchive {
@@ -19,6 +100,8 @@ export interface ParsedArchive {
   conversations: Conversation[];
   warnings: string[];
   sourceBytes: number;
+  provenance?: SourceProvenance;
+  integrity?: IntegrityReport;
 }
 
 export interface CleanOptions {

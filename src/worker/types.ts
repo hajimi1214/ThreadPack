@@ -1,4 +1,4 @@
-import type { Change, CleanOptions, CleanStats, HandoffSummary, Message, OutputLanguage, RecentSelectionMode, Role } from '../core';
+import type { Change, CleanOptions, CleanStats, HandoffSummary, IntegrityReport, Message, OutputLanguage, RecentSelectionMode, Role } from '../core';
 
 export interface ConversationInfo { id: string; title: string; source: string; messageCount: number }
 export interface ParseInfo {
@@ -6,6 +6,7 @@ export interface ParseInfo {
   format: string;
   warnings: string[];
   sourceBytes: number;
+  integrity?: IntegrityReport;
   conversations: ConversationInfo[];
 }
 export interface CleanSummary {

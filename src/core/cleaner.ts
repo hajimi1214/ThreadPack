@@ -260,7 +260,8 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
   let emailsRedacted = 0;
   let customRedacted = 0;
   let customRuleMatches = 0;
-  const messages = conversation.messages.map((message) => {
+  const sourceMessages = conversation.history?.messages ?? conversation.messages;
+  const cleanMessages = sourceMessages.map((message) => {
     const original = message.content;
     beforeBytes += bytes(original);
     let content = original;
@@ -277,7 +278,7 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
     // Compare unchanged output before any redaction/trim, so distinct raw outputs
     // cannot become "duplicates" merely because their credentials were removed.
     let firstDuplicate: string | undefined;
-    if (message.role === 'tool' && options.deduplicate && content.length > 0) {
+    if (message.role === 'tool' && message.kind !== 'tool-result' && options.deduplicate && content.length > 0) {
       firstDuplicate = seenTools.get(content);
       if (!firstDuplicate) seenTools.set(content, message.id);
     }
@@ -311,22 +312,104 @@ export function cleanConversation(conversation: Conversation, options: CleanOpti
       change('tool', 1, previous);
     }
     afterBytes += bytes(content);
-    return { ...message, content };
+    const cleanField = (value: string | undefined): string | undefined => {
+      if (value === undefined) return undefined;
+      const result = redactContent(value, maps, options.redact, options.redactEmails, customSecrets);
+      secretsRedacted += result.secretCount;
+      emailsRedacted += result.emailCount;
+      customRedacted += result.customCount;
+      customRuleMatches += result.customRuleMatches;
+      return result.content;
+    };
+    const cleanRawTimestamp = (value: string | number | undefined): string | number | undefined => {
+      if (value === undefined) return undefined;
+      const result = cleanField(String(value));
+      return typeof value === 'number' && result === String(value) ? value : result;
+    };
+    const provenance = message.provenance;
+    if (!provenance) return { ...message, content, ...(message.toolName !== undefined ? { toolName: cleanField(message.toolName) } : {}) };
+    return { ...message, content, provenance: {
+      ...provenance,
+      ...(provenance.platformId !== undefined ? { platformId: cleanField(provenance.platformId) } : {}),
+      ...(provenance.sourceNodeId !== undefined ? { sourceNodeId: cleanField(provenance.sourceNodeId) } : {}),
+      ...(provenance.parentSourceId !== undefined ? { parentSourceId: cleanField(provenance.parentSourceId) } : {}),
+      ...(provenance.toolCallSourceId !== undefined ? { toolCallSourceId: cleanField(provenance.toolCallSourceId) } : {}),
+      ...(provenance.conversationSourceId !== undefined ? { conversationSourceId: cleanField(provenance.conversationSourceId) } : {}),
+      ...(provenance.conversationTitle !== undefined ? { conversationTitle: cleanField(provenance.conversationTitle) } : {}),
+      ...(provenance.conversationSource !== undefined ? { conversationSource: cleanField(provenance.conversationSource) } : {}),
+      ...(provenance.rawTimestamp !== undefined ? { rawTimestamp: cleanRawTimestamp(provenance.rawTimestamp) } : {}),
+      ...(provenance.conversationSourceRecordCount !== undefined ? { conversationSourceRecordCount: provenance.conversationSourceRecordCount } : {}),
+    }, ...(message.toolName !== undefined ? { toolName: cleanField(message.toolName) } : {}) };
+  });
+  const cleanById = new Map(cleanMessages.map(message => [message.id, message]));
+  const messages = conversation.history
+    ? conversation.messages.map(message => cleanById.get(message.id) ?? message)
+    : cleanMessages;
+  const history = conversation.history ? { ...conversation.history, messages: cleanMessages,
+    branches: conversation.history.branches.map(branch => ({ ...branch,
+      ...(branch.sourceNodeIds ? { sourceNodeIds: branch.sourceNodeIds.map(value => {
+        const redacted = redactContent(value, maps, options.redact, options.redactEmails, customSecrets);
+        secretsRedacted += redacted.secretCount;
+        emailsRedacted += redacted.emailCount;
+        customRedacted += redacted.customCount;
+        customRuleMatches += redacted.customRuleMatches;
+        return redacted.content;
+      }) } : {}),
+    })) } : undefined;
+  const events = conversation.events?.map(event => {
+    let content = event.content;
+    if (options.stripImages) {
+      const stripped = stripImages(content);
+      content = stripped.content;
+      imagesRemoved += stripped.count;
+    }
+    const redacted = redactContent(content, maps, options.redact, options.redactEmails, customSecrets);
+    secretsRedacted += redacted.secretCount;
+    emailsRedacted += redacted.emailCount;
+    customRedacted += redacted.customCount;
+    customRuleMatches += redacted.customRuleMatches;
+    let sourceId = event.sourceId;
+    if (sourceId !== undefined) {
+      const sourceResult = redactContent(sourceId, maps, options.redact, options.redactEmails, customSecrets);
+      sourceId = sourceResult.content;
+      secretsRedacted += sourceResult.secretCount;
+      emailsRedacted += sourceResult.emailCount;
+      customRedacted += sourceResult.customCount;
+      customRuleMatches += sourceResult.customRuleMatches;
+    }
+    const rawTimestamp = event.rawTimestamp === undefined ? undefined : redactContent(String(event.rawTimestamp), maps, options.redact, options.redactEmails, customSecrets);
+    if (rawTimestamp) {
+      secretsRedacted += rawTimestamp.secretCount;
+      emailsRedacted += rawTimestamp.emailCount;
+      customRedacted += rawTimestamp.customCount;
+      customRuleMatches += rawTimestamp.customRuleMatches;
+    }
+    const cleanType = redactContent(event.type, maps, options.redact, options.redactEmails, customSecrets);
+    secretsRedacted += cleanType.secretCount;
+    emailsRedacted += cleanType.emailCount;
+    customRedacted += cleanType.customCount;
+    customRuleMatches += cleanType.customRuleMatches;
+    return { ...event, type: cleanType.content, content: redacted.content, ...(sourceId !== undefined ? { sourceId } : {}),
+      ...(rawTimestamp ? { rawTimestamp: typeof event.rawTimestamp === 'number' && rawTimestamp.content === String(event.rawTimestamp) ? event.rawTimestamp : rawTimestamp.content } : {}) };
   });
   if (outputsTrimmed || duplicatesRemoved || imagesRemoved) warnings.push('This is a lossy, normalized copy for review and handoff. Keep the original export; the copy is not a resumable agent session.');
   if (options.redact || options.redactEmails || customSecrets.length) warnings.push('Redaction uses local patterns and exact custom values and can miss secrets or personal information. Review the export before sharing.');
   const titleResult = redactContent(conversation.title, maps, options.redact, options.redactEmails, customSecrets);
   const sourceResult = redactContent(conversation.source, maps, options.redact, options.redactEmails, customSecrets);
-  const metadataSecretCount = titleResult.secretCount + sourceResult.secretCount;
-  const metadataEmailCount = titleResult.emailCount + sourceResult.emailCount;
-  const metadataCustomCount = titleResult.customCount + sourceResult.customCount;
+  const provenanceResult = conversation.provenance?.sourceId
+    ? redactContent(conversation.provenance.sourceId, maps, options.redact, options.redactEmails, customSecrets) : undefined;
+  const metadataSecretCount = titleResult.secretCount + sourceResult.secretCount + (provenanceResult?.secretCount ?? 0);
+  const metadataEmailCount = titleResult.emailCount + sourceResult.emailCount + (provenanceResult?.emailCount ?? 0);
+  const metadataCustomCount = titleResult.customCount + sourceResult.customCount + (provenanceResult?.customCount ?? 0);
   secretsRedacted += metadataSecretCount;
   emailsRedacted += metadataEmailCount;
   customRedacted += metadataCustomCount;
-  customRuleMatches += titleResult.customRuleMatches + sourceResult.customRuleMatches;
+  customRuleMatches += titleResult.customRuleMatches + sourceResult.customRuleMatches + (provenanceResult?.customRuleMatches ?? 0);
   if (metadataSecretCount || metadataEmailCount || metadataCustomCount) warnings.push('Sensitive patterns in the conversation title or source label were also redacted. Byte totals describe message bodies only.');
   return {
-    conversation: { ...conversation, title: titleResult.content, source: sourceResult.content, messages },
+    conversation: { ...conversation, title: titleResult.content, source: sourceResult.content, messages,
+      ...(history ? { history } : {}), ...(events ? { events } : {}),
+      ...(provenanceResult && conversation.provenance ? { provenance: { ...conversation.provenance, sourceId: provenanceResult.content } } : {}) },
     changes,
     stats: { beforeBytes, afterBytes, removedBytes: Math.max(0, beforeBytes - afterBytes), imagesRemoved, outputsTrimmed, duplicatesRemoved, secretsRedacted, emailsRedacted, customRedacted,
       customRuleMatches, redactionReplacements: secretsRedacted + emailsRedacted + customRedacted },

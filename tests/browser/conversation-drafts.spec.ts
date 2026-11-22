@@ -19,12 +19,12 @@ test('conversation drafts survive switching and are discarded with the archive',
   await page.getByRole('combobox', { name: 'Recent messages', exact: true }).selectOption('0');
   await page.getByRole('combobox', { name: 'Handoff text budget', exact: true }).selectOption('6000');
   await page.getByRole('button', { name: 'Latest timestamps', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('beta');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '2. Beta' });
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
   await expect(page.getByRole('button', { name: 'Source order', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.handoff-document')).not.toContainText('Alpha draft');
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Beta separate draft.');
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('alpha');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '1. Alpha' });
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Alpha draft note.');
   await expect(page.getByRole('textbox', { name: 'Constraints', exact: true })).toHaveValue('Alpha constraints.');
   await expect(page.getByRole('combobox', { name: 'Recent messages', exact: true })).toHaveValue('0');
@@ -100,7 +100,7 @@ test('handoff drafts export and import independently with a source-bound pin che
   await expect(page.locator('.toast')).toContainText('invalid or uses an unsupported version');
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Sensitive draft note stays as entered.');
 
-  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('other-conversation');
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption({ label: '2. Other conversation' });
   await page.getByLabel('Import draft', { exact: true }).setInputFiles({
     name: 'handoff-draft.json', mimeType: 'application/json', buffer: Buffer.from(draftText),
   });

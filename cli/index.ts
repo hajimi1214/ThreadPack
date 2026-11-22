@@ -361,6 +361,7 @@ async function main() {
   else if (format === 'handoff') rendered = handoff!.text;
   else if (format === 'report') rendered = JSON.stringify({
     tool: 'ThreadPack', version: __THREADPACK_VERSION__, format: archive.format,
+    sourcePlatform: archive.provenance?.platform ?? 'unknown', sourceBytes: archive.sourceBytes, integrity: archive.integrity,
     conversation: selected, conversationCount: archive.conversations.length,
     messages: result.conversation.messages.length, stats: result.stats,
     warningCount: archive.warnings.length + result.warnings.length,

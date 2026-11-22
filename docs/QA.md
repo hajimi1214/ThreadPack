@@ -133,3 +133,12 @@ Validation date: 2026-11-22. The repository currently remains at version 1.7.1; 
 - JSONL parsing now consumes decoded lines and parsed records incrementally rather than holding both full intermediate arrays. Browser and CLI callers pass known UTF-8 source byte lengths to avoid another full-input encoding allocation. Stream chunk references are released once decoding completes.
 - Dialog focus returns to the control that opened it across pointer and keyboard interaction. Mobile cleanup actions return focus to the transcript, quick actions are available on the first paint, short-window archive changes preserve reading positions, and 320px Firefox/Chromium layouts fit the header.
 - Large JSON parsing still retains the decoded input and normalized conversation model. The 100 MiB limit remains, so memory use still scales with archive size. No remote GitHub Actions run was part of this local validation.
+
+## Stage 2 session structure validation
+
+- Validation date: 2026-11-23. Package version remains 1.7.1; no release tag was created.
+- `npm test`: 180 core, CLI, localization, preview, parser, and Worker tests passed on Windows Node.js 20.19.0 and Node.js 24.14.1.
+- `npm run check`, `npm run build`, `npm audit`, and `npm pack --dry-run` passed. The dependency audit reported zero vulnerabilities.
+- The complete 75-test browser suite passed on Windows Chrome/Chromium, Linux Firefox, and Linux WebKit. It covers content-free import integrity, ChatGPT branch exports, offline processing, Worker cancellation, handoff drafts, responsive layouts, and keyboard focus.
+- Synthetic fixtures cover Codex reasoning and tool events, Claude Code tool-use/result pairing, Claude parent links and timestamps, OpenAI-compatible JSON/JSONL calls, ChatGPT branch history including nodes without message bodies, malformed mapping nodes, unknown archive/JSONL records, structural integrity checks, and versioned JSONL round-trips.
+- Provider coverage uses synthetic fixtures rather than redacted production archives. Provider formats continue to evolve. Parsing retains decoded input and the normalized session model in memory under the existing 100 MiB limit. Integrity checks cover structural links but do not calculate cryptographic source checksums. No remote GitHub Actions run was part of this local validation.
