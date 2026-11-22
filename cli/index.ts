@@ -293,11 +293,11 @@ async function main() {
     const inputInfo = await stat(inputPath);
     if (!inputInfo.isFile()) throw new CliError('Input must be a regular file.');
     if (inputInfo.size > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
+    inputByteLength = inputInfo.size;
     if (originalOutput) await copyOriginalFile(inputPath, originalOutput, Boolean(values.force));
     const parsePath = originalOutput ?? inputPath;
     text = await readFile(parsePath, 'utf8');
-    inputByteLength = Buffer.byteLength(text, 'utf8');
-    if (inputByteLength > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
+    if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
   }
   if (!text.trim()) throw new CliError('Input is empty.');
   const archive = parseInput(text, input === '-' ? 'stdin.txt' : basename(input), inputByteLength);
