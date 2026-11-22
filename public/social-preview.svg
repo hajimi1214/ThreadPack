@@ -8,10 +8,7 @@
   </defs>
   <rect width="1200" height="630" fill="url(#background)"/>
   <rect x="600" width="600" height="630" fill="url(#grid)" opacity=".55"/>
-  <g transform="translate(64 54)">
-    <rect width="47" height="47" rx="12" fill="#285df4"/>
-    <g fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 16 11.5-6L35 16v15l-11.5 6L12 31Z M12 16l11.5 6L35 16 M23.5 22v15 M17.75 13l11.5 6"/></g>
-  </g>
+  <image href="./icons/icon-512.png" x="64" y="54" width="47" height="47" preserveAspectRatio="xMidYMid meet"/>
   <g font-family="Segoe UI,Arial,sans-serif">
     <text x="126" y="87" fill="#1e3555" font-size="31" font-weight="650" letter-spacing="-.9">ThreadPack</text>
     <text x="66" y="192" fill="#6780a4" font-size="13" font-weight="600" letter-spacing="1.9">CONVERSATION FILE TOOLS</text>

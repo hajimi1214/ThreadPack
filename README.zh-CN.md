@@ -1,6 +1,6 @@
 <div align="center">
 
-![ThreadPack](docs/assets/banner.svg)
+![ThreadPack](docs/assets/banner.png)
 
 # ThreadPack
 

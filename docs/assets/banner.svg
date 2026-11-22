@@ -7,10 +7,7 @@
   </defs>
   <rect width="1280" height="360" rx="16" fill="url(#fade)"/>
   <rect x="780" y="0" width="500" height="360" fill="url(#grid)" opacity=".6"/>
-  <g transform="translate(76 67)" fill="none" stroke="#dceaff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-    <rect width="46" height="48" rx="11" fill="#1c4697" stroke="#446fb2" stroke-width="1"/>
-    <path d="m12 17 11-6 11 6v14l-11 6-11-6Z M12 17l11 6 11-6 M23 23v14 M18 14l11 6"/>
-  </g>
+  <image href="../../icons/icon-512.png" x="76" y="67" width="46" height="48" preserveAspectRatio="xMidYMid meet"/>
   <text x="137" y="102" fill="#f3f7ff" font-family="Segoe UI,Arial,sans-serif" font-size="35" font-weight="650" letter-spacing="-1">ThreadPack</text>
   <text x="76" y="176" fill="#e6efff" font-family="Segoe UI,Arial,sans-serif" font-size="33" font-weight="400" letter-spacing="-.7">Offline AI conversation processing toolkit.</text>
   <text x="77" y="214" fill="#a2bde9" font-family="Segoe UI,Arial,sans-serif" font-size="16">Import, clean, redact, and export context for your next conversation.</text>
