@@ -1,5 +1,15 @@
 # QA inventory
 
+## Stage 3 project library coverage
+
+- The project library is optional and explicit. In-memory imports remain the default until a conversation is saved to a named project.
+- IndexedDB persistence is covered for project metadata, current status and important notes, multiple isolated projects, session search across all saved revisions, stable-ID updates, content-fingerprint duplicate detection, immutable history restoration, and clear/delete behavior.
+- Versioned session JSONL retains the phase-two provenance and structured session data. Worker tests confirm project snapshots are generated from original conversation data, before cleanup redactions.
+- Backup export and restore cover multiple revisions, project records, source metadata, SHA-256 verification, ordered records, staging cleanup on failure, and restoration as a separate project.
+- Project-specific coverage includes persistence across reloads, duplicate imports, all-version content search, historical revision restore, backup round trip, corruption rejection, project isolation and deletion, ChatGPT inactive-branch preservation, narrow-screen fit, and operation when IndexedDB is disabled.
+- Final Chromium browser regression: 80 tests passed with one worker. All five project-library browser tests passed in Chromium and WebKit. Core and CLI tests: 181 passed. `npm run build` and `npm pack --dry-run` succeeded, and `npm audit --omit=dev` reported zero vulnerabilities.
+- Firefox and Linux were not validated in this run. The installed Firefox binary could not launch on this Windows host because Windows reported a Side-by-Side configuration error before the tests started. No Linux runner was available locally.
+
 The sign-off covers the supported local workflows, not semantic summarization or native session recovery.
 
 | User claim / control | Functional check | Visual states |
@@ -9,7 +19,7 @@ The sign-off covers the supported local workflows, not semantic summarization or
 | Review and handoff | Search/filter; pin/unpin; edit each note; recent/budget selection | Search empty, pinned, handoff preview |
 | Exports | Read real Markdown, JSONL, report, handoff downloads | Format dialog and handoff |
 | Offline processing | Open production HTML via file URL with network disabled | Local file in desktop browser |
-| Privacy | No external requests; no transcript storage; clear workspace | Privacy notice and cleared workspace |
+| Privacy | No external requests; no persistent transcript storage unless explicitly saved to a project; clear workspace | Privacy notice and cleared workspace |
 | Five interface languages | Select English, Chinese, Japanese, French, and Spanish; detect region preferences; reload saved preference | Desktop and mobile language states |
 | Responsive layout | Desktop 1440px and mobile 390px; assert horizontal fit | Contact sheet of actual browser captures |
 | Accessibility basics | Dialog escape/focus return; keyboard navigation | Focus state and dialog |

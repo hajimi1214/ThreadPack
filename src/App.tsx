@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, FolderOpen, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import mascotIcon from './assets/mascot-icon-192.png';
 import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
@@ -25,7 +25,9 @@ import type { QuickAction } from './components/CommandMenu';
 import THIRD_PARTY_NOTICES from '../public/third-party-licenses.txt?raw';
 import { APP_VERSION } from './version';
 import { startPwa, applyUpdate } from './pwa';
-import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult, PinIdsResult, PinNumbersResult } from './worker/types';
+import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ExportSourceSessionResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult, PinIdsResult, PinNumbersResult } from './worker/types';
+import ProjectLibrary from './projects/ProjectLibrary';
+import type { ProjectSessionInput } from './projects/store';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
@@ -103,6 +105,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(() => { try { return resolveLanguage(localStorage.getItem('threadpack-language'), navigator.languages); } catch { return resolveLanguage(null, navigator.languages); } });
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
+  const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
   const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | 'draft-confirm' | null>(null);
   const dialogReturnFocus = useRef<HTMLElement | null>(null);
   const [shareState, setShareState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
@@ -188,7 +191,7 @@ export default function App() {
   const handoffDraftContext = JSON.stringify([actionContext, notes, pins, recent, recentMode, budget]);
   const handoffDraftContextRef = useRef(handoffDraftContext);
   handoffDraftContextRef.current = handoffDraftContext;
-  const overlayOpen = dialog !== null || !!pendingAction || isCompact && settingsOpen;
+  const overlayOpen = dialog !== null || projectLibraryOpen || !!pendingAction || isCompact && settingsOpen;
   const rememberDialogTrigger = (event: ReactMouseEvent<HTMLDivElement>): void => {
     if (overlayOpen) return;
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a[href], input, select, textarea') : null;
@@ -228,7 +231,7 @@ export default function App() {
   useLayoutEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'k') return;
-      if (pendingAction || settingsOpen || dialog && dialog !== 'commands') return;
+      if (pendingAction || projectLibraryOpen || settingsOpen || dialog && dialog !== 'commands') return;
       event.preventDefault();
       if (dialog === 'commands') setDialog(null);
       else {
@@ -239,7 +242,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [dialog, pendingAction, settingsOpen]);
+  }, [dialog, pendingAction, projectLibraryOpen, settingsOpen]);
   useEffect(() => { setPage(0); }, [filter, query, selected, mode, changedOnly, pinnedOnly]);
   useLayoutEffect(() => {
     if (!archive) return;
@@ -332,6 +335,22 @@ export default function App() {
   }
   const openText = (text: string, name: string, isDemo = false) => importArchive(name, { text }, isDemo);
   const openFile = (file: File) => importArchive(file.name, { file });
+
+  async function readProjectSession(conversationId: string): Promise<ProjectSessionInput> {
+    if (!archive) throw new Error(t.noConversation);
+    const snapshot = await request<ExportSourceSessionResult>({ type: 'export-source-session', archiveId: archive.archiveId, conversationId });
+    return {
+      title: archive.conversations.find(conversation => conversation.id === conversationId)?.title ?? filename,
+      sourceName: filename || snapshot.filename, platform: snapshot.platform, sourceId: snapshot.sourceId,
+      format: snapshot.format, messageCount: snapshot.messageCount,
+      content: new TextDecoder('utf-8', { fatal: true }).decode(snapshot.buffer),
+    };
+  }
+
+  function openProjectSession(content: string, name: string) {
+    setProjectLibraryOpen(false);
+    void openText(content, name);
+  }
 
   function clearWorkspace() {
     ++exportGeneration.current; exportLock.current = false;
@@ -561,6 +580,7 @@ export default function App() {
   const working = busy || importing || querying || deferredQuery !== query || exporting || !!processed && processed.optionsKey !== optionsKey;
   const filtersActive = !!query || filter !== 'all' || changedOnly || pinnedOnly;
   const quickActions: QuickAction[] = [
+    { id: 'projects', label: t.projects, keywords: 'project library history memory', run: () => setProjectLibraryOpen(true) },
     { id: 'import', label: t.import, keywords: 'open upload file', run: () => input.current?.click(), disabled: importing },
     { id: 'paste', label: t.paste, keywords: 'clipboard text', run: () => setDialog('paste'), disabled: importing },
     { id: 'demo', label: t.demo, keywords: 'sample example', run: () => void openText(createDemo(), 'checkout-session.jsonl', true), disabled: importing },
@@ -604,6 +624,7 @@ export default function App() {
       <nav className="main-nav" aria-label={t.workbench}>
         <button className={view === 'workbench' ? 'selected' : ''} onClick={() => navigate('workbench')}>{t.workbench}</button>
         <button className={view === 'handoff' ? 'selected' : ''} onClick={() => navigate('handoff')} disabled={!processed}>{t.handoff}{pins.length > 0 && <span className="nav-count">{pins.length}</span>}</button>
+        <button className={projectLibraryOpen ? 'selected' : ''} onClick={event => { dialogReturnFocus.current = event.currentTarget; setProjectLibraryOpen(true); }}><FolderOpen size={14} />{t.projects}</button>
       </nav>
       <div className="header-actions">{installPrompt && <button className="install-button" onClick={() => void installApp()}><Download size={14} />{t.installApp}</button>}<button className="command-trigger" aria-label={t.quickActions} title={`${t.quickActions} (Ctrl/⌘ K)`} onClick={() => setDialog('commands')}><Command size={15} /><kbd>Ctrl K</kbd></button><button className="help-button" aria-label={t.help} onClick={event => openDialogFrom('help', event.currentTarget)}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
     </header>
@@ -743,6 +764,11 @@ export default function App() {
     {toast && <div key={toast.id} className={`toast ${toast.tone === 'error' ? 'toast-error' : ''} ${overlayOpen ? 'above-dialog' : ''}`} role="status">{toast.tone === 'error' ? <AlertCircle size={16} /> : <Check size={16} />}<span>{toast.text}</span></div>}
     {dragging && <div className="drag-overlay"><div><Upload size={44} /><h2>{t.drop}</h2><p>{t.dropHint}</p></div></div>}
 
+    {projectLibraryOpen && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setProjectLibraryOpen(false)} label={t.projectsTitle} closeLabel={t.close} className="project-dialog"><ProjectLibrary
+      activeSession={archive && currentConversation ? { conversationId: selected, title: currentConversation.title, messageCount: currentConversation.messageCount } : null}
+      t={t} lang={lang} close={() => setProjectLibraryOpen(false)} readActiveSession={readProjectSession}
+      openSession={openProjectSession} notify={notify}
+    /></Dialog>}
 
     {dialog === 'snippets' && archive && processed && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.codeSnippets} closeLabel={t.close} className="snippet-dialog"><SnippetExplorer key={`${archive.archiveId}:${selected}:${processed.revision}`} archiveId={archive.archiveId} conversationId={selected} revision={processed.revision} request={request} t={t} download={download} notify={notify} /><ThirdPartyNotices t={t} /></Dialog>}
     {dialog === 'commands' && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.quickActions} closeLabel={t.close} className="command-dialog"><CommandMenu actions={quickActions} t={t} execute={executeQuickAction} /></Dialog>}

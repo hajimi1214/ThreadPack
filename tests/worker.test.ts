@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { unzipSync, zipSync } from 'fflate';
-import { DEFAULT_OPTIONS } from '../src/core';
+import { DEFAULT_OPTIONS, parseInput } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
 import type { CleanSummary, ExportExcerptRequest, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
@@ -400,6 +400,27 @@ test('exports transfer complete cleaned UTF-8 data and reports contain only allo
   const markdown = await engine.handle({ id: next(), type: 'export', ...request, format: 'markdown' });
   assert.equal(markdown.filename, 'threadpack-transcript.md');
   assert.ok(!textOf(markdown.buffer).includes(fakeToken));
+});
+
+test('project snapshots preserve the original normalized session and provider provenance', async () => {
+  const engine = new WorkerEngine();
+  const token = ['sk', 'proj', 'K'.repeat(35)].join('-');
+  const archive = await load(engine, JSON.stringify({
+    id: 'stable-project-session', title: 'Project snapshot', messages: [
+      { id: 'provider-message-a', role: 'user', content: `Keep original ${token}` },
+      { id: 'provider-message-b', role: 'assistant', content: 'Original reply.' },
+    ],
+  }), 21, 'project-source.json');
+  const summary = await clean(engine, archive);
+  const snapshot = await engine.handle({ id: next(), type: 'export-source-session', archiveId: 21,
+    conversationId: summary.conversation.id });
+  const restored = parseInput(textOf(snapshot.buffer), snapshot.filename).conversations[0]!;
+  assert.equal(restored.messages[0]!.content, `Keep original ${token}`);
+  assert.equal(restored.provenance?.platform, 'generic');
+  assert.equal(restored.provenance?.sourceId, 'stable-project-session');
+  assert.equal(restored.messages[0]!.provenance?.platformId, 'provider-message-a');
+  assert.equal(snapshot.messageCount, 2);
+  assert.equal(snapshot.format, 'Messages JSON export');
 });
 
 test('Worker reader-facing exports and bundle documents follow all supported output languages', async () => {

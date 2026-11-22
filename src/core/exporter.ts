@@ -137,7 +137,7 @@ export function buildTranscript(conversation: Conversation, language: OutputLang
 
 export function buildJsonl(conversation: Conversation): string {
   if (conversation.history || conversation.events?.length
-    || conversation.integrity?.status === 'partial' || conversation.provenance && !conversation.messages.length) {
+    || conversation.integrity?.status === 'partial' || !conversation.messages.length) {
     const records = [{
       type: 'threadpack_session', version: 2,
       id: conversation.id, title: conversation.title, source: conversation.source,

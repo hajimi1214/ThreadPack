@@ -25,6 +25,13 @@ export interface PreviewMessage {
 }
 export interface QueryResult { items: PreviewMessage[]; total: number; page: number; pageCount: number }
 export interface ExportResult { buffer: ArrayBuffer; filename: string; mimeType: string }
+export interface ExportSourceSessionResult extends ExportResult {
+  platform: import('../core').SourcePlatform;
+  sourceId?: string;
+  format: string;
+  messageCount: number;
+  sourceBytes: number;
+}
 export interface ExcerptExportResult extends ExportResult { messageCount: number }
 export interface SnippetPreview {
   id: string; language: string; messageIndex: number; fenceIndex: number;
@@ -67,6 +74,7 @@ export interface QueryRequest extends RequestBase, RevisionSelection, PreviewFil
   type: 'query'; page: number; pageSize: 30;
 }
 export interface ExportRequest extends RequestBase, RevisionSelection { type: 'export'; format: 'markdown' | 'jsonl' | 'report'; language?: OutputLanguage }
+export interface ExportSourceSessionRequest extends RequestBase, Selection { type: 'export-source-session' }
 export interface ExportExcerptRequest extends RequestBase, RevisionSelection, PreviewFilters { type: 'export-excerpt'; format: 'markdown' | 'jsonl'; language?: OutputLanguage }
 export interface CopyMessageRequest extends RequestBase, RevisionSelection { type: 'copy-message'; messageId: string; mode: 'cleaned' | 'original' }
 export interface CompareMessageRequest extends RequestBase, RevisionSelection { type: 'compare-message'; messageId: string }
@@ -88,7 +96,7 @@ export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   maxCharacters?: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | PinNumbersRequest | PinIdsRequest | CleanRequest | QueryRequest | ExportRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
-export type WorkerResult = ParseInfo | PinNumbersResult | PinIdsResult | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
+export type WorkerRequest = ParseRequest | PinNumbersRequest | PinIdsRequest | CleanRequest | QueryRequest | ExportRequest | ExportSourceSessionRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
+export type WorkerResult = ParseInfo | PinNumbersResult | PinIdsResult | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExportSourceSessionResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; 'pin-numbers': PinNumbersResult; 'pin-ids': PinIdsResult; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; 'pin-numbers': PinNumbersResult; 'pin-ids': PinIdsResult; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-source-session': ExportSourceSessionResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }

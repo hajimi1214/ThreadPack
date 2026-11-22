@@ -10,7 +10,7 @@ import { buildContextBundle } from './context-bundle';
 import { extractZipText } from './zip-import';
 import { sha256Fingerprint } from '../handoff-draft';
 import { localizeWarning } from '../../cli/i18n';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, ExportSourceSessionResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -94,6 +94,7 @@ export class WorkerEngine {
     const state = this.archives.get(request.archiveId);
     const original = state?.archive.conversations.find(conversation => conversation.id === request.conversationId);
     if (!state || !original) throw new Error('This conversation is unavailable. Import the conversation again.');
+    if (request.type === 'export-source-session') return this.exportSourceSession(state.archive.format, original);
     if (request.type === 'pin-numbers') {
       if (!Array.isArray(request.pinnedIds) || request.pinnedIds.length > original.messages.length
         || request.pinnedIds.some(id => typeof id !== 'string' || id.length < 1 || id.length > 500)) {
@@ -275,6 +276,17 @@ export class WorkerEngine {
       archiveId: request.archiveId, format: archive.format, warnings: [...archive.warnings], sourceBytes,
       integrity: archive.integrity!,
       conversations: archive.conversations.map(info),
+    };
+  }
+
+  private exportSourceSession(format: string, conversation: Conversation): ExportSourceSessionResult {
+    const content = buildJsonl(conversation);
+    return {
+      buffer: encoder.encode(content).buffer as ArrayBuffer,
+      filename: 'threadpack-session.jsonl', mimeType: 'application/x-ndjson;charset=utf-8',
+      platform: conversation.provenance?.platform ?? conversation.messages[0]?.provenance?.platform ?? 'unknown',
+      ...(conversation.provenance?.sourceId ? { sourceId: conversation.provenance.sourceId } : {}),
+      format, messageCount: conversation.messages.length, sourceBytes: byteLength(content),
     };
   }
 

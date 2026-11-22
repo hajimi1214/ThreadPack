@@ -11,6 +11,7 @@ import './snippets.css';
 import './code-highlight.css';
 import './motion.css';
 import './markdown-preview.css';
+import './projects/projects.css';
 
 const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
 if (favicon) { favicon.href = mascotIcon; favicon.type = 'image/png'; }
