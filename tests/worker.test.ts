@@ -44,6 +44,27 @@ test('clean RPC sends summaries only; message bodies and full change arrays stay
   assert.equal(page.items[0]!.message.content, 'UNIQUE_MESSAGE_BODY_DO_NOT_TRANSFER');
 });
 
+test('handoff pin numbers bind to message content without exposing provider IDs', async () => {
+  const engine = new WorkerEngine();
+  const source = { messages: [
+    { id: 'provider-private-id-1', role: 'user', content: 'First note.' },
+    { id: 'provider-private-id-2', role: 'assistant', content: 'Second note.' },
+  ] };
+  const archive = await load(engine, JSON.stringify(source));
+  const conversationId = archive.conversations[0]!.id;
+  const exported = await engine.handle({ id: next(), type: 'pin-numbers', archiveId: archive.archiveId, conversationId,
+    pinnedIds: ['message-2'] });
+  assert.deepEqual(exported.pinnedMessages.map(pin => pin.number), [2]);
+  assert.ok(!JSON.stringify(exported).includes('message-2'));
+  const imported = await engine.handle({ id: next(), type: 'pin-ids', archiveId: archive.archiveId, conversationId,
+    pinnedMessages: exported.pinnedMessages });
+  assert.deepEqual(imported.pinnedIds, ['message-2']);
+  await assert.rejects(engine.handle({ id: next(), type: 'pin-ids', archiveId: archive.archiveId, conversationId,
+    pinnedMessages: [{ ...exported.pinnedMessages[0]!, fingerprint: '0'.repeat(64) }] }), /could not be matched/);
+  await assert.rejects(engine.handle({ id: next(), type: 'pin-ids', archiveId: archive.archiveId, conversationId,
+    pinnedMessages: [{ ...exported.pinnedMessages[0]!, number: 3 }] }), /message numbers/);
+});
+
 test('code snippet queries page across the full cleaned corpus and return bounded previews only', async () => {
   const engine = new WorkerEngine();
   const code = 'a'.repeat(MAX_SNIPPET_PREVIEW_CHARACTERS - 1) + '🔎' + 'tail '.repeat(1000);

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 test('conversation drafts survive switching and are discarded with the archive', async ({ page }) => {
   await page.goto('/');
@@ -11,7 +12,7 @@ test('conversation drafts survive switching and are discarded with the archive',
   });
   const ready = () => expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
   await upload(); await ready();
-  await page.getByRole('button', { name: 'Pin for handoff', exact: true }).click();
+  await page.getByRole('article').first().getByRole('button', { name: 'Pin for handoff', exact: true }).click();
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
   await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Alpha draft note.');
   await page.getByRole('textbox', { name: 'Constraints', exact: true }).fill('Alpha constraints.');
@@ -44,5 +45,65 @@ test('conversation drafts survive switching and are discarded with the archive',
   await page.getByRole('dialog', { name: 'Unsaved handoff notes', exact: true }).getByRole('button', { name: 'Discard notes', exact: true }).click();
   await upload(); await ready();
   await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
+});
+
+test('handoff drafts export and import independently with a source-bound pin check', async ({ page }) => {
+  await page.goto('/');
+  const fixture = [
+    { id: 'source-conversation', title: 'Source conversation', messages: [
+      { id: 'provider-private-id', role: 'user', content: 'Pinned source message.' },
+      { id: 'another-private-id', role: 'assistant', content: 'Reply to preserve in context.' },
+    ] },
+    { id: 'other-conversation', title: 'Other conversation', messages: [
+      { role: 'user', content: 'An unrelated message.' },
+    ] },
+  ];
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'source.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fixture)),
+  });
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('article').first().getByRole('button', { name: 'Pin for handoff', exact: true }).click();
+  await page.getByRole('button', { name: 'Build a handoff', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Sensitive draft note stays as entered.');
+  await page.getByRole('button', { name: 'Latest timestamps', exact: true }).click();
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export draft', exact: true }).click();
+  const draftPath = await (await download).path();
+  const draftText = await readFile(draftPath!, 'utf8');
+  const draft = JSON.parse(draftText) as { notes: { goal: string }; pinnedMessages: { number: number; fingerprint: string }[] };
+  expect(draft.notes.goal).toBe('Sensitive draft note stays as entered.');
+  expect(draft.pinnedMessages.map(pin => pin.number)).toEqual([1]);
+  expect(draftText).not.toContain('provider-private-id');
+  expect(draftText).not.toContain('Pinned source message.');
+
+  await page.getByRole('textbox', { name: 'Goal', exact: true }).fill('Keep current draft when replacement is canceled.');
+  const loadDraft = () => page.getByLabel('Import draft', { exact: true }).setInputFiles({
+    name: 'handoff-draft.json', mimeType: 'application/json', buffer: Buffer.from(draftText),
+  });
+  await loadDraft();
+  const replaceDialog = page.getByRole('dialog', { name: 'Replace the current handoff draft?', exact: true });
+  await expect(replaceDialog).toBeVisible();
+  await replaceDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Keep current draft when replacement is canceled.');
+
+  await loadDraft();
+  await page.getByRole('dialog', { name: 'Replace the current handoff draft?', exact: true }).getByRole('button', { name: 'Replace draft', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Sensitive draft note stays as entered.');
+  await expect(page.locator('.handoff-document')).toContainText('Pinned source message.');
+
+  const invalid = { ...draft, pinnedMessages: [{ number: 3, fingerprint: '0'.repeat(64) }] };
+  await page.getByLabel('Import draft', { exact: true }).setInputFiles({
+    name: 'invalid-draft.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(invalid)),
+  });
+  await expect(page.locator('.toast')).toContainText('invalid or uses an unsupported version');
+  await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('Sensitive draft note stays as entered.');
+
+  await page.getByRole('combobox', { name: 'Conversation', exact: true }).selectOption('other-conversation');
+  await page.getByLabel('Import draft', { exact: true }).setInputFiles({
+    name: 'handoff-draft.json', mimeType: 'application/json', buffer: Buffer.from(draftText),
+  });
+  await expect(page.locator('.toast')).toContainText('do not match this conversation');
   await expect(page.getByRole('textbox', { name: 'Goal', exact: true })).toHaveValue('');
 });
