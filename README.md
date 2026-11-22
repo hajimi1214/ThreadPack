@@ -42,7 +42,7 @@ Layout adapts to both screen width and height. Phones and short landscape window
 
 Files are read with Web Streams inside a Web Worker, with progress and cancellation. The interface receives at most 30 preview messages at a time; a full message crosses into the interface only when you explicitly copy it. Complete exports are built in the worker and transferred as buffers. See the [measured comparison](docs/ARCHITECTURE.md#measured-comparison).
 
-The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Canonical export headings, markers, and diagnostic messages remain in English.
+The interface supports **English, 简体中文, 日本語, Français, and Español**. Use the language menu in the top navigation. The initial language follows your browser preferences, and a manual choice is remembered. Imported conversation content is not translated. Reader-facing export headings, warnings, reports, and handoff text use the selected language; JSON keys, message roles, and machine aliases remain stable.
 
 ![ThreadPack workbench with a synthetic conversation](docs/assets/demo.png)
 
@@ -74,6 +74,8 @@ Provider exports change over time. Unsupported records and partial imports produ
 4. **Export** a Markdown transcript, normalized JSONL, aggregate cleanup report, portable context bundle, or a handoff with goal, decisions, constraints, and next steps.
 
 Original files are not modified. The interface reports UTF-8 message-text bytes and change counts; these measurements exclude source metadata and are not provider token or billing estimates.
+
+While a conversation is loaded, **Download original file** saves the exact imported bytes separately from cleaned exports. For ZIP imports it downloads the original ZIP. For pasted text it saves the entered text as UTF-8. The source stays available until the workspace is cleared or another import succeeds.
 
 Handoffs include your notes, pinned messages, and recent context. If the selected text budget is exceeded, the export marks it.
 
@@ -153,7 +155,7 @@ The notes file is a UTF-8 JSON object. Any of the four fields may be omitted and
 | --- | --- |
 | `--format markdown\|jsonl\|handoff\|report` | Export format; defaults to `markdown` |
 | `--original-out FILE` | Save an unmodified byte-for-byte copy of the input alongside the cleaned export |
-| `--language en\|zh` | Localize Markdown labels, report warnings, and CLI diagnostics; defaults to English |
+| `--language en\|zh\|ja\|fr\|es` | Localize Markdown labels, report warnings, and CLI diagnostics; defaults to English |
 | `--conversation N` | Conversation selection, starting at 1 |
 | `--tool-limit N` | Character limit per tool output, from 500 to 100000 |
 | `--keep-images` | Retain inline image payloads |
@@ -183,7 +185,7 @@ Timestamp selection chooses the most recently dated messages with valid timestam
 
 When the text budget is tight, ThreadPack reserves space for message structure and excerpt markers, then distributes the remaining context space across multiple recent messages. Short messages use only the space they need, which leaves more room for longer excerpts. Messages that cannot fit even a useful marked excerpt are listed as omitted. This remains deterministic excerpting rather than semantic compression.
 
-The CLI defaults to English. `--language zh` translates reader-facing Markdown headings, handoff labels, warnings, and diagnostics. JSON property names, message roles, and machine aliases such as `[SECRET_1]` remain unchanged.
+The CLI defaults to English. `--language` selects English, Chinese, Japanese, French, or Spanish for reader-facing Markdown headings, handoff labels, warnings, and diagnostics. JSON property names, message roles, and machine aliases such as `[SECRET_1]` remain unchanged.
 
 For handoffs, `--notes-file` accepts `goal`, `decisions`, `constraints`, and `nextSteps` strings. Each field is limited to 12000 characters and the JSON file to 256 KiB. Notes use the same enabled built-in, email, and custom redaction rules as the conversation, with independent `[NOTE_SECRET_n]`, `[NOTE_EMAIL_n]`, and `[NOTE_CUSTOM_n]` aliases. Repeat `--pin N` to include messages by their 1-based order in the original selected conversation. Notes and pins can also be passed with `--format report` to calculate its handoff summary without including note text.
 

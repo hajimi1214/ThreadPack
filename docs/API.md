@@ -186,11 +186,11 @@ The export dialog also offers a portable context bundle. The Worker creates a ZI
 The browser also provides an optional Markdown reading mode using `react-markdown` and `remark-gfm`. Raw HTML is not enabled, images render as text placeholders, and code is rendered as React text. This mode changes only presentation; message copy and exports continue using the full cleaned source text.
 
 ```ts
-buildTranscript(conversation: Conversation): string
+buildTranscript(conversation: Conversation, language?: OutputLanguage): string
 buildJsonl(conversation: Conversation): string
 ```
 
-`buildTranscript` returns Markdown with message bodies in code fences. `buildJsonl` returns one normalized `Message` object per line. Both accept the conversation passed to them without applying cleanup; pass `result.conversation` to export cleaned data.
+`buildTranscript` returns Markdown with message bodies in code fences and localized reader-facing headings. `language` accepts `en`, `zh`, `ja`, `fr`, or `es` and defaults to `en`. `buildJsonl` returns one normalized `Message` object per line and does not translate its JSON keys or message roles. Both accept the conversation passed to them without applying cleanup; pass `result.conversation` to export cleaned data.
 
 Neither format is a native provider session file or a mechanism for resuming an agent.
 
@@ -205,6 +205,7 @@ interface HandoffOptions {
   pinnedIds: string[];
   recentCount: number;
   recentMode?: 'source' | 'timestamp';
+  language?: 'en' | 'zh' | 'ja' | 'fr' | 'es';
   maxCharacters?: number;
 }
 
