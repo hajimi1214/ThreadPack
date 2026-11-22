@@ -27,6 +27,8 @@ Code extraction indexes closed fenced blocks by offsets into the cleaned Worker-
 
 The portable context bundle reuses the same cleaned Worker cache and writes deterministic ZIP entries for a manifest, Markdown transcript, normalized JSONL, aggregate cleanup report, optional handoff notes, and code files. Text and code entries are pushed in UTF-8-safe chunks; original-view messages, source titles, and custom redaction values do not cross the bundle boundary.
 
+Handoff drafts use a separate versioned JSON format capped at 256 KiB. The browser exports notes and selection settings, plus SHA-256 fingerprints for the source conversation and pinned messages. Import validates the schema and fingerprints before changing the active conversation draft. The file has no conversation text and does not recreate a provider session.
+
 Both original and packed search run over complete worker-owned message bodies. The interface receives only the requested page, with long content replaced by bounded previews. Export and handoff generation use complete retained messages in the worker rather than reconstructing content from the preview. An explicit per-message copy request returns that single complete message in the selected original or packed mode. A separate review request returns at most 12,000 characters each from one message's original and cleaned form, with image payloads hidden and truncation disclosed. Pinned-only filtering is combined with role, changed-message, and text filters in the worker. `ArrayBuffer` export responses transfer ownership instead of structured-cloning the buffer. React's deferred query value avoids putting search work on the input event path.
 
 ## Measured comparison

@@ -183,6 +183,8 @@ The browser adds search and allowlisted language filters over cleaned snippets, 
 
 The export dialog also offers a portable context bundle. The Worker creates a ZIP from the cleaned conversation containing `README.md`, `transcript.md`, `messages.jsonl`, `cleanup-report.json`, cleaned `code/` files, and `handoff.md` only when submitted notes contain nonblank text. The bundle uses allowlisted metadata and never includes original-view content or custom redaction values.
 
+The handoff view can import and export a separate `threadpack-handoff-draft` JSON document, version 1, limited to 256 KiB. It contains the four handoff note fields, recent-message settings, a source fingerprint, and pinned message numbers with SHA-256 content fingerprints. It contains no message bodies or provider IDs. Notes remain unredacted in this file. Pinned messages are accepted only when the source conversation and the referenced messages match. The document stores editable handoff settings, not a native session or conversation recovery data.
+
 The browser also provides an optional Markdown reading mode using `react-markdown` and `remark-gfm`. Raw HTML is not enabled, images render as text placeholders, and code is rendered as React text. This mode changes only presentation; message copy and exports continue using the full cleaned source text.
 
 ```ts
