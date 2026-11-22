@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { dictionary, SUPPORTED_LANGUAGES } from '../../src/i18n';
 
 test.use({ locale: 'en-US' });
@@ -19,6 +20,23 @@ async function noHorizontalOverflow(page: Page) {
 async function idle(page: Page) {
   await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
 }
+
+async function exportFromDialog(page: Page, exportLabel: string, formatLabel: string): Promise<string> {
+  await page.getByRole('button', { name: exportLabel, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.locator('.export-formats button').filter({ hasText: formatLabel }).click();
+  const download = await downloadPromise;
+  return readFile((await download.path())!, 'utf8');
+}
+
+const outputLabels = {
+  en: { transcript: 'Normalized transcript', handoff: '# Handoff:', goal: '## Goal', warning: 'Redaction uses local patterns' },
+  zh: { transcript: '标准化对话', handoff: '# 交接包：', goal: '## 目标', warning: '脱敏使用本地模式' },
+  ja: { transcript: '正規化された会話記録', handoff: '# 引き継ぎ：', goal: '## 目標', warning: 'マスキングはローカル' },
+  fr: { transcript: 'Transcription normalisée', handoff: '# Transmission :', goal: '## Objectif', warning: 'Le masquage utilise' },
+  es: { transcript: 'Transcripción normalizada', handoff: '# Traspaso:', goal: '## Objetivo', warning: 'La ocultación usa' },
+} as const;
 
 for (const language of SUPPORTED_LANGUAGES) {
   test(`${language.name}: localized demo, cleanup, help, mobile layout, and saved preference`, async ({ page }) => {
@@ -43,6 +61,10 @@ for (const language of SUPPORTED_LANGUAGES) {
     await page.getByRole('button', { name: t.showcaseAction, exact: true }).click();
     await idle(page);
     await expect(page.locator('.demo-badge')).toHaveText(t.demoBadge);
+    await page.locator('.warnings summary').click();
+    await expect(page.locator('.warnings')).toContainText(outputLabels[language.code].warning);
+    await page.locator('.warnings summary').click();
+    await expect(page.locator('.warnings')).toContainText(outputLabels[language.code].warning);
     const imageSwitch = page.getByRole('switch', { name: t.stripImages, exact: true });
     if (!(await imageSwitch.isVisible())) await page.locator('.settings-toggle').click();
     await expect(page.getByRole('heading', { name: t.recipe, exact: true })).toBeVisible();
@@ -72,6 +94,24 @@ for (const language of SUPPORTED_LANGUAGES) {
     await expect(dialog).not.toBeVisible();
     await expect(help).toBeFocused();
 
+    const markdown = await exportFromDialog(page, t.export, t.markdown);
+    expect(markdown).toContain(outputLabels[language.code].transcript);
+    expect(markdown).toContain('[EMAIL_1]');
+    const reportText = await exportFromDialog(page, t.export, t.report);
+    const report = JSON.parse(reportText);
+    expect(report.stats.emailsRedacted).toBeGreaterThan(0);
+    expect(report.warningCount).toBe(report.warnings.length);
+    expect(report.warnings.some((warning: string) => warning.includes(outputLabels[language.code].warning))).toBeTruthy();
+    expect(Object.hasOwn(report, 'scope')).toBeTruthy();
+
+    await page.getByRole('button', { name: t.buildHandoff, exact: true }).click();
+    const handoffPreview = page.locator('.handoff-document');
+    await expect(handoffPreview).toContainText(outputLabels[language.code].handoff);
+    await expect(handoffPreview).toContainText(outputLabels[language.code].goal);
+    const handoffDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: t.downloadHandoff, exact: true }).click();
+    expect(await readFile((await (await handoffDownload).path())!, 'utf8')).toContain(outputLabels[language.code].handoff);
+
     expect(await page.evaluate(() => ({ ...localStorage }))).toEqual({ 'threadpack-language': language.code });
     await page.reload();
     await expect(selector).toHaveValue(language.code);
@@ -83,6 +123,27 @@ for (const language of SUPPORTED_LANGUAGES) {
     await noHorizontalOverflow(page);
   });
 }
+
+test('diagnostics follow the selected interface language after an error', async ({ page }) => {
+  await page.goto('/');
+  const selector = page.getByRole('combobox', { name: 'Language / 语言', exact: true });
+  await selector.selectOption('en');
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{"messages":[not valid JSON]}'),
+  });
+  const alert = page.getByRole('alert');
+  const detail = alert.locator('p');
+  await expect(detail).toContainText('Invalid JSON');
+  const expected = {
+    zh: '本地处理失败', ja: 'ローカル処理に失敗しました',
+    fr: 'Le traitement local a échoué', es: 'El procesamiento local falló',
+  } as const;
+  for (const [language, translated] of Object.entries(expected)) {
+    await selector.selectOption(language);
+    await expect(detail).toContainText(translated);
+    await expect(detail).not.toContainText('Invalid JSON');
+  }
+});
 
 test.describe('invalid stored preference', () => {
   test.describe('supported browser locale', () => {

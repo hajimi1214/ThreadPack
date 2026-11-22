@@ -381,6 +381,64 @@ test('exports transfer complete cleaned UTF-8 data and reports contain only allo
   assert.ok(!textOf(markdown.buffer).includes(fakeToken));
 });
 
+test('Worker reader-facing exports and bundle documents follow all supported output languages', async () => {
+  const engine = new WorkerEngine();
+  const fakeToken = ['sk', 'proj', 'J'.repeat(35)].join('-');
+  const archive = await load(engine, JSON.stringify({ title: 'Localized export', messages: [{
+    role: 'user', content: `API_KEY="${fakeToken}"\nContact locale-user@example.test`,
+  }] }));
+  const summary = await clean(engine, archive);
+  const selection = { archiveId: archive.archiveId, conversationId: summary.conversation.id, revision: summary.revision };
+  const cases = [
+    { language: 'en' as const, transcript: 'Normalized transcript', handoff: '# Handoff:', warning: 'Redaction uses local patterns' },
+    { language: 'zh' as const, transcript: '标准化对话', handoff: '# 交接包：', warning: '脱敏使用本地模式' },
+    { language: 'ja' as const, transcript: '正規化された会話記録', handoff: '# 引き継ぎ：', warning: 'マスキングはローカル' },
+    { language: 'fr' as const, transcript: 'Transcription normalisée', handoff: '# Transmission :', warning: 'Le masquage utilise' },
+    { language: 'es' as const, transcript: 'Transcripción normalizada', handoff: '# Traspaso:', warning: 'La ocultación usa' },
+  ];
+  for (const item of cases) {
+    const markdown = await engine.handle({ id: next(), type: 'export', ...selection, format: 'markdown', language: item.language });
+    const markdownText = textOf(markdown.buffer);
+    assert.ok(markdownText.includes(item.transcript), item.language);
+    assert.ok(markdownText.includes('[SECRET_1]'));
+    assert.ok(markdownText.includes('[EMAIL_1]'));
+    assert.ok(!markdownText.includes(fakeToken));
+
+    const jsonl = await engine.handle({ id: next(), type: 'export', ...selection, format: 'jsonl', language: item.language });
+    const message = JSON.parse(textOf(jsonl.buffer).trim());
+    assert.equal(message.role, 'user');
+    assert.ok(message.content.includes('[SECRET_1]'));
+    assert.ok(message.content.includes('[EMAIL_1]'));
+
+    const report = await engine.handle({ id: next(), type: 'export', ...selection, format: 'report', language: item.language });
+    const reportText = textOf(report.buffer);
+    const parsedReport = JSON.parse(reportText);
+    assert.ok(Object.hasOwn(parsedReport, 'scope'));
+    assert.ok(Object.hasOwn(parsedReport, 'warningCount'));
+    assert.ok(!Object.hasOwn(parsedReport, 'note'));
+    assert.ok(parsedReport.warnings.some((warning: string) => warning.includes(item.warning)), item.language);
+    assert.ok(!reportText.includes(fakeToken));
+
+    const handoff = await engine.handle({ id: next(), type: 'handoff', ...selection, language: item.language,
+      notes: { goal: '', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
+    assert.ok(handoff.text.startsWith(item.handoff), item.language);
+    assert.ok(handoff.text.includes('[SECRET_1]'));
+  }
+
+  const frenchBundle = await engine.handle({ id: next(), type: 'export-bundle', ...selection, language: 'fr',
+    notes: { goal: 'Reprendre le travail', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
+  const files = unzipSync(new Uint8Array(frenchBundle.buffer));
+  const readme = new TextDecoder().decode(files['README.md']!);
+  const report = JSON.parse(new TextDecoder().decode(files['cleanup-report.json']!));
+  const transcript = new TextDecoder().decode(files['transcript.md']!);
+  const handoff = new TextDecoder().decode(files['handoff.md']!);
+  assert.ok(readme.includes('Pack de contexte ThreadPack'));
+  assert.ok(readme.includes('transcription nettoyée et lisible'));
+  assert.ok(report.scope.includes('texte normalisé des messages'));
+  assert.ok(transcript.includes('Transcription normalisée'));
+  assert.ok(handoff.startsWith('# Transmission :'));
+});
+
 test('portable context bundles contain cleaned files, safe code names, and no custom values', async () => {
   const engine = new WorkerEngine();
   const custom = 'bundle-private-value-739';

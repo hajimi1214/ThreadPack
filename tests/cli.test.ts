@@ -136,10 +136,53 @@ test('CLI translates Markdown headings, warnings, reports, and errors without tr
   const handoffResult = run(['-', '--out', handoffPath, '--format', 'handoff', '--recent', '1', '--language', 'zh'], transcript);
   assert.equal(handoffResult.status, 0, handoffResult.stderr);
   const handoff = await readFile(handoffPath, 'utf8');
-  assert.match(handoff, /^# 交接包:/);
+  assert.match(handoff, /^# 交接包：/);
   assert.ok(handoff.includes('## 目标'));
   assert.ok(handoff.includes('[SECRET_1]'));
   assert.ok(!handoff.includes(fakeSecret));
+});
+
+test('CLI localizes exports, warnings, diagnostics, and help in all five languages', async () => {
+  const input = join(folder, 'all-languages.jsonl');
+  await writeFile(input, `${JSON.stringify({ role: 'user', content: 'Contact locale-user@example.test.' })}\nmalformed-line\n`);
+  const cases = [
+    { language: 'en', markdown: 'Normalized transcript', handoff: '# Handoff:', warning: 'invalid JSONL line', pinError: 'message number must be between', help: 'Usage:' },
+    { language: 'zh', markdown: '标准化对话', handoff: '# 交接包：', warning: '无效 JSONL', pinError: '消息序号必须', help: '用法：' },
+    { language: 'ja', markdown: '正規化された会話記録', handoff: '# 引き継ぎ：', warning: '無効な JSONL 行', pinError: 'メッセージ番号は', help: '使い方：' },
+    { language: 'fr', markdown: 'Transcription normalisée', handoff: '# Transmission :', warning: 'lignes JSONL invalides', pinError: 'numéro de message --pin', help: 'Utilisation :' },
+    { language: 'es', markdown: 'Transcripción normalizada', handoff: '# Traspaso:', warning: 'líneas JSONL no válidas', pinError: 'número de mensaje de --pin', help: 'Uso:' },
+  ];
+  for (const item of cases) {
+    const reportPath = join(folder, `all-language-${item.language}.json`);
+    const reportResult = run([input, '--out', reportPath, '--format', 'report', '--language', item.language]);
+    assert.equal(reportResult.status, 0, reportResult.stderr);
+    assert.ok(reportResult.stderr.includes(item.warning), item.language);
+    const reportText = await readFile(reportPath, 'utf8');
+    const report = JSON.parse(reportText);
+    assert.equal(report.warningCount, report.warnings.length);
+    assert.ok(report.warnings.some((warning: string) => warning.includes(item.warning)), item.language);
+    assert.ok(Object.hasOwn(report, 'stats'));
+    assert.ok(Object.hasOwn(report, 'note'));
+    assert.ok(!reportText.includes('locale-user@example.test'));
+
+    const markdownPath = join(folder, `all-language-${item.language}.md`);
+    const markdownResult = run([input, '--out', markdownPath, '--format', 'markdown', '--language', item.language]);
+    assert.equal(markdownResult.status, 0, markdownResult.stderr);
+    assert.ok((await readFile(markdownPath, 'utf8')).includes(item.markdown), item.language);
+
+    const handoffPath = join(folder, `all-language-${item.language}-handoff.md`);
+    const handoffResult = run([input, '--out', handoffPath, '--format', 'handoff', '--recent', '1', '--language', item.language]);
+    assert.equal(handoffResult.status, 0, handoffResult.stderr);
+    assert.ok((await readFile(handoffPath, 'utf8')).startsWith(item.handoff), item.language);
+
+    const pinError = run(['-', '--out', join(folder, `bad-pin-${item.language}.md`), '--format', 'handoff', '--pin', '9', '--language', item.language], transcript);
+    assert.equal(pinError.status, 1);
+    assert.ok(pinError.stderr.includes(item.pinError), item.language);
+
+    const help = run(['--help', '--language', item.language]);
+    assert.equal(help.status, 0);
+    assert.ok(help.stdout.includes(item.help), item.language);
+  }
 });
 
 test('CLI refuses overwriting output unless force is explicit', async () => {
@@ -375,7 +418,7 @@ test('CLI help documents the recent-message default', () => {
   assert.match(result.stdout, /--notes-file <file>/);
   assert.match(result.stdout, /--pin <N>.*repeatable/);
   assert.match(result.stdout, /--original-out <file>/);
-  assert.match(result.stdout, /--language <en\|zh>/);
+  assert.match(result.stdout, /--language <en\|zh\|ja\|fr\|es>/);
   assert.match(result.stdout, /--no-redact-emails/);
   const chinese = run(['--help', '--language', 'zh']);
   assert.equal(chinese.status, 0);

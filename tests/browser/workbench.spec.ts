@@ -31,11 +31,47 @@ function changes(page: Page, label: string) {
 
 test('imports a supported conversation directly from a ZIP export', async ({ page }) => {
   const zip = zipSync({ 'conversations.json': Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: 'DIRECT_ZIP_IMPORT' }] })) });
+  const originalZip = Buffer.from(zip);
   await page.goto('/');
-  await page.getByLabel('Import file', { exact: true }).setInputFiles({ name: 'chatgpt-export.zip', mimeType: 'application/zip', buffer: Buffer.from(zip) });
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({ name: 'chatgpt-export.zip', mimeType: 'application/zip', buffer: originalZip });
   await ready(page);
   await expect(page.locator('.file-details > strong')).toHaveText('chatgpt-export.zip');
   await expect(page.locator('.message-content').first()).toContainText('DIRECT_ZIP_IMPORT');
+  const originalDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original file', exact: true }).click();
+  expect(await readFile((await (await originalDownload).path())!)).toEqual(originalZip);
+});
+
+test('browser downloads the original imported bytes separately from the cleaned export', async ({ page }) => {
+  const source = Buffer.from('\uFEFF{\r\n  "messages": [{"role":"user","content":"ORIGINAL_SOURCE_PAYLOAD"}]\r\n}\r\n', 'utf8');
+  await page.goto('/');
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'preserve-source.json', mimeType: 'application/json', buffer: source,
+  });
+  await ready(page);
+
+  const originalDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original file', exact: true }).click();
+  const original = await originalDownload;
+  expect(original.suggestedFilename()).toBe('preserve-source.json');
+  expect(await readFile((await original.path())!)).toEqual(source);
+
+  const cleanedText = await exported(page, 'Markdown transcript');
+  expect(cleanedText).toContain('ORIGINAL_SOURCE_PAYLOAD');
+  expect(cleanedText).toContain('Normalized transcript');
+  expect(Buffer.from(cleanedText)).not.toEqual(source);
+
+  const replacement = Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: 'REPLACEMENT_SOURCE' }] }), 'utf8');
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'replacement-source.json', mimeType: 'application/json', buffer: replacement,
+  });
+  await ready(page);
+  const replacementDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original file', exact: true }).click();
+  expect(await readFile((await (await replacementDownload).path())!)).toEqual(replacement);
+
+  await page.getByRole('button', { name: 'Clear workspace', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Download original file', exact: true })).not.toBeVisible();
 });
 
 test('mobile handoff shows its preview and actions without opening the keyboard', async ({ page }) => {
@@ -345,11 +381,15 @@ test('paste, malformed JSON, clearing, language, and help keyboard focus all wor
   await page.getByRole('button', { name: 'Paste text', exact: true }).click();
   const paste = page.getByRole('dialog', { name: 'Paste text', exact: true });
   await expect(paste.getByRole('button', { name: 'Open text' })).toBeDisabled();
-  await paste.getByRole('textbox', { name: 'Paste text', exact: true }).fill('User: PASTE_GOAL: keep Unicode 你好.\nAssistant: PASTE_REPLY: ready.');
+  const pastedSource = 'User: PASTE_GOAL: keep Unicode 你好.\nAssistant: PASTE_REPLY: ready.';
+  await paste.getByRole('textbox', { name: 'Paste text', exact: true }).fill(pastedSource);
   await paste.getByRole('button', { name: 'Open text', exact: true }).click();
   await ready(page);
   await expect(page.locator('.message-card')).toHaveCount(2);
   await expect(page.locator('.messages-list')).toContainText('你好');
+  const pastedOriginalDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original file', exact: true }).click();
+  expect(await readFile((await (await pastedOriginalDownload).path())!)).toEqual(Buffer.from(pastedSource, 'utf8'));
   await page.getByRole('button', { name: 'Clear workspace', exact: true }).click();
   await expect(page.locator('.message-card')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Try the demo', exact: true })).toBeVisible();
