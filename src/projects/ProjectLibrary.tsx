@@ -7,6 +7,7 @@ import {
   listProjects, listProjectSessions, restoreProjectBackup, restoreProjectRevision, saveProjectSession, updateProject,
 } from './store';
 import type { ProjectRecord, ProjectRevisionSummary, ProjectSessionInput, ProjectSessionSummary } from './store';
+import ProjectMemoryPanel from './ProjectMemoryPanel';
 
 interface ActiveSession { conversationId: string; title: string; messageCount: number }
 interface Props {
@@ -47,6 +48,12 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     setProjectReload(value => value + 1);
   }
 
+  async function refreshProjectMetadata(projectId: string) {
+    const next = await listProjects();
+    setProjects(next);
+    if (next.some(project => project.id === projectId)) setSelectedProjectId(projectId);
+  }
+
   useEffect(() => {
     let active = true;
     void listProjects().then(value => { if (active) { setProjects(value); setSelectedProjectId(value[0]?.id ?? ''); } })
@@ -68,7 +75,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     let active = true;
     const timer = setTimeout(() => {
       void listProjectSessions(selectedProjectId, query).then(result => {
-        if (active) { setSessions(result.sessions); setSessionTotal(result.total); setError(''); }
+        if (active) { setSessions(result.sessions); setSessionTotal(result.total); }
       }).catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); });
     }, query ? 180 : 0);
     return () => { active = false; clearTimeout(timer); };
@@ -187,6 +194,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
         <div className="project-detail-heading"><div><h3>{selectedProject.name}</h3><small>{t.projectUpdated} · {formatDate(selectedProject.updatedAt)}</small></div><button className="icon-button muted" aria-label={t.projectBackupExport} title={t.projectBackupExport} disabled={!!busy} onClick={downloadBackup}><ArrowDownToLine size={16} /></button><button className="icon-button muted" aria-label={t.projectDelete} title={t.projectDelete} disabled={!!busy} onClick={removeSelectedProject}><Trash2 size={16} /></button></div>
         {confirmDelete && <div className="project-confirm"><span>{t.projectDeleteConfirm}</span><button className="button danger small" disabled={!!busy} onClick={removeSelectedProject}>{t.projectDelete}</button><button className="button secondary small" onClick={() => setConfirmDelete(false)}>{t.cancel}</button></div>}
         <div className="project-fields"><label><span>{t.projectName}</span><input value={projectName} maxLength={100} onChange={event => setProjectName(event.target.value)} /></label><label><span>{t.projectStatus}</span><textarea value={summary} maxLength={10000} rows={2} onChange={event => setSummary(event.target.value)} /></label><label><span>{t.projectImportantNotes}</span><textarea value={importantNotes} maxLength={20000} rows={3} onChange={event => setImportantNotes(event.target.value)} /></label><button className="button secondary small" disabled={!!busy} onClick={saveDetails}>{t.projectSaveDetails}</button></div>
+        <ProjectMemoryPanel key={selectedProject.id} project={selectedProject} reloadKey={projectReload} sessions={sessions} t={t} notify={notify} onChanged={() => refreshProjectMetadata(selectedProject.id)} />
         <div className="project-sessions-heading"><h3>{t.projectSessions} <span>{sessionTotal}</span></h3><label className="project-search"><Search size={14} /><input type="search" maxLength={1000} value={query} aria-label={t.projectSearch} placeholder={t.projectSearch} onChange={event => setQuery(event.target.value)} /></label></div>
         {activeSession && <button className="button primary small project-save-session" disabled={!!busy} onClick={saveSession}><Archive size={14} />{t.projectSaveSession}<span>{activeSession.title}</span></button>}
         {!sessions.length && <p className="project-empty">{query ? t.projectNoMatches : t.projectNoSessions}</p>}

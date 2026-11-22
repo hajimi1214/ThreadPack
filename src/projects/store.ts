@@ -1,9 +1,10 @@
 import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
+import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, ProjectMemoryFact, ProjectMemoryInput, TaskState } from './memory-types';
 
 const DATABASE_NAME = 'threadpack-project-library';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const RESTORE_STALE_AFTER = 24 * 60 * 60 * 1000;
 const MAX_REVISION_BYTES = 200 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -109,6 +110,11 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 
 let databasePromise: Promise<IDBDatabase> | undefined;
 
+const MEMORY_CATEGORIES: MemoryCategory[] = ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'];
+const MEMORY_STATUSES: MemoryStatus[] = ['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded'];
+const EVIDENCE_KINDS: EvidenceKind[] = ['conversation', 'repository', 'test', 'user'];
+const TASK_STATES: TaskState[] = ['not-started', 'in-progress', 'done', 'blocked', 'unclear'];
+
 function database(): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) return Promise.reject(new Error('Local project storage is unavailable in this browser.'));
   if (!databasePromise) {
@@ -117,15 +123,26 @@ function database(): Promise<IDBDatabase> {
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
       request.onupgradeneeded = () => {
         const db = request.result;
-        const projects = db.createObjectStore('projects', { keyPath: 'id' });
-        projects.createIndex('updatedAt', 'updatedAt');
-        const sessions = db.createObjectStore('sessions', { keyPath: 'key' });
-        sessions.createIndex('projectId', 'projectId');
-        sessions.createIndex('projectSessionKey', ['projectId', 'sessionKey'], { unique: true });
-        sessions.createIndex('projectUpdatedAt', ['projectId', 'updatedAt']);
-        const revisions = db.createObjectStore('revisions', { keyPath: 'key' });
-        revisions.createIndex('projectId', 'projectId');
-        revisions.createIndex('projectSession', ['projectId', 'sessionId']);
+        if (!db.objectStoreNames.contains('projects')) {
+          const projects = db.createObjectStore('projects', { keyPath: 'id' });
+          projects.createIndex('updatedAt', 'updatedAt');
+        }
+        if (!db.objectStoreNames.contains('sessions')) {
+          const sessions = db.createObjectStore('sessions', { keyPath: 'key' });
+          sessions.createIndex('projectId', 'projectId');
+          sessions.createIndex('projectSessionKey', ['projectId', 'sessionKey'], { unique: true });
+          sessions.createIndex('projectUpdatedAt', ['projectId', 'updatedAt']);
+        }
+        if (!db.objectStoreNames.contains('revisions')) {
+          const revisions = db.createObjectStore('revisions', { keyPath: 'key' });
+          revisions.createIndex('projectId', 'projectId');
+          revisions.createIndex('projectSession', ['projectId', 'sessionId']);
+        }
+        if (!db.objectStoreNames.contains('memory')) {
+          const memory = db.createObjectStore('memory', { keyPath: 'key' });
+          memory.createIndex('projectId', 'projectId');
+          memory.createIndex('projectTopic', ['projectId', 'category', 'normalizedTopic']);
+        }
       };
       request.onsuccess = () => {
         if (blocked) { request.result.close(); return; }
@@ -165,18 +182,21 @@ async function removeProjectRows(transaction: IDBTransaction, projectId: string)
   const projects = transaction.objectStore('projects');
   const sessions = transaction.objectStore('sessions');
   const revisions = transaction.objectStore('revisions');
-  const [sessionKeys, revisionKeys] = await Promise.all([
+  const memory = transaction.objectStore('memory');
+  const [sessionKeys, revisionKeys, memoryKeys] = await Promise.all([
     idbRequest(sessions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
     idbRequest(revisions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
+    idbRequest(memory.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
   ]);
   for (const key of sessionKeys) sessions.delete(key);
   for (const key of revisionKeys) revisions.delete(key);
+  for (const key of memoryKeys) memory.delete(key);
   projects.delete(projectId);
 }
 
 async function cleanAbandonedRestores(): Promise<void> {
   const cutoff = Date.now() - RESTORE_STALE_AFTER;
-  await withTransaction(['projects', 'sessions', 'revisions'], 'readwrite', async transaction => {
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', async transaction => {
     const projects = await idbRequest<ProjectRecord[]>(transaction.objectStore('projects').getAll());
     for (const project of projects) {
       if (project.restoringSince && project.restoringSince < cutoff) await removeProjectRows(transaction, project.id);
@@ -353,7 +373,7 @@ export async function updateProject(projectId: string, changes: Partial<Pick<Pro
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  await withTransaction(['projects', 'sessions', 'revisions'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
 }
 
 export async function saveProjectSession(projectId: string, input: ProjectSessionInput): Promise<ProjectImportResult> {
@@ -399,6 +419,14 @@ export async function listProjectSessions(projectId: string, query = ''): Promis
   }));
 }
 
+export async function listProjectSessionStates(projectId: string): Promise<{ id: string; title: string; currentVersion: number }[]> {
+  return withTransaction(['sessions'], 'readonly', async transaction => {
+    const sessions = await idbRequest<ProjectSessionRecord[]>(transaction.objectStore('sessions').index('projectId')
+      .getAll(IDBKeyRange.only(projectId)));
+    return sessions.sort((a, b) => b.updatedAt - a.updatedAt).map(({ id, title, currentVersion }) => ({ id, title, currentVersion }));
+  });
+}
+
 export async function getProjectSession(projectId: string, sessionId: string, version?: number): Promise<ProjectSessionContent> {
   return withTransaction(['sessions', 'revisions'], 'readonly', async transaction => {
     const session = await idbRequest<ProjectSessionRecord | undefined>(transaction.objectStore('sessions').get(`${projectId}\0${sessionId}`));
@@ -407,12 +435,15 @@ export async function getProjectSession(projectId: string, sessionId: string, ve
     const revision = await idbRequest<RevisionRecord | undefined>(transaction.objectStore('revisions').get([projectId, sessionId, selectedVersion]));
     if (!revision || revision.fingerprint !== await sha256Fingerprint(revision.content)) throw new Error('This project history entry failed its integrity check.');
     const snapshot = inspectSnapshot(revision.content);
-    if (snapshot.messageCount !== revision.messageCount || selectedVersion === session.currentVersion
-      && (revision.fingerprint !== session.fingerprint || revision.title !== session.title || revision.platform !== session.platform
-        || revision.messageCount !== session.messageCount || revision.sourceName !== session.sourceName)) {
+    if (snapshot.messageCount !== (revision.messageCount ?? session.messageCount) || selectedVersion === session.currentVersion
+      && (revision.fingerprint !== session.fingerprint
+        || revision.title !== undefined && revision.title !== session.title
+        || revision.platform !== undefined && revision.platform !== session.platform
+        || revision.messageCount !== undefined && revision.messageCount !== session.messageCount
+        || revision.sourceName !== undefined && revision.sourceName !== session.sourceName)) {
       throw new Error('This project history entry failed its structure check.');
     }
-    return { summary: session, version: selectedVersion, sourceName: revision.sourceName, content: revision.content };
+    return { summary: session, version: selectedVersion, sourceName: revision.sourceName ?? session.sourceName, content: revision.content };
   });
 }
 
@@ -458,17 +489,247 @@ export async function restoreProjectRevision(projectId: string, sessionId: strin
   });
 }
 
+function normalizeMemoryTopic(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function findSnapshotMessage(content: string, messageId: string): { id: string; role: string; timestamp?: string; content: string } | null {
+  let offset = 0;
+  while (offset < content.length) {
+    const end = content.indexOf('\n', offset);
+    const line = content.slice(offset, end < 0 ? content.length : end).replace(/\r$/, '');
+    offset = end < 0 ? content.length : end + 1;
+    if (!line) continue;
+    let record: unknown;
+    try { record = JSON.parse(line); } catch { throw new Error('The cited project history contains invalid JSON.'); }
+    if (!isRecord(record)) continue;
+    const message = record.type === 'threadpack_message' && isRecord(record.message) ? record.message : record;
+    if (message.id !== messageId || typeof message.content !== 'string' || typeof message.role !== 'string') continue;
+    return { id: messageId, role: message.role, content: message.content,
+      ...(typeof message.timestamp === 'string' ? { timestamp: message.timestamp } : {}) };
+  }
+  return null;
+}
+
+async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInput): Promise<MemoryEvidence> {
+  if (!input || !EVIDENCE_KINDS.includes(input.kind) || typeof input.reference !== 'string' || input.reference.length > 1000
+    || typeof input.quote !== 'undefined' && (typeof input.quote !== 'string' || input.quote.length > 1000)) {
+    throw new Error('A memory evidence entry is invalid.');
+  }
+  const recordedAt = Date.now();
+  if (input.kind === 'conversation') {
+    if (typeof input.sessionId !== 'string' || typeof input.messageId !== 'string'
+      || !Number.isSafeInteger(input.version) || (input.version as number) < 1) throw new Error('Select a saved conversation message as evidence.');
+    const saved = await getProjectSession(projectId, input.sessionId, input.version);
+    const message = findSnapshotMessage(saved.content, input.messageId);
+    if (!message) throw new Error('The selected evidence message is unavailable in that saved version.');
+    const quote = input.quote?.trim() || message.content.slice(0, 600);
+    if (!quote || quote.length > 1000 || !message.content.includes(quote)) throw new Error('The evidence excerpt does not match the selected message.');
+    return {
+      id: makeId(), kind: input.kind,
+      reference: `${saved.summary.title} · v${saved.version} · ${message.id}`,
+      quote, sessionId: input.sessionId, version: input.version, messageId: input.messageId,
+      messageFingerprint: await sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`),
+      recordedAt, verification: 'source-matched',
+    };
+  }
+  if (input.kind === 'user') return {
+    id: makeId(), kind: input.kind, reference: input.reference || 'No source attached', quote: '', recordedAt,
+    verification: 'unattached',
+  };
+  const commit = input.commit?.trim();
+  if (!input.reference.trim() || !commit || !/^[a-f0-9]{7,64}$/i.test(commit) || !input.quote?.trim()) {
+    throw new Error('Repository and test evidence need a commit ID and an exact excerpt or result.');
+  }
+  if (input.kind === 'test' && !input.command?.trim()) throw new Error('Test evidence needs the command that was run.');
+  return {
+    id: makeId(), kind: input.kind, reference: input.reference, quote: input.quote.trim(), commit,
+    ...(input.command ? { command: input.command.trim().slice(0, 500) } : {}), recordedAt,
+    verification: 'user-recorded',
+  };
+}
+
+export async function listProjectMemory(projectId: string): Promise<ProjectMemoryFact[]> {
+  if (typeof projectId !== 'string' || projectId.length > 200) throw new Error('This project is unavailable.');
+  return withTransaction(['memory'], 'readonly', async transaction =>
+    (await idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))))
+      .sort((a, b) => b.updatedAt - a.updatedAt));
+}
+
+export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
+  if (!input || !MEMORY_CATEGORIES.includes(input.category) || !['user', 'ai'].includes(input.origin)
+    || !MEMORY_STATUSES.includes(input.status) || typeof input.topic !== 'string' || !input.topic.trim()
+    || input.topic.length > 160 || typeof input.statement !== 'string' || !input.statement.trim()
+    || input.statement.length > 4000 || !Array.isArray(input.evidence) || input.evidence.length > 5
+    || input.taskState !== undefined && !TASK_STATES.includes(input.taskState)
+    || input.category !== 'task' && input.taskState !== undefined) {
+    throw new Error('Enter a category, topic, statement, and up to five evidence entries.');
+  }
+  if (input.origin === 'ai' && (input.status !== 'proposed' || !input.evidence.length || input.evidence.some(item => item.kind !== 'conversation'))) {
+    throw new Error('AI-extracted facts must remain proposed and cite selected conversation messages.');
+  }
+  if (input.origin === 'user' && !['confirmed', 'needs-review'].includes(input.status)) {
+    throw new Error('User-authored facts must be confirmed or marked for review.');
+  }
+  const topic = input.topic.trim();
+  const normalizedTopic = normalizeMemoryTopic(topic);
+  const evidenceInputs = input.evidence.length ? input.evidence : [{ kind: 'user' as const, reference: 'No source attached' }];
+  const evidence = await Promise.all(evidenceInputs.map(item => prepareMemoryEvidence(projectId, item)));
+  if (input.origin === 'ai' && evidence.some(item => item.verification !== 'source-matched')) {
+    throw new Error('Every AI suggestion must cite selected conversation evidence.');
+  }
+  const id = makeId();
+  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    if (!project || project.restoringSince) throw new Error('This project is unavailable.');
+    const now = Date.now();
+    const fact: ProjectMemoryFact = {
+      key: `${projectId}\0${id}`, id, projectId, category: input.category, topic, normalizedTopic,
+      statement: input.statement.trim(), origin: input.origin, status: input.status,
+      ...(input.category === 'task' ? { taskState: input.taskState ?? 'unclear' } : {}),
+      evidence, conflictsWith: [], createdAt: now, updatedAt: now,
+    };
+    let matching: ProjectMemoryFact[] = [];
+    if (input.supersedes) {
+      if (typeof input.supersedes !== 'string' || input.supersedes.length > 200) throw new Error('The fact to supersede is invalid.');
+      const previous = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${input.supersedes}`));
+      if (!previous || previous.status === 'rejected' || previous.status === 'superseded') throw new Error('The selected previous fact is unavailable.');
+      previous.status = 'superseded';
+      previous.supersededBy = fact.id;
+      previous.updatedAt = now;
+      fact.supersedes = previous.id;
+      for (const otherId of previous.conflictsWith) {
+        const other = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${otherId}`));
+        if (other) {
+          other.conflictsWith = other.conflictsWith.filter(id => id !== previous.id);
+          if (!other.conflictsWith.length && other.status === 'needs-review' && other.reviewStateBeforeConflict) {
+            other.status = other.reviewStateBeforeConflict;
+            delete other.reviewStateBeforeConflict;
+          }
+          other.updatedAt = now;
+          memory.put(other);
+        }
+      }
+      previous.conflictsWith = [];
+      memory.put(previous);
+      matching = await idbRequest<ProjectMemoryFact[]>(memory.index('projectTopic').getAll(
+        IDBKeyRange.only([projectId, fact.category, fact.normalizedTopic])));
+    } else {
+      matching = await idbRequest<ProjectMemoryFact[]>(memory.index('projectTopic').getAll(
+        IDBKeyRange.only([projectId, fact.category, fact.normalizedTopic])));
+      const sameUserFact = input.origin === 'user' && matching.find(previous => previous.origin === 'user'
+        && previous.status !== 'rejected' && previous.status !== 'superseded'
+        && previous.statement.trim().normalize('NFKC').toLocaleLowerCase() === fact.statement.normalize('NFKC').toLocaleLowerCase()
+        && previous.taskState === fact.taskState);
+      if (sameUserFact) {
+        if (input.status === 'confirmed' && sameUserFact.conflictsWith.length) throw new Error('Resolve the listed conflicts before confirming this fact.');
+        const evidenceKey = (item: MemoryEvidence) => item.kind === 'conversation'
+          ? `${item.kind}\0${item.sessionId}\0${item.version}\0${item.messageId}\0${item.messageFingerprint}`
+          : `${item.kind}\0${item.reference}\0${item.commit ?? ''}\0${item.command ?? ''}\0${item.quote}`;
+        const knownEvidence = new Set(sameUserFact.evidence.map(evidenceKey));
+        const additions = evidence.filter(item => !knownEvidence.has(evidenceKey(item)));
+        if (sameUserFact.evidence.length + additions.length > 20) throw new Error('A memory fact can hold at most 20 evidence entries.');
+        sameUserFact.evidence.push(...additions);
+        sameUserFact.status = input.status;
+        sameUserFact.updatedAt = now;
+        memory.put(sameUserFact);
+        project.updatedAt = now;
+        projects.put(project);
+        return sameUserFact;
+      }
+      const duplicateAIFact = input.origin === 'ai' && matching.find(previous => previous.status !== 'rejected'
+        && previous.status !== 'superseded'
+        && previous.statement.trim().normalize('NFKC').toLocaleLowerCase() === fact.statement.normalize('NFKC').toLocaleLowerCase()
+        && previous.taskState === fact.taskState);
+      if (duplicateAIFact) {
+        const evidenceKey = (item: MemoryEvidence) => item.kind === 'conversation'
+          ? `${item.kind}\0${item.sessionId}\0${item.version}\0${item.messageId}\0${item.messageFingerprint}`
+          : `${item.kind}\0${item.reference}\0${item.commit ?? ''}\0${item.command ?? ''}\0${item.quote}`;
+        const knownEvidence = new Set(duplicateAIFact.evidence.map(evidenceKey));
+        const additions = evidence.filter(item => !knownEvidence.has(evidenceKey(item)));
+        if (duplicateAIFact.evidence.length + additions.length > 20) throw new Error('A memory fact can hold at most 20 evidence entries.');
+        duplicateAIFact.evidence.push(...additions);
+        duplicateAIFact.updatedAt = now;
+        memory.put(duplicateAIFact);
+        project.updatedAt = now;
+        projects.put(project);
+        return duplicateAIFact;
+      }
+    }
+    const conflicts = matching.filter(previous => previous.id !== input.supersedes
+      && previous.status !== 'rejected' && previous.status !== 'superseded'
+      && (previous.statement.trim().normalize('NFKC').toLocaleLowerCase() !== fact.statement.normalize('NFKC').toLocaleLowerCase()
+        || fact.category === 'task' && previous.taskState !== fact.taskState));
+    if (conflicts.length) {
+      if (fact.origin === 'user') {
+        if (fact.status === 'confirmed') fact.reviewStateBeforeConflict = 'confirmed';
+        fact.status = 'needs-review';
+      }
+      fact.conflictsWith = conflicts.map(previous => previous.id);
+      for (const previous of conflicts) {
+        if (previous.status !== 'needs-review') previous.reviewStateBeforeConflict = previous.status === 'proposed' ? 'proposed' : 'confirmed';
+        previous.status = 'needs-review';
+        previous.conflictsWith = [...new Set([...previous.conflictsWith, fact.id])];
+        previous.updatedAt = now;
+        memory.put(previous);
+      }
+    }
+    memory.add(fact);
+    project.updatedAt = now;
+    projects.put(project);
+    return fact;
+  });
+}
+
+export async function updateProjectMemoryStatus(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
+  if (!MEMORY_STATUSES.includes(status)) throw new Error('Choose a valid memory review state.');
+  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${factId}`));
+    if (!project || project.restoringSince || !fact) throw new Error('This project memory entry is unavailable.');
+    if (fact.status === 'rejected' || fact.status === 'superseded') throw new Error('Rejected or superseded entries are read-only.');
+    if (status === 'confirmed' && fact.conflictsWith.length) throw new Error('Resolve the listed conflicts before confirming this fact.');
+    if (status === 'rejected') {
+      for (const conflictId of fact.conflictsWith) {
+        const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
+        if (conflict) {
+          conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
+          if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
+            conflict.status = conflict.reviewStateBeforeConflict;
+            delete conflict.reviewStateBeforeConflict;
+          }
+          conflict.updatedAt = Date.now();
+          memory.put(conflict);
+        }
+      }
+      fact.conflictsWith = [];
+      delete fact.reviewStateBeforeConflict;
+    }
+    fact.status = status;
+    fact.updatedAt = Date.now();
+    memory.put(fact);
+    project.updatedAt = fact.updatedAt;
+    projects.put(project);
+    return fact;
+  });
+}
+
 async function* backupLines(projectId: string): AsyncGenerator<string> {
   const project = await withTransaction(['projects'], 'readonly', async transaction =>
     idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
   if (!project || project.restoringSince) throw new Error('This project is unavailable.');
   const sessions = await withTransaction(['sessions'], 'readonly', async transaction =>
     idbRequest<ProjectSessionRecord[]>(transaction.objectStore('sessions').index('projectId').getAll(IDBKeyRange.only(projectId))));
+  const facts = await listProjectMemory(projectId);
   let revisionCount = 0;
   for (const session of sessions) revisionCount += session.currentVersion;
-  yield JSON.stringify({ type: 'threadpack_project', version: 1, createdAt: Date.now(), project: {
+  yield JSON.stringify({ type: 'threadpack_project', version: 2, createdAt: Date.now(), project: {
     name: project.name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt, updatedAt: project.updatedAt,
-  }, sessionCount: sessions.length, revisionCount }) + '\n';
+  }, sessionCount: sessions.length, revisionCount, factCount: facts.length }) + '\n';
   for (const session of sessions) {
     yield JSON.stringify({ type: 'session', data: {
       id: session.id, sessionKey: session.sessionKey, title: session.title, sourceName: session.sourceName,
@@ -487,6 +748,10 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
         messageCount: revision.messageCount, sourceName: revision.sourceName, createdAt: revision.createdAt,
       } }) + '\n';
     }
+  }
+  for (const fact of facts) {
+    const { key: _key, projectId: _projectId, ...data } = fact;
+    yield JSON.stringify({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data }) + '\n';
   }
 }
 
@@ -538,22 +803,112 @@ function parseBackupLine(line: string): Record<string, unknown> {
   return value;
 }
 
-function validateBackupHeader(value: Record<string, unknown>): { project: Omit<ProjectRecord, 'id' | 'restoringSince'>; sessionCount: number; revisionCount: number } {
+interface ProjectBackupHeader {
+  version: 1 | 2;
+  project: Omit<ProjectRecord, 'id' | 'restoringSince'>;
+  sessionCount: number;
+  revisionCount: number;
+  factCount: number;
+}
+
+function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHeader {
   const project = value.project;
-  if (value.type !== 'threadpack_project' || value.version !== 1 || !isRecord(project)
+  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 || !isRecord(project)
     || !Number.isSafeInteger(value.createdAt)
     || typeof project.name !== 'string' || typeof project.summary !== 'string' || typeof project.importantNotes !== 'string'
     || !Number.isSafeInteger(project.createdAt) || !Number.isSafeInteger(project.updatedAt)
     || typeof value.sessionCount !== 'number' || !Number.isSafeInteger(value.sessionCount) || value.sessionCount < 0
     || typeof value.revisionCount !== 'number' || !Number.isSafeInteger(value.revisionCount) || value.revisionCount < 0
-    || value.sessionCount > value.revisionCount || value.revisionCount > 1_000_000) {
+    || value.sessionCount > value.revisionCount || value.revisionCount > 1_000_000
+    || value.version === 2 && (!Number.isSafeInteger(value.factCount) || (value.factCount as number) < 0 || (value.factCount as number) > 100_000)) {
     throw new Error('This project backup has an unsupported or invalid header.');
   }
   const name = normalizeName(project.name);
   if (project.summary.length > 10000 || project.importantNotes.length > 20000) throw new Error('The project backup contains oversized project notes.');
   return {
     project: { name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt as number, updatedAt: project.updatedAt as number },
+    version: value.version,
     sessionCount: value.sessionCount, revisionCount: value.revisionCount,
+    factCount: value.version === 2 ? value.factCount as number : 0,
+  };
+}
+
+async function memoryBackupFingerprint(data: Omit<ProjectMemoryFact, 'key' | 'projectId'>): Promise<string> {
+  return sha256Fingerprint(JSON.stringify(data));
+}
+
+async function validateBackupMemory(value: unknown, projectId: string, factIds: Set<string>): Promise<ProjectMemoryFact> {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
+    || !MEMORY_CATEGORIES.includes(value.category as MemoryCategory)
+    || !['user', 'ai'].includes(value.origin as string) || !MEMORY_STATUSES.includes(value.status as MemoryStatus)
+    || typeof value.topic !== 'string' || !value.topic.trim() || value.topic.length > 160
+    || value.normalizedTopic !== normalizeMemoryTopic(value.topic)
+    || typeof value.statement !== 'string' || !value.statement.trim() || value.statement.length > 4000
+    || value.taskState !== undefined && !TASK_STATES.includes(value.taskState as TaskState)
+    || value.category !== 'task' && value.taskState !== undefined
+    || !Array.isArray(value.evidence) || value.evidence.length < 1 || value.evidence.length > 20
+    || !Array.isArray(value.conflictsWith) || value.conflictsWith.some(id => typeof id !== 'string' || id.length > 200)
+    || value.supersedes !== undefined && (typeof value.supersedes !== 'string' || value.supersedes.length > 200)
+    || value.supersededBy !== undefined && (typeof value.supersededBy !== 'string' || value.supersededBy.length > 200)
+    || value.reviewStateBeforeConflict !== undefined && !['confirmed', 'proposed'].includes(value.reviewStateBeforeConflict as string)
+    || !Number.isSafeInteger(value.createdAt) || !Number.isSafeInteger(value.updatedAt)) {
+    throw new Error('The project backup contains an invalid memory record.');
+  }
+  const id = value.id;
+  if (factIds.has(id)) throw new Error('The project backup contains duplicate memory IDs.');
+  factIds.add(id);
+  const evidence: MemoryEvidence[] = [];
+  for (const candidate of value.evidence) {
+    if (!isRecord(candidate) || typeof candidate.id !== 'string' || !candidate.id || candidate.id.length > 200
+      || !EVIDENCE_KINDS.includes(candidate.kind as EvidenceKind)
+      || typeof candidate.reference !== 'string' || candidate.reference.length > 1000
+      || typeof candidate.quote !== 'string' || candidate.quote.length > 1000
+      || !Number.isSafeInteger(candidate.recordedAt)
+      || !['source-matched', 'user-recorded', 'unattached'].includes(candidate.verification as string)) {
+      throw new Error('The project backup contains invalid memory evidence.');
+    }
+    if (candidate.kind === 'conversation') {
+      if (candidate.verification !== 'source-matched' || typeof candidate.sessionId !== 'string'
+        || !Number.isSafeInteger(candidate.version) || (candidate.version as number) < 1
+        || typeof candidate.messageId !== 'string' || typeof candidate.messageFingerprint !== 'string'
+        || !candidate.quote.trim()
+        || !/^[a-f0-9]{64}$/.test(candidate.messageFingerprint)) throw new Error('The project backup contains invalid conversation evidence.');
+      const saved = await getProjectSession(projectId, candidate.sessionId, candidate.version as number);
+      const message = findSnapshotMessage(saved.content, candidate.messageId);
+      if (!message || !message.content.includes(candidate.quote)
+        || await sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`) !== candidate.messageFingerprint) {
+        throw new Error('A memory citation does not match its saved conversation.');
+      }
+    } else if (candidate.kind === 'user') {
+      if (candidate.verification !== 'unattached') throw new Error('The project backup contains invalid user evidence.');
+    } else if (candidate.verification !== 'user-recorded' || typeof candidate.commit !== 'string'
+      || !/^[a-f0-9]{7,64}$/i.test(candidate.commit) || !candidate.quote.trim()
+      || candidate.kind === 'test' && (typeof candidate.command !== 'string' || !candidate.command.trim())) {
+      throw new Error('The project backup contains invalid repository or test evidence.');
+    }
+    evidence.push({
+      id: candidate.id, kind: candidate.kind as EvidenceKind, reference: candidate.reference,
+      quote: candidate.quote, recordedAt: candidate.recordedAt as number,
+      verification: candidate.verification as MemoryEvidence['verification'],
+      ...(typeof candidate.sessionId === 'string' ? { sessionId: candidate.sessionId } : {}),
+      ...(typeof candidate.version === 'number' ? { version: candidate.version } : {}),
+      ...(typeof candidate.messageId === 'string' ? { messageId: candidate.messageId } : {}),
+      ...(typeof candidate.messageFingerprint === 'string' ? { messageFingerprint: candidate.messageFingerprint } : {}),
+      ...(typeof candidate.commit === 'string' ? { commit: candidate.commit } : {}),
+      ...(typeof candidate.command === 'string' ? { command: candidate.command } : {}),
+    });
+  }
+  const normalizedTopic = normalizeMemoryTopic(value.topic);
+  return {
+    key: `${projectId}\0${id}`, id, projectId, category: value.category as MemoryCategory,
+    topic: value.topic, normalizedTopic, statement: value.statement, origin: value.origin as MemoryOrigin,
+    status: value.status as MemoryStatus, evidence, conflictsWith: [...value.conflictsWith as string[]],
+    ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
+    ...(value.reviewStateBeforeConflict === 'confirmed' || value.reviewStateBeforeConflict === 'proposed'
+      ? { reviewStateBeforeConflict: value.reviewStateBeforeConflict } : {}),
+    ...(typeof value.supersedes === 'string' ? { supersedes: value.supersedes } : {}),
+    ...(typeof value.supersededBy === 'string' ? { supersededBy: value.supersededBy } : {}),
+    createdAt: value.createdAt as number, updatedAt: value.updatedAt as number,
   };
 }
 
@@ -621,6 +976,9 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   let expectedVersion = 1;
   let sessionCount = 0;
   let revisionCount = 0;
+  let seenMemory = false;
+  const facts: ProjectMemoryFact[] = [];
+  const factIds = new Set<string>();
   try {
     const first = await iterator.next();
     if (first.done) throw new Error('The project backup is empty.');
@@ -632,6 +990,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
       if (next.done) break;
       const record = parseBackupLine(next.value);
       if (record.type === 'session') {
+        if (seenMemory) throw new Error('The project backup puts session records after memory records.');
         if (activeSession && expectedVersion <= activeSession.currentVersion) throw new Error('The project backup has an incomplete conversation history.');
         if (sessionCount >= header.sessionCount) throw new Error('The project backup contains extra sessions.');
         activeSession = validateBackupSession(record.data, project.id);
@@ -639,6 +998,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         await withTransaction(['sessions'], 'readwrite', async transaction => { transaction.objectStore('sessions').add(activeSession!); });
         sessionCount++;
       } else if (record.type === 'revision') {
+        if (seenMemory) throw new Error('The project backup puts history records after memory records.');
         if (!activeSession || expectedVersion > activeSession.currentVersion || revisionCount >= header.revisionCount) {
           throw new Error('The project backup contains unexpected history records.');
         }
@@ -650,18 +1010,40 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         }
         expectedVersion++;
         revisionCount++;
+      } else if (record.type === 'memory') {
+        if (header.version !== 2 || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+          || !/^[a-f0-9]{64}$/.test(record.fingerprint) || facts.length >= header.factCount) {
+          throw new Error('The project backup contains unexpected memory records.');
+        }
+        if (activeSession && expectedVersion <= activeSession.currentVersion) throw new Error('The project backup has an incomplete conversation history.');
+        seenMemory = true;
+        const fingerprint = await memoryBackupFingerprint(record.data as Omit<ProjectMemoryFact, 'key' | 'projectId'>);
+        if (fingerprint !== record.fingerprint) throw new Error('A project memory record failed its integrity check.');
+        facts.push(await validateBackupMemory(record.data, project.id, factIds));
       } else throw new Error('The project backup contains an unknown record type.');
     }
     if (activeSession && expectedVersion <= activeSession.currentVersion
-      || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount) {
+      || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount || facts.length !== header.factCount) {
       throw new Error('The project backup is incomplete.');
     }
+    const factsById = new Map(facts.map(fact => [fact.id, fact]));
+    for (const fact of facts) {
+      if (fact.conflictsWith.some(id => !factsById.get(id)?.conflictsWith.includes(fact.id))
+        || fact.supersedes && factsById.get(fact.supersedes)?.supersededBy !== fact.id
+        || fact.supersededBy && factsById.get(fact.supersededBy)?.supersedes !== fact.id) {
+        throw new Error('The project backup contains inconsistent memory relationships.');
+      }
+    }
+    if (facts.length) await withTransaction(['memory'], 'readwrite', async transaction => {
+      const memory = transaction.objectStore('memory');
+      for (const fact of facts) memory.add(fact);
+    });
     const completed = { ...project, restoringSince: undefined, updatedAt: Date.now() };
     delete completed.restoringSince;
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').put(completed); });
     return completed;
   } catch (error) {
-    if (project) await withTransaction(['projects', 'sessions', 'revisions'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
+    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
     throw error;
   } finally { await iterator.return(undefined).catch(() => {}); }
 }

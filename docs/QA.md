@@ -10,6 +10,16 @@
 - Final Chromium browser regression: 80 tests passed with one worker. All five project-library browser tests passed in Chromium and WebKit. Core and CLI tests: 181 passed. `npm run build` and `npm pack --dry-run` succeeded, and `npm audit --omit=dev` reported zero vulnerabilities.
 - Firefox and Linux were not validated in this run. The installed Firefox binary could not launch on this Windows host because Windows reported a Side-by-Side configuration error before the tests started. No Linux runner was available locally.
 
+## Stage 4 project memory coverage
+
+- Project memory is persisted in IndexedDB schema version 2. The migration retains version 1 projects, sessions, revisions, and backups.
+- Facts retain category, topic, task progress, user or AI origin, confirmation/review/rejection/supersedence state, conflict links, and evidence. Conversation citations are checked against an immutable session version, message ID, exact quote, and message fingerprint. Repository and test records are explicitly user-recorded and are not represented as independently verified.
+- Context generation is deterministic, query-ranked, character-budgeted, and tested to include conflict counterparts, label stale evidence, and report whole-record omissions without truncating facts.
+- Optional AI extraction is tested with a mocked Chat Completions endpoint. The request is explicit and bounded. The response must cite exact excerpts from selected evidence, suggestions stay unconfirmed, and API keys do not enter IndexedDB backups.
+- Browser coverage includes project-memory creation and correction, conflict rejection, budgeted context, AI proposal confirmation and duplicate suppression, v2 memory-backup round-trip, version 1 backup restoration, and migration of real version 1 IndexedDB stores with retained revisions and evidence-linked memory writes.
+- Final stage 4 checks: 186 core/CLI tests passed, 84 Chromium browser tests passed, and all 9 project-library/project-memory browser tests passed in WebKit. The v1 IndexedDB migration was repeated three times in WebKit. `npm run build`, `npm pack --dry-run`, and `npm audit --omit=dev` passed with no reported production dependency vulnerabilities.
+- Firefox and Linux were not validated for this stage. The installed Firefox binary cannot launch on this Windows host because Windows reports a Side-by-Side configuration error. No Linux runner was available locally.
+
 The sign-off covers the supported local workflows, not semantic summarization or native session recovery.
 
 | User claim / control | Functional check | Visual states |

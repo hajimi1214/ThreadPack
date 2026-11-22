@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 async function importConversation(page: Page, name: string, content: string) {
   await page.getByLabel('Import file', { exact: true }).setInputFiles({
@@ -14,6 +14,12 @@ async function importConversation(page: Page, name: string, content: string) {
 async function openProjects(page: Page) {
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   return page.getByRole('dialog', { name: 'Local project library', exact: true });
+}
+
+async function importBackup(page: Page, dialog: Locator, name: string, contents: Buffer) {
+  const chooser = page.waitForEvent('filechooser');
+  await dialog.locator('.project-library-heading').getByRole('button', { name: 'Restore backup', exact: true }).click();
+  await (await chooser).setFiles({ name, mimeType: 'application/x-ndjson', buffer: contents });
 }
 
 test('project history survives reloads, deduplicates imports, restores versions and verifies backups', async ({ page }) => {
@@ -73,15 +79,11 @@ test('project history survives reloads, deduplicates imports, restores versions 
   const firstRevision = JSON.parse(lines[2]!) as { type: string; data: { content: string } };
   firstRevision.data.content += 'corruption';
   lines[2] = JSON.stringify(firstRevision);
-  await dialog.getByLabel('Restore backup', { exact: true }).setInputFiles({
-    name: 'corrupt-project.jsonl', mimeType: 'application/x-ndjson', buffer: Buffer.from(lines.join('\n') + '\n'),
-  });
+  await importBackup(page, dialog, 'corrupt-project.jsonl', Buffer.from(lines.join('\n') + '\n'));
   await expect(dialog.getByRole('alert')).toContainText('integrity check');
   await expect(dialog.locator('.project-list-item')).toHaveCount(1);
 
-  await dialog.getByLabel('Restore backup', { exact: true }).setInputFiles({
-    name: 'project-backup.jsonl', mimeType: 'application/x-ndjson', buffer: Buffer.from(backupText),
-  });
+  await importBackup(page, dialog, 'project-backup.jsonl', Buffer.from(backupText));
   await expect(dialog.locator('.project-list-item')).toHaveCount(2);
   await expect(dialog.locator('.project-session-item')).toContainText('Version 3');
   await dialog.getByRole('button', { name: 'Version history', exact: true }).click();
@@ -102,7 +104,7 @@ test('project records stay isolated and deleting a project removes its history',
 
   await dialog.getByLabel('Project name', { exact: true }).first().fill('Project Beta');
   await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
-  await expect(dialog.locator('.project-empty')).toContainText('No conversations saved in this project.');
+  await expect(dialog.getByText('No conversations saved in this project.', { exact: true })).toBeVisible();
   await dialog.getByLabel('Search project history…', { exact: true }).fill('PROJECT_ALPHA_PRIVATE_MARKER');
   await expect(dialog.locator('.project-session-item')).toHaveCount(0);
 
@@ -145,9 +147,7 @@ test('project snapshots and backups retain inactive conversation branches', asyn
   const backupText = await readFile(backupPath!, 'utf8');
   expect(backupText).toContain('INACTIVE_BRANCH_MARKER');
 
-  await dialog.getByLabel('Restore backup', { exact: true }).setInputFiles({
-    name: 'branched-project-backup.jsonl', mimeType: 'application/x-ndjson', buffer: Buffer.from(backupText),
-  });
+  await importBackup(page, dialog, 'branched-project-backup.jsonl', Buffer.from(backupText));
   await expect(dialog.locator('.project-list-item')).toHaveCount(2);
   await dialog.getByRole('button', { name: /Branched project/ }).last().click();
   await dialog.getByRole('button', { name: 'Open', exact: true }).click();
