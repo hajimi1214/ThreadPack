@@ -17,8 +17,17 @@
 - Context generation is deterministic, query-ranked, character-budgeted, and tested to include conflict counterparts, label stale evidence, and report whole-record omissions without truncating facts.
 - Optional AI extraction is tested with a mocked Chat Completions endpoint. The request is explicit and bounded. The response must cite exact excerpts from selected evidence, suggestions stay unconfirmed, and API keys do not enter IndexedDB backups.
 - Browser coverage includes project-memory creation and correction, conflict rejection, budgeted context, AI proposal confirmation and duplicate suppression, v2 memory-backup round-trip, version 1 backup restoration, and migration of real version 1 IndexedDB stores with retained revisions and evidence-linked memory writes.
+- Portable context-pack tests inspect its ZIP entries, evidence metadata, status labels, and tool instruction files. The synthetic continuation benchmark checks expected-fact recall and precision across four task queries, evidence labels, and budget bounds. These fixtures do not claim measured real-world productivity or model accuracy.
 - Final stage 4 checks: 186 core/CLI tests passed, 84 Chromium browser tests passed, and all 9 project-library/project-memory browser tests passed in WebKit. The v1 IndexedDB migration was repeated three times in WebKit. `npm run build`, `npm pack --dry-run`, and `npm audit --omit=dev` passed with no reported production dependency vulnerabilities.
 - Firefox and Linux were not validated for this stage. The installed Firefox binary cannot launch on this Windows host because Windows reports a Side-by-Side configuration error. No Linux runner was available locally.
+
+## Stage 5 cross-AI continuation coverage
+
+- A portable context package exports a budgeted context snapshot, structured evidence/status JSON, and `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` entry instructions. The package is tested for source references, review-state retention, and absence of API keys.
+- No provider account is connected and no undocumented API is used. The package must be imported through each product's supported file/project controls or placed in the project repository for coding agents. It does not auto-sync after export.
+- The deterministic continuation benchmark contains four synthetic task queries and four labeled facts. Final benchmark precision and recall are both 1.0 for this fixture; it also checks evidence status and character budgets. This is a retrieval regression metric, not a real-world productivity study or a model-quality claim.
+- Final stage 5 checks: 188 core/CLI tests passed, 84 Chromium browser tests passed, 9 project/library/memory browser tests passed in WebKit, production build and package dry-run passed, and the production dependency audit reported zero vulnerabilities.
+- Firefox and Linux remain unverified because of the Windows Firefox Side-by-Side launch failure and the absence of a Linux runner.
 
 The sign-off covers the supported local workflows, not semantic summarization or native session recovery.
 

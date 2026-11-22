@@ -190,6 +190,7 @@ const en = {
   memoryContextTitle: 'Generate project context', memoryContextQuery: 'What does the next task need to know?',
   memoryContextBudget: 'Character budget', memoryContextGenerate: 'Build context', memoryContextCopy: 'Copy context',
   memoryContextDownload: 'Download context', memoryContextCopied: 'Project context copied.', memoryContextOmissions: 'Omitted items', memoryContextUncertain: 'Review signals',
+  memoryContextPackage: 'Export AI context pack',
   memoryOmittedSection: 'Section omitted', memoryOmittedBudget: 'over budget', memoryOmittedIrrelevant: 'outside this search',
   snippetPreviewShortened: "Preview shortened. Copy or download the complete code.",
   snippetSource: "Message",

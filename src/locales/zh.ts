@@ -189,6 +189,7 @@ const zh: Record<TranslationKey, string> = {
   memoryContextTitle: '生成项目上下文', memoryContextQuery: '下一项任务需要了解什么？',
   memoryContextBudget: '字符预算', memoryContextGenerate: '生成上下文', memoryContextCopy: '复制上下文',
   memoryContextDownload: '下载上下文', memoryContextCopied: '项目上下文已复制。', memoryContextOmissions: '省略项', memoryContextUncertain: '审查信号',
+  memoryContextPackage: '导出跨 AI 上下文包',
   memoryOmittedSection: '省略章节', memoryOmittedBudget: '超出预算', memoryOmittedIrrelevant: '与本次搜索无关',
   snippetPreviewShortened: "预览已缩短，复制或下载可获取完整代码。",
   snippetSource: "消息",

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { unzipSync, strFromU8 } from 'fflate';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from '../src/projects/memory-ai';
 import { generateProjectContext } from '../src/projects/memory-context';
+import { buildProjectContextPackage } from '../src/projects/memory-export';
 import type { ProjectMemoryFact } from '../src/projects/memory-types';
 
 function fact(overrides: Partial<ProjectMemoryFact> & Pick<ProjectMemoryFact, 'id' | 'topic' | 'statement'>): ProjectMemoryFact {
@@ -73,4 +75,64 @@ test('AI extraction prompt names its limits and sends only supplied evidence', (
   assert.match(prompt, /Do not infer repository state or test success/);
   assert.match(prompt, /Keep the work offline/);
   assert.doesNotMatch(prompt, /secret-key/);
+});
+
+test('portable AI context package retains evidence and tool entry instructions without secrets', () => {
+  const entry = fact({ id: 'decision-1', topic: 'Storage', statement: 'Keep project history local.' });
+  const generated = generateProjectContext({ project: { name: 'ThreadPack Stage 5', summary: 'Connect tools.', importantNotes: '' },
+    facts: [entry], sessions: [{ id: 'session', title: 'Design session', currentVersion: 2 }], query: 'storage', budget: 2000 });
+  const pack = buildProjectContextPackage({ project: { name: 'ThreadPack Stage 5', summary: 'Connect tools.', importantNotes: '' },
+    facts: [entry], sessions: [{ id: 'session', title: 'Design session', currentVersion: 2 }], generated, createdAt: 1 });
+  const files = unzipSync(pack.bytes);
+  const context = strFromU8(files['PROJECT_CONTEXT.md']!);
+  const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!)) as {
+    facts: { evidence: { sessionTitle?: string; verification: string }[] }[];
+    budget: { includedFactIds: string[] };
+  };
+  assert.equal(pack.filename, 'threadpack-context-ThreadPack-Stage-5.zip');
+  assert.ok(files['AGENTS.md']);
+  assert.ok(files['CLAUDE.md']);
+  assert.ok(files['GEMINI.md']);
+  assert.ok(strFromU8(files['AGENTS.md']!).includes('AI proposals are not confirmed facts'));
+  assert.ok(context.includes('Keep project history local.'));
+  assert.equal(memory.facts[0]!.evidence[0]!.sessionTitle, 'Design session');
+  assert.equal(memory.facts[0]!.evidence[0]!.verification, 'source-matched');
+  assert.deepEqual(memory.budget.includedFactIds, ['decision-1']);
+  assert.doesNotMatch(JSON.stringify(memory), /synthetic-api-key-do-not-store/);
+});
+
+test('continuation benchmark retrieves every labeled fact within budget without dropping its evidence status', () => {
+  const corpus = [
+    fact({ id: 'offline-runtime', category: 'constraint', topic: 'Runtime', statement: 'The project runtime must remain offline.' }),
+    fact({ id: 'branch-preservation', category: 'decision', topic: 'Session import', statement: 'Keep alternate ChatGPT branches in saved history.' }),
+    fact({ id: 'backup-recovery', category: 'task', topic: 'Backup recovery', statement: 'Test restoring a versioned project backup.', taskState: 'in-progress' }),
+    fact({ id: 'redaction', category: 'risk', topic: 'Privacy', statement: 'Review redaction before sharing untrusted conversation data.' }),
+  ];
+  const cases = [
+    { query: 'offline runtime', expected: ['offline-runtime'] },
+    { query: 'ChatGPT alternate branches', expected: ['branch-preservation'] },
+    { query: 'versioned project backup', expected: ['backup-recovery'] },
+    { query: 'redaction sharing privacy', expected: ['redaction'] },
+  ];
+  let retrieved = 0;
+  let returned = 0;
+  const unexpected: string[] = [];
+  for (const item of cases) {
+    const generated = generateProjectContext({ project: { name: 'ThreadPack', summary: '', importantNotes: '' },
+      facts: corpus, sessions: [{ id: 'session', title: 'Synthetic evidence session', currentVersion: 1 }],
+      query: item.query, budget: 2000 });
+    retrieved += item.expected.filter(id => generated.includedFactIds.includes(id)).length;
+    returned += generated.includedFactIds.length;
+    unexpected.push(...generated.includedFactIds.filter(id => !item.expected.includes(id)).map(id => `${item.query} -> ${id}`));
+    assert.equal(generated.usedCharacters <= generated.budget, true);
+    for (const id of generated.includedFactIds) {
+      assert.ok(generated.text.includes(corpus.find(entry => entry.id === id)!.statement));
+      assert.match(generated.text, /CONFIRMED|NEEDS REVIEW|AI PROPOSAL/);
+      assert.match(generated.text, /Evidence \(source-matched\)/);
+    }
+  }
+  const recall = retrieved / cases.reduce((total, item) => total + item.expected.length, 0);
+  const precision = retrieved / returned;
+  assert.equal(recall, 1);
+  assert.equal(precision, 1, unexpected.join('; '));
 });

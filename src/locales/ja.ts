@@ -192,6 +192,7 @@ const ja: Record<TranslationKey, string> = {
   memoryContextTitle: 'プロジェクト文脈を生成', memoryContextQuery: '次のタスクに必要な情報',
   memoryContextBudget: '文字数の上限', memoryContextGenerate: '文脈を生成', memoryContextCopy: '文脈をコピー',
   memoryContextDownload: '文脈をダウンロード', memoryContextCopied: 'プロジェクト文脈をコピーしました。', memoryContextOmissions: '省略項目', memoryContextUncertain: '確認項目',
+  memoryContextPackage: 'AI 引き継ぎパックを書き出す',
   memoryOmittedSection: '省略したセクション', memoryOmittedBudget: '予算超過', memoryOmittedIrrelevant: '検索条件外',
   snippetPreviewShortened: "プレビューは短縮されています。コピーまたは保存するとコード全文を取得できます。",
   snippetSource: "メッセージ",

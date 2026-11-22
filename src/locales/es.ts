@@ -300,6 +300,7 @@ const es: Record<TranslationKey, string> = {
   memoryContextTitle: 'Generar contexto del proyecto', memoryContextQuery: 'Qué necesita saber la próxima tarea',
   memoryContextBudget: 'Presupuesto de caracteres', memoryContextGenerate: 'Generar contexto', memoryContextCopy: 'Copiar contexto',
   memoryContextDownload: 'Descargar contexto', memoryContextCopied: 'Contexto del proyecto copiado.', memoryContextOmissions: 'Elementos omitidos', memoryContextUncertain: 'Señales de revisión',
+  memoryContextPackage: 'Exportar paquete de contexto IA',
   memoryOmittedSection: 'Sección omitida', memoryOmittedBudget: 'fuera del presupuesto', memoryOmittedIrrelevant: 'fuera de esta búsqueda',
   snippetPreviewShortened: "Vista previa abreviada. Copia o descarga el código completo.",
   snippetSource: "Mensaje",

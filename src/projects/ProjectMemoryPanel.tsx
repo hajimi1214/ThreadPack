@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, Check, Clipboard, LoaderCircle, Plus, Search, ShieldAlert, Sparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, Check, Clipboard, Download, LoaderCircle, Plus, Search, ShieldAlert, Sparkles, X } from 'lucide-react';
 import { parseInput } from '../core';
 import type { Message } from '../core';
 import type { TranslationKey } from '../i18n';
@@ -12,6 +12,7 @@ import type { MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFa
 import { generateProjectContext } from './memory-context';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from './memory-ai';
 import type { AIEvidenceMessage } from './memory-ai';
+import { buildProjectContextPackage } from './memory-export';
 
 interface SessionState { id: string; title: string; currentVersion: number }
 interface RevisionChoice { version: number; current: boolean }
@@ -263,6 +264,16 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
+  function downloadContextPackage() {
+    if (!generated) return;
+    const pack = buildProjectContextPackage({ project, facts, sessions: sessionChoices, generated });
+    const url = URL.createObjectURL(new Blob([pack.bytes], { type: 'application/zip' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = pack.filename;
+    document.body.append(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
   function toggleAISession(sessionId: string) {
     setSelectedAISessions(current => current.includes(sessionId)
       ? current.filter(id => id !== sessionId)
@@ -406,7 +417,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     <section className="memory-context-builder" aria-labelledby="memory-context-heading">
       <div className="project-sessions-heading"><h3 id="memory-context-heading">{t.memoryContextTitle}</h3></div>
       <div className="memory-context-controls"><label className="project-search"><Search size={14} /><input maxLength={1000} value={query} placeholder={t.memoryContextQuery} onChange={event => setQuery(event.target.value)} /></label><label><span>{t.memoryContextBudget}</span><select value={budget} onChange={event => setBudget(Number(event.target.value))}>{[4000, 8000, 12000, 24000, 48000, 100000].map(value => <option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label><button className="button primary small" onClick={generateContext}>{t.memoryContextGenerate}</button></div>
-      {generated && <><div className="memory-context-summary"><span>{generated.usedCharacters.toLocaleString()} / {generated.budget.toLocaleString()}</span><span>{t.memoryContextOmissions} · {generated.omissions.length + generated.omittedSections.length}</span><span>{t.memoryPotentialConflict} · {generated.conflictCount}</span><span>{t.memoryContextUncertain} · {generated.proposedCount + generated.uncitedCount + generated.unverifiedEvidenceCount + generated.staleEvidenceCount}</span></div><textarea className="memory-context-output" aria-label={t.memoryContextTitle} readOnly value={generated.text} /><div className="memory-context-actions"><button className="button secondary small" disabled={!generated.text} onClick={() => void copyContext()}><Clipboard size={13} />{t.memoryContextCopy}</button><button className="button secondary small" disabled={!generated.text} onClick={downloadContext}><ArrowDownToLine size={13} />{t.memoryContextDownload}</button></div><ul className="memory-omission-list">{generated.omittedSections.map(section => <li key={section}>{t.memoryOmittedSection} · {section}</li>)}{generated.omissions.map(item => <li key={item.id}>{memoryCategoryLabel(item.category, t)} · {item.topic} · {item.reason === 'budget' ? t.memoryOmittedBudget : t.memoryOmittedIrrelevant}</li>)}</ul></>}
+      {generated && <><div className="memory-context-summary"><span>{generated.usedCharacters.toLocaleString()} / {generated.budget.toLocaleString()}</span><span>{t.memoryContextOmissions} · {generated.omissions.length + generated.omittedSections.length}</span><span>{t.memoryPotentialConflict} · {generated.conflictCount}</span><span>{t.memoryContextUncertain} · {generated.proposedCount + generated.uncitedCount + generated.unverifiedEvidenceCount + generated.staleEvidenceCount}</span></div><textarea className="memory-context-output" aria-label={t.memoryContextTitle} readOnly value={generated.text} /><div className="memory-context-actions"><button className="button secondary small" disabled={!generated.text} onClick={() => void copyContext()}><Clipboard size={13} />{t.memoryContextCopy}</button><button className="button secondary small" disabled={!generated.text} onClick={downloadContext}><ArrowDownToLine size={13} />{t.memoryContextDownload}</button><button className="button primary small" disabled={!generated.text} onClick={downloadContextPackage}><Download size={13} />{t.memoryContextPackage}</button></div><ul className="memory-omission-list">{generated.omittedSections.map(section => <li key={section}>{t.memoryOmittedSection} · {section}</li>)}{generated.omissions.map(item => <li key={item.id}>{memoryCategoryLabel(item.category, t)} · {item.topic} · {item.reason === 'budget' ? t.memoryOmittedBudget : t.memoryOmittedIrrelevant}</li>)}</ul></>}
     </section>
   </section>;
 }

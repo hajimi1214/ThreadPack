@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { strFromU8, unzipSync } from 'fflate';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -78,6 +79,14 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   await expect(context).toHaveValue(/Runtime decisions v1/);
   await expect(context).not.toHaveValue(/cloud connection/);
   await expect(dialog.locator('.memory-context-summary')).toContainText('Omitted items · 0');
+  const packageDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
+  const packagePath = await (await packageDownload).path();
+  expect(packagePath).toBeTruthy();
+  const packageFiles = unzipSync(await readFile(packagePath!));
+  expect(strFromU8(packageFiles['PROJECT_CONTEXT.md']!)).toContain('The runtime must stay offline.');
+  expect(JSON.parse(strFromU8(packageFiles['threadpack-memory.json']!)).facts[0].evidence[0].sessionTitle).toBe('Runtime decisions');
+  expect(strFromU8(packageFiles['AGENTS.md']!)).toContain('AI proposals are not confirmed facts');
 });
 
 test('AI proposals are source-checked, stay pending review, and leave no stored API key', async ({ page }) => {

@@ -88,6 +88,8 @@ The project-memory section records goals, decisions, constraints, tasks, risks, 
 
 AI extraction is optional and off by default. To use it, choose an HTTPS Chat Completions endpoint and model, enter an API key for the current tab, select up to four conversations, and start extraction. ThreadPack sends bounded excerpts, project status, and confirmed fact summaries only after that action. The endpoint and key are not saved. AI results remain unconfirmed proposals and must cite exact excerpts from the selected messages. Repository and test evidence can be recorded with a commit, path, command, and output excerpt. ThreadPack stores those user-provided records but does not independently inspect the repository or rerun tests.
 
+Use **Export AI context pack** to create a portable snapshot with the selected context, evidence metadata, and instruction-file entry points for Codex, Claude Code, and Gemini coding workflows. Place the instruction and context files in a repository for coding agents, or upload the context files through a browser tool's supported project controls. The pack does not sync automatically. ThreadPack does not claim direct ChatGPT or Claude account integration.
+
 ## Installation and usage
 
 ### Browser application

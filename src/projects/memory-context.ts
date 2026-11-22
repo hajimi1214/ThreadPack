@@ -9,8 +9,11 @@ const statusLabel: Record<MemoryStatus, string> = {
   'needs-review': 'NEEDS REVIEW', rejected: 'REJECTED', superseded: 'SUPERSEDED',
 };
 
+const stopWords = new Set(['project', 'threadpack', 'current', 'status', 'fact', 'memory', 'context', 'task', 'next']);
+
 function terms(value: string): string[] {
-  return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? [])];
+  return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? [])]
+    .filter(term => !stopWords.has(term));
 }
 
 function scoreFact(fact: ProjectMemoryFact, queryTerms: string[]): number {
