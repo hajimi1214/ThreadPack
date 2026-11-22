@@ -6,6 +6,13 @@
     <meta name="theme-color" content="#2563eb" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%232563eb'/%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m11 16 13-7 13 7v16l-13 7-13-7Z M11 16l13 7 13-7 M24 23v16 M17.5 12.5l13 7'/%3E%3C/g%3E%3C/svg%3E" />
+    <style>
+      #app-boot { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 14px; padding: 24px; color: #435c78; background: #f4f7ff; font: 14px/1.6 system-ui, sans-serif; text-align: center; }
+      #app-boot-spinner { width: 26px; height: 26px; border: 3px solid #d9e4f7; border-top-color: #285df4; border-radius: 50%; animation: app-boot-spin .8s linear infinite; }
+      #app-boot-message { max-width: 420px; margin: 0; }
+      @keyframes app-boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { #app-boot-spinner { animation-duration: 2s; } }
+    </style>
     <meta name="description" content="Clean, review in Markdown, and export Codex, Claude Code, ChatGPT and Claude conversations locally. Extract code and build ZIP archives." />
     <link rel="canonical" href="https://hajimi1214.github.io/ThreadPack/" />
     <meta property="og:type" content="website" />
@@ -45,8 +52,20 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="app-boot" role="status" aria-live="polite">
+        <span id="app-boot-spinner" aria-hidden="true"></span>
+        <p id="app-boot-message">正在启动 ThreadPack · Starting ThreadPack</p>
+      </div>
+    </div>
+    <script>
+      window.setTimeout(() => {
+        const message = document.getElementById('app-boot-message');
+        if (message?.isConnected) message.textContent = 'ThreadPack 尚未启动。请刷新页面并查看浏览器控制台或开发服务器日志。 / ThreadPack did not start. Refresh and check the browser console or dev-server log.';
+      }, 8000);
+    </script>
     <noscript>
+      <style>#app-boot { display: none !important; }</style>
       <main>
         <h1>ThreadPack — Conversation File Tools</h1>
         <p>Clean and export Codex, Claude Code, ChatGPT, and Claude conversation files on your device. Review cleanup changes, redact recognized secrets, and download Markdown, JSONL, or a handoff for your next conversation.</p>

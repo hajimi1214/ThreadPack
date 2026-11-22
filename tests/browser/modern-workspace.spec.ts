@@ -76,12 +76,28 @@ async function upload(page: Page, messages: { role: string; content: string }[],
 
 test('desktop opens directly onto useful message content', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.locator('#app-boot')).not.toBeAttached();
+  const mascot = page.locator('.brand-icon img');
+  await expect(mascot).toBeVisible();
+  await expect(mascot).toHaveJSProperty('naturalWidth', 192);
   await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
   await ready(page);
   const first = await page.locator('.message-card').first().boundingBox();
   expect(first).toBeTruthy();
   expect(first!.y).toBeLessThan(700);
   await expect(page.getByRole('switch', { name: 'Remove embedded images', exact: true })).toBeVisible();
+});
+
+test('shows a startup status while the application module is loading', async ({ page }) => {
+  await page.route('**/src/main.tsx', async route => {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  const navigation = page.reload();
+  await expect(page.locator('#app-boot')).toBeVisible();
+  await navigation;
+  await expect(page.locator('#app-boot')).not.toBeAttached();
+  await expect(page.locator('.brand-icon img')).toHaveJSProperty('naturalWidth', 192);
 });
 
 test('mobile keeps settings collapsed until requested and shows the first message promptly', async ({ page }) => {
