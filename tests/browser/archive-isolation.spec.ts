@@ -88,12 +88,18 @@ test('a cancelled parse cannot replace the accepted archive when the next import
 
 test('a failed replacement import leaves the accepted archive available for cleaning and export', async ({ page }) => {
   await page.goto('/');
-  await importSynthetic(page, 'A.json', acceptedText);
+  const acceptedBytes = Buffer.from(JSON.stringify({ messages: [{ role: 'user', content: acceptedText }] }));
+  await page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name: 'A.json', mimeType: 'application/json', buffer: acceptedBytes,
+  });
   await expectAcceptedArchive(page);
   await page.getByLabel('Import file', { exact: true }).setInputFiles({
     name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{"messages": [invalid}'),
   });
   await expect(page.getByRole('alert')).toContainText('Invalid JSON');
+  const originalDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download original file', exact: true }).click();
+  expect(await readFile((await (await originalDownload).path())!)).toEqual(acceptedBytes);
   await page.getByRole('switch', { name: 'Redact email addresses', exact: true }).click();
   await expectAcceptedArchive(page);
   await expectAcceptedExport(page);

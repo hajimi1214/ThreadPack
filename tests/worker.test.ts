@@ -419,24 +419,40 @@ test('Worker reader-facing exports and bundle documents follow all supported out
     assert.ok(parsedReport.warnings.some((warning: string) => warning.includes(item.warning)), item.language);
     assert.ok(!reportText.includes(fakeToken));
 
+    const excerpt = await engine.handle({ id: next(), type: 'export-excerpt', ...selection,
+      mode: 'cleaned', query: '', role: 'all', changedOnly: false, pinnedOnly: false, pinnedIds: [], page: 0, pageSize: 30,
+      format: 'markdown', language: item.language });
+    assert.ok(textOf(excerpt.buffer).includes(item.transcript), item.language);
+
     const handoff = await engine.handle({ id: next(), type: 'handoff', ...selection, language: item.language,
       notes: { goal: '', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
     assert.ok(handoff.text.startsWith(item.handoff), item.language);
     assert.ok(handoff.text.includes('[SECRET_1]'));
   }
 
-  const frenchBundle = await engine.handle({ id: next(), type: 'export-bundle', ...selection, language: 'fr',
-    notes: { goal: 'Reprendre le travail', decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
-  const files = unzipSync(new Uint8Array(frenchBundle.buffer));
-  const readme = new TextDecoder().decode(files['README.md']!);
-  const report = JSON.parse(new TextDecoder().decode(files['cleanup-report.json']!));
-  const transcript = new TextDecoder().decode(files['transcript.md']!);
-  const handoff = new TextDecoder().decode(files['handoff.md']!);
-  assert.ok(readme.includes('Pack de contexte ThreadPack'));
-  assert.ok(readme.includes('transcription nettoyée et lisible'));
-  assert.ok(report.scope.includes('texte normalisé des messages'));
-  assert.ok(transcript.includes('Transcription normalisée'));
-  assert.ok(handoff.startsWith('# Transmission :'));
+  const bundleLabels = {
+    en: { readme: 'ThreadPack context bundle', transcript: 'Normalized transcript', handoff: '# Handoff:', scope: 'Statistics describe' },
+    zh: { readme: 'ThreadPack 上下文包', transcript: '标准化对话', handoff: '# 交接包：', scope: '统计描述标准化' },
+    ja: { readme: 'ThreadPack コンテキストパック', transcript: '正規化された会話記録', handoff: '# 引き継ぎ：', scope: '統計は正規化後' },
+    fr: { readme: 'Pack de contexte ThreadPack', transcript: 'Transcription normalisée', handoff: '# Transmission :', scope: 'statistiques portent' },
+    es: { readme: 'Paquete de contexto ThreadPack', transcript: 'Transcripción normalizada', handoff: '# Traspaso:', scope: 'estadísticas describen' },
+  } as const;
+  for (const language of ['en', 'zh', 'ja', 'fr', 'es'] as const) {
+    const goal = language === 'fr' ? 'Reprendre le travail' : 'Continue the work';
+    const bundle = await engine.handle({ id: next(), type: 'export-bundle', ...selection, language,
+      notes: { goal, decisions: '', constraints: '', nextSteps: '' }, pinnedIds: [], recentCount: 1, maxCharacters: 6000 });
+    const files = unzipSync(new Uint8Array(bundle.buffer));
+    const readme = new TextDecoder().decode(files['README.md']!);
+    const report = JSON.parse(new TextDecoder().decode(files['cleanup-report.json']!));
+    const transcript = new TextDecoder().decode(files['transcript.md']!);
+    const handoff = new TextDecoder().decode(files['handoff.md']!);
+    assert.ok(readme.includes(bundleLabels[language].readme), language);
+    assert.ok(Object.hasOwn(report, 'scope'));
+    assert.ok(!Object.hasOwn(report, 'note'));
+    assert.ok(report.scope.includes(bundleLabels[language].scope), language);
+    assert.ok(transcript.includes(bundleLabels[language].transcript), language);
+    assert.ok(handoff.startsWith(bundleLabels[language].handoff), language);
+  }
 });
 
 test('portable context bundles contain cleaned files, safe code names, and no custom values', async () => {
