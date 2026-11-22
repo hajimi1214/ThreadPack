@@ -431,6 +431,11 @@ test('self-contained HTML runs offline from file:// and exports without network 
   page.on('pageerror', error => errors.push(error.message));
   try {
     await page.goto(pathToFileURL(resolve('dist/index.html')).href);
+    await expect(page.locator('#app-boot')).not.toBeAttached();
+    const brandIcon = page.locator('.brand-icon img');
+    await expect(brandIcon).toHaveJSProperty('naturalWidth', 192);
+    await expect(page.locator('link[rel="icon"]')).toHaveAttribute('type', 'image/png');
+    expect(await page.locator('link[rel="icon"]').getAttribute('href')).toMatch(/^data:image\/png;base64,/);
     await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
     await ready(page);
     await expect(changes(page, 'images removed')).toHaveText('1');

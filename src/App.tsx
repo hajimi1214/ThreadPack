@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from '
 import type { ReactNode } from 'react';
 import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import mascotIcon from './assets/mascot-icon-192.png';
 import { DEFAULT_OPTIONS, validateCustomSecrets } from './core';
 import type { CleanOptions, Role } from './core';
 import { createDemo } from './demo';
@@ -568,7 +569,7 @@ export default function App() {
 
   return <div className={`app-shell ${archive ? 'has-archive' : ''} ${view === 'handoff' ? 'handoff-view' : ''}`} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
     <header className="site-header">
-      <a className="brand" href="#" onClick={e => { e.preventDefault(); navigate('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><Package size={21} strokeWidth={1.7} /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
+      <a className="brand" href="#" onClick={e => { e.preventDefault(); navigate('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><img src={mascotIcon} alt="" /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
       <nav className="main-nav" aria-label={t.workbench}>
         <button className={view === 'workbench' ? 'selected' : ''} onClick={() => navigate('workbench')}>{t.workbench}</button>
         <button className={view === 'handoff' ? 'selected' : ''} onClick={() => navigate('handoff')} disabled={!processed}>{t.handoff}{pins.length > 0 && <span className="nav-count">{pins.length}</span>}</button>

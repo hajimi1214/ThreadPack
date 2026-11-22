@@ -51,6 +51,8 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
   .command-dialog { padding-top: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
+.site-header .brand-icon { width: 32px; height: auto; aspect-ratio: 1; flex: 0 0 auto; padding: 0; border-radius: 7px; overflow: hidden; }
+.brand-icon img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .draft-actions { grid-column: 1 / -1; margin-top: 4px; padding-top: 14px; border-top: 1px solid #e9eef8; }
 .draft-actions-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .draft-actions > .field-note { margin-top: 8px; }
