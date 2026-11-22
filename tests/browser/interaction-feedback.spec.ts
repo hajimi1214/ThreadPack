@@ -98,6 +98,7 @@ test('quick actions support keyboard search and execute with focus and scroll re
   await search.fill('demo');
   await page.keyboard.press('Enter');
   await expect(menu).not.toBeVisible();
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.message-card')).toHaveCount(10);
   await page.keyboard.press('Control+k');
   await search.fill('Search conversation');

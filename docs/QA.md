@@ -122,3 +122,14 @@ Measured layout and RPC comparisons are recorded in [ARCHITECTURE.md](ARCHITECTU
 - `npm test`: 141 tests cover URL user information, percent encoding, IPv6 authorities, email boundaries, overlap counters, and secret-free exports.
 - `npm run test:e2e -- --workers=2`: 69 browser tests cover URL credential cleanup in the workbench, reports, and handoff output, along with the full existing workflow suite.
 - `npm run check`, `npm run build`, and `npm audit --omit=dev` pass.
+
+## Stage 1 stability and engineering validation
+
+Validation date: 2026-11-22. The repository currently remains at version 1.7.1; this verification does not publish a release.
+
+- `npm test`: 169 core, CLI, localization, preview, parser, and Worker tests passed with Node.js 20.19.0 on Windows.
+- `npm run check`, `npm run build`, and `npm pack --dry-run` passed. The production dependency audit reported no vulnerabilities.
+- `npm run test:e2e -- --workers=1`: all 74 tests passed in Windows Chrome/Chromium and WebKit, and all 74 passed in Linux Firefox running under Ubuntu WSL. The suite covers offline imports, Worker cancellation, export integrity, code extraction, note protection, keyboard focus, mobile widths, and screen orientation.
+- JSONL parsing now consumes decoded lines and parsed records incrementally rather than holding both full intermediate arrays. Browser and CLI callers pass known UTF-8 source byte lengths to avoid another full-input encoding allocation. Stream chunk references are released once decoding completes.
+- Dialog focus returns to the control that opened it across pointer and keyboard interaction. Mobile cleanup actions return focus to the transcript, quick actions are available on the first paint, short-window archive changes preserve reading positions, and 320px Firefox/Chromium layouts fit the header.
+- Large JSON parsing still retains the decoded input and normalized conversation model. The 100 MiB limit remains, so memory use still scales with archive size. No remote GitHub Actions run was part of this local validation.

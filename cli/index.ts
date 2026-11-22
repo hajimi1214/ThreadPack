@@ -66,7 +66,7 @@ function integer(value: string | undefined, fallback: number, min: number, max: 
   return n;
 }
 
-async function readStdin(keepOriginal: boolean): Promise<{ text: string; originalBytes?: Buffer }> {
+async function readStdin(keepOriginal: boolean): Promise<{ text: string; sourceBytes: number; originalBytes?: Buffer }> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {
@@ -76,7 +76,7 @@ async function readStdin(keepOriginal: boolean): Promise<{ text: string; origina
     chunks.push(buffer);
   }
   const originalBytes = Buffer.concat(chunks);
-  return { text: originalBytes.toString('utf8'), ...(keepOriginal ? { originalBytes } : {}) };
+  return { text: originalBytes.toString('utf8'), sourceBytes: originalBytes.byteLength, ...(keepOriginal ? { originalBytes } : {}) };
 }
 
 async function writeOutput(path: string, content: string | Buffer, force: boolean): Promise<void> {
@@ -277,10 +277,12 @@ async function main() {
     goal: '', decisions: '', constraints: '', nextSteps: '',
   };
   let text: string;
+  let inputByteLength: number;
   let originalBytes: Buffer | undefined;
   if (input === '-') {
     const inputData = await readStdin(Boolean(originalOutput));
     text = inputData.text;
+    inputByteLength = inputData.sourceBytes;
     originalBytes = inputData.originalBytes;
     if (originalOutput) {
       await writeOutput(originalOutput, originalBytes!, Boolean(values.force));
@@ -294,10 +296,11 @@ async function main() {
     if (originalOutput) await copyOriginalFile(inputPath, originalOutput, Boolean(values.force));
     const parsePath = originalOutput ?? inputPath;
     text = await readFile(parsePath, 'utf8');
-    if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
+    inputByteLength = Buffer.byteLength(text, 'utf8');
+    if (inputByteLength > MAX_BYTES) throw new CliError('Input exceeds the 100 MiB limit.');
   }
   if (!text.trim()) throw new CliError('Input is empty.');
-  const archive = parseInput(text, input === '-' ? 'stdin.txt' : basename(input));
+  const archive = parseInput(text, input === '-' ? 'stdin.txt' : basename(input), inputByteLength);
   const conversation = archive.conversations[selected - 1];
   if (!conversation) throw new CliError(`Conversation ${selected} is unavailable; this input contains ${archive.conversations.length}.`);
   const cleanOptions = {

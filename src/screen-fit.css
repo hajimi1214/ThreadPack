@@ -54,10 +54,15 @@
   main.loaded .metric > small, main.loaded .mini-bars { display: none; }
 }
 @media (max-width: 360px) {
-  .site-header .brand { font-size: 16px; gap: 4px; }
-  .site-header .brand-icon { width: 23px; }
-  .header-actions { gap: 4px; }
-  .language-picker select { width: 78px; }
+  .site-header .brand { min-width: 0; font-size: 14px; gap: 2px; }
+  .site-header .brand-icon { width: 20px; }
+  .header-actions { gap: 2px; }
+  .command-trigger { width: 28px; }
+  .help-button { width: 24px; }
+  .language-picker { gap: 3px; }
+  .language-picker > svg:first-child { width: 12px; }
+  .language-picker select { width: 60px; }
+  .language-picker > svg:last-child { width: 9px; }
   .has-archive .file-details > strong { max-width: calc(100vw - 104px); }
 }
 

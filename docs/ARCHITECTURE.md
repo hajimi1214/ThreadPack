@@ -13,7 +13,7 @@ flowchart LR
     SW[Service Worker] -->|Public shell only| Cache[HTML + manifest + icons]
 ```
 
-The page sends the `File` to the worker, which reads bytes incrementally and reports progress. UTF-8 decoding preserves characters split across chunks. Parsing still operates on the decoded text; this is not a streaming JSON parser and does not make memory usage independent of file size. The 100 MiB limit remains.
+The page sends the `File` to the worker, which reads bytes incrementally and reports progress. UTF-8 decoding preserves characters split across chunks, and known source byte lengths flow into the parser to avoid re-encoding the complete input for statistics. JSONL records are parsed one line at a time without retaining a second array of source lines and parsed records. Parsing still operates on the decoded text; this is not a streaming JSON parser and does not make memory usage independent of file size. The 100 MiB limit remains.
 
 Archive identifiers distinguish accepted files from cancelled candidate imports. Cleanup revisions identify an exact immutable recipe result. Queries, exports, and handoffs require that revision; stale requests cannot silently use a different cleanup configuration. React also checks the matching recipe and request generation before accepting responses.
 

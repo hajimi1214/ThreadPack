@@ -251,6 +251,7 @@ export class WorkerEngine {
         throw new Error('This file could not be read. Choose it again or paste its text.');
       } finally { reader.releaseLock(); }
       text = chunks.join('');
+      chunks.length = 0;
       progress?.({ loaded: sourceBytes, total: file.size });
       }
       }
@@ -260,7 +261,7 @@ export class WorkerEngine {
       if (sourceBytes > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.');
     }
     checkActive();
-    const archive = parseInput(text, parsedFilename);
+    const archive = parseInput(text, parsedFilename, sourceBytes);
     if (importWarning) archive.warnings.push(importWarning);
     checkActive();
     archive.sourceBytes = sourceBytes;

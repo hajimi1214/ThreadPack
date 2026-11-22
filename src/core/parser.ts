@@ -160,7 +160,7 @@ function conversationFromJson(value: unknown, index: number, titleFallback: stri
   return undefined;
 }
 
-function parseRecords(values: unknown[], filename: string, warnings: string[]): { conversations: Conversation[]; format: string } {
+function parseRecords(values: Iterable<unknown>, filename: string, warnings: string[]): { conversations: Conversation[]; format: string } {
   const messages: Message[] = [];
   let format = 'Messages JSONL';
   let title = filename;
@@ -168,10 +168,11 @@ function parseRecords(values: unknown[], filename: string, warnings: string[]): 
   let skipped = 0;
   let codex = false;
   let claudeCode = false;
-  for (let n = 0; n < values.length; n++) {
-    const value = values[n];
+  let n = 0;
+  for (const value of values) {
+    n++;
     if (!record(value)) { skipped++; continue; }
-    const fallbackId = `message-${n + 1}`;
+    const fallbackId = `message-${n}`;
     if (value.type === 'session_meta') {
       codex = true;
       if (record(value.payload)) id = asString(value.payload.id) || id;
@@ -214,7 +215,33 @@ function parseRecords(values: unknown[], filename: string, warnings: string[]): 
   if (skipped) warnings.push(`${skipped} metadata or unsupported record(s) contained no recognized conversation message and were not included.`);
   // Keep the file name as the title. A truncated first user prompt could expose
   // a partial credential that no longer matches the full redaction pattern.
-  return { format, conversations: messages.length ? [{ id, title, source: codex ? 'Codex' : claudeCode ? 'Claude Code' : 'JSONL', messages: uniqueIds(messages) }] : [] };
+  return { format, conversations: messages.length ? [{ id, title, source: codex ? 'Codex' : claudeCode ? 'Claude Code' : 'JSONL', messages }] : [] };
+}
+
+interface JsonlParseStats { validRecords: number; malformedLines: number }
+
+function* jsonlValues(text: string, stats: JsonlParseStats): Generator<unknown> {
+  let start = 0;
+  while (start <= text.length) {
+    const newline = text.indexOf('\n', start);
+    const end = newline < 0 ? text.length : newline;
+    const line = text.slice(start, end).replace(/\r$/, '');
+    if (line.trim()) {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        stats.malformedLines++;
+        if (newline < 0) break;
+        start = newline + 1;
+        continue;
+      }
+      stats.validRecords++;
+      yield value;
+    }
+    if (newline < 0) break;
+    start = newline + 1;
+  }
 }
 
 function parseJson(value: unknown, text: string, filename: string, warnings: string[]): { conversations: Conversation[]; format: string } {
@@ -282,9 +309,10 @@ function parseText(text: string, filename: string): { conversations: Conversatio
   return { format: /\.md$/i.test(filename) ? 'Markdown' : 'Plain text', conversations: [{ id: 'conversation-1', title: filename, source: 'Text', messages }] };
 }
 
-export function parseInput(text: string, filename: string): ParsedArchive {
+export function parseInput(text: string, filename: string, inputByteLength?: number): ParsedArchive {
   if (typeof text !== 'string') throw new Error('Input must be a text string.');
-  const sourceBytes = encoder.encode(text).byteLength;
+  const sourceBytes = inputByteLength ?? encoder.encode(text).byteLength;
+  if (!Number.isSafeInteger(sourceBytes) || sourceBytes < 0) throw new Error('Input byte length must be a nonnegative safe integer.');
   if (!text.trim()) throw new Error('This file is empty. Choose a conversation export or paste a transcript.');
   const warnings: string[] = [];
   const normalized = text.replace(/^\uFEFF/, '');
@@ -293,15 +321,10 @@ export function parseInput(text: string, filename: string): ParsedArchive {
   const json = /\.json$/i.test(filename);
   let parsed: { conversations: Conversation[]; format: string };
   if (jsonl) {
-    const values: unknown[] = [];
-    let malformed = 0;
-    for (const line of normalized.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      try { values.push(JSON.parse(line)); } catch { malformed++; }
-    }
-    if (malformed) warnings.push(`${malformed} invalid JSONL line(s) were skipped. Keep the original file to recover them.`);
-    if (!values.length) throw new Error('No valid JSONL records were found. Check the export format or use a .txt file for plain text.');
-    parsed = parseRecords(values, filename, warnings);
+    const stats: JsonlParseStats = { validRecords: 0, malformedLines: 0 };
+    parsed = parseRecords(jsonlValues(normalized, stats), filename, warnings);
+    if (stats.malformedLines) warnings.unshift(`${stats.malformedLines} invalid JSONL line(s) were skipped. Keep the original file to recover them.`);
+    if (!stats.validRecords) throw new Error('No valid JSONL records were found. Check the export format or use a .txt file for plain text.');
     if (!parsed.conversations.length) throw new Error('The JSONL contains no recognized conversation messages. Supported formats: Codex, Claude Code, or records with role and content.');
   } else if (json || trimmed.startsWith('{') || trimmed.startsWith('[')) {
     let value: unknown;
@@ -313,7 +336,7 @@ export function parseInput(text: string, filename: string): ParsedArchive {
       if (lines.length > 1 && lines.every((line) => { try { JSON.parse(line); return true; } catch { return false; } })) {
         parsed = parseRecords(lines.map((line) => JSON.parse(line)), filename, warnings);
         if (!parsed.conversations.length) throw new Error('No recognized messages were found in the pasted JSONL.');
-        return { ...parsed, warnings, sourceBytes };
+        return { ...parsed, conversations: parsed.conversations.map(conversation => ({ ...conversation, messages: uniqueIds(conversation.messages) })), warnings, sourceBytes };
       }
       warnings.push('Input starts like JSON but is not valid JSON. It was preserved as plain text.');
       parsed = parseText(normalized, filename);

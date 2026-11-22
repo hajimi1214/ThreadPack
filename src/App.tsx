@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { AlertCircle, ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Clipboard, Code2, Command, Copy, Download, Eye, FileJson, FileText, Globe2, HelpCircle, ImageMinus, Layers, Link, LoaderCircle, LockKeyhole, Mail, Package, Pin, RotateCcw, Search, Settings2, ShieldCheck, Sparkles, Terminal, Trash2, Upload, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import mascotIcon from './assets/mascot-icon-192.png';
@@ -64,12 +64,14 @@ function MarkdownViewToggle({ enabled, onChange, t }: { enabled: boolean; onChan
   </div>;
 }
 
-function Dialog({ children, close, label, closeLabel, className = '' }: { children: ReactNode; close: () => void; label: string; closeLabel: string; className?: string }) {
+function Dialog({ children, close, label, closeLabel, className = '', restoreFocus }: { children: ReactNode; close: () => void; label: string; closeLabel: string; className?: string; restoreFocus?: HTMLElement | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
+    const activeElement = document.activeElement as HTMLElement | null;
+    const previous = activeElement && activeElement !== document.body && !ref.current?.contains(activeElement)
+      ? activeElement : restoreFocus;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     (ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? ref.current?.querySelector<HTMLElement>('button, textarea, input, select'))?.focus();
@@ -84,7 +86,11 @@ function Dialog({ children, close, label, closeLabel, className = '' }: { childr
       }
     };
     document.addEventListener('keydown', handle);
-    return () => { document.body.style.overflow = overflow; document.removeEventListener('keydown', handle); previous?.focus(); };
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener('keydown', handle);
+      if (previous) requestAnimationFrame(() => previous.focus({ preventScroll: true }));
+    };
   }, []);
   return <div className="dialog-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
     <div ref={ref} className={`dialog ${className}`} role="dialog" aria-modal="true" aria-label={label}>
@@ -98,6 +104,7 @@ export default function App() {
   const t = dictionary(lang);
   const [view, setView] = useState<'workbench' | 'handoff'>('workbench');
   const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | 'draft-confirm' | null>(null);
+  const dialogReturnFocus = useRef<HTMLElement | null>(null);
   const [shareState, setShareState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [archive, setArchive] = useState<ParseInfo | null>(null);
   const [originalSource, setOriginalSource] = useState<{ blob: Blob; name: string } | null>(null);
@@ -182,6 +189,15 @@ export default function App() {
   const handoffDraftContextRef = useRef(handoffDraftContext);
   handoffDraftContextRef.current = handoffDraftContext;
   const overlayOpen = dialog !== null || !!pendingAction || isCompact && settingsOpen;
+  const rememberDialogTrigger = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (overlayOpen) return;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a[href], input, select, textarea') : null;
+    if (target) dialogReturnFocus.current = target;
+  };
+  const openDialogFrom = <T extends NonNullable<typeof dialog>>(next: T, trigger: HTMLElement): void => {
+    dialogReturnFocus.current = trigger;
+    setDialog(next);
+  };
 
   useEffect(() => {
     ++handoffCopyGeneration.current; handoffCopyLock.current = false; setHandoffCopyState('idle');
@@ -209,11 +225,17 @@ export default function App() {
     const timer = setTimeout(() => setHandoffCopyState('idle'), 2200);
     return () => clearTimeout(timer);
   }, [handoffCopyState]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'k') return;
       if (pendingAction || settingsOpen || dialog && dialog !== 'commands') return;
-      event.preventDefault(); setDialog(value => value === 'commands' ? null : 'commands');
+      event.preventDefault();
+      if (dialog === 'commands') setDialog(null);
+      else {
+        const activeElement = document.activeElement;
+        dialogReturnFocus.current = activeElement instanceof HTMLElement && activeElement !== document.body ? activeElement : null;
+        setDialog('commands');
+      }
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
@@ -229,6 +251,11 @@ export default function App() {
     }
   }, [view, archive, selected, isCompact]);
   useEffect(() => { if (!isCompact) setSettingsOpen(false); }, [isCompact]);
+  useEffect(() => {
+    if (overlayOpen) return;
+    const trigger = dialogReturnFocus.current;
+    if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
+  }, [overlayOpen]);
 
   useEffect(() => {
     if (!archive || !selected) return;
@@ -255,7 +282,9 @@ export default function App() {
     return () => { active = false; };
   }, [archive, processed, selected, busy, optionsKey, mode, deferredQuery, filter, changedOnly, pinnedOnly, queryPinnedIds, page, request]);
   useLayoutEffect(() => {
-    if (archive && preview && messageList.current) messageList.current.scrollTop = readingPositions.current.get(readingPositionKey) ?? 0;
+    if (archive && preview && messageList.current) {
+      messageList.current.scrollTop = readingPositions.current.get(readingPositionKey) ?? 0;
+    }
   }, [preview, archive, selected, readingPositionKey]);
 
   useEffect(() => {
@@ -325,10 +354,12 @@ export default function App() {
     setView(next);
   }
   function finishSettings() {
+    dialogReturnFocus.current = previewPanel.current;
     setSettingsOpen(false);
     requestAnimationFrame(() => { previewPanel.current?.focus({ preventScroll: true }); previewPanel.current?.scrollIntoView({ block: 'nearest' }); });
   }
   function selectConversation(id: string) {
+    if (archive && messageList.current) rememberReadingPosition(readingPositionKey, messageList.current.scrollTop);
     setSelected(id); setProcessed(null); setPreview(null); setError('');
     setQuery(''); setFilter('all'); setChangedOnly(false); setPinnedOnly(false); setPage(0);
   }
@@ -567,14 +598,14 @@ export default function App() {
         </aside>
   );
 
-  return <div className={`app-shell ${archive ? 'has-archive' : ''} ${view === 'handoff' ? 'handoff-view' : ''}`} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
+  return <div className={`app-shell ${archive ? 'has-archive' : ''} ${view === 'handoff' ? 'handoff-view' : ''}`} onMouseDownCapture={rememberDialogTrigger} onClickCapture={rememberDialogTrigger} onDragOver={e => { e.preventDefault(); if (e.dataTransfer.types.includes('Files')) setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) void openFile(e.dataTransfer.files[0]); }}>
     <header className="site-header">
       <a className="brand" href="#" onClick={e => { e.preventDefault(); navigate('workbench'); }} aria-label="ThreadPack"><span className="brand-icon"><img src={mascotIcon} alt="" /></span><span>Thread<span className="brand-light">Pack</span><span className="version">v{APP_VERSION}</span></span></a>
       <nav className="main-nav" aria-label={t.workbench}>
         <button className={view === 'workbench' ? 'selected' : ''} onClick={() => navigate('workbench')}>{t.workbench}</button>
         <button className={view === 'handoff' ? 'selected' : ''} onClick={() => navigate('handoff')} disabled={!processed}>{t.handoff}{pins.length > 0 && <span className="nav-count">{pins.length}</span>}</button>
       </nav>
-      <div className="header-actions">{installPrompt && <button className="install-button" onClick={() => void installApp()}><Download size={14} />{t.installApp}</button>}<button className="command-trigger" aria-label={t.quickActions} title={`${t.quickActions} (Ctrl/⌘ K)`} onClick={() => setDialog('commands')}><Command size={15} /><kbd>Ctrl K</kbd></button><button className="help-button" aria-label={t.help} onClick={() => setDialog('help')}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
+      <div className="header-actions">{installPrompt && <button className="install-button" onClick={() => void installApp()}><Download size={14} />{t.installApp}</button>}<button className="command-trigger" aria-label={t.quickActions} title={`${t.quickActions} (Ctrl/⌘ K)`} onClick={() => setDialog('commands')}><Command size={15} /><kbd>Ctrl K</kbd></button><button className="help-button" aria-label={t.help} onClick={event => openDialogFrom('help', event.currentTarget)}><HelpCircle size={15} /><span>{t.help}</span></button><span className="header-divider" /><label className="language-picker"><Globe2 size={14} /><select aria-label="Language / 语言" value={lang} onChange={event => setLang(event.target.value as Lang)}>{SUPPORTED_LANGUAGES.map(language => <option key={language.code} value={language.code}>{language.name}</option>)}</select><ChevronDown size={11} /></label></div>
     </header>
 
     <main className={archive ? 'loaded' : ''}>
@@ -613,10 +644,10 @@ export default function App() {
       {archive && view === 'workbench' && <div className="workspace-grid">
         <button className="settings-toggle button secondary" aria-label={t.recipe} aria-expanded={settingsOpen} aria-controls="cleanup-settings" onClick={() => setSettingsOpen(value => !value)}><Settings2 size={16} />{t.recipe}<ChevronDown size={14} className={settingsOpen ? 'rotate' : ''} /></button>
         {!isCompact && cleanupPanel}
-        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="preview-tools"><button className="snippet-trigger" disabled={working || customDirty || !processed} onClick={() => setDialog('snippets')}><Code2 size={14} />{t.codeSnippets}</button><MarkdownViewToggle enabled={markdownPreview} onChange={() => setMarkdownPreview(value => !value)} t={t} /><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div></div>
+        <section ref={previewPanel} tabIndex={-1} className="preview-panel panel"><div className="panel-heading preview-heading"><div><h2>{t.preview}<span className="count-badge">{currentConversation?.messageCount ?? 0}</span></h2><p>{preview ? preview.total.toLocaleString() + ' ' + t.resultCount : t.previewSub}</p></div><div className="preview-tools"><button className="snippet-trigger" disabled={working || customDirty || !processed} onClick={event => openDialogFrom('snippets', event.currentTarget)}><Code2 size={14} />{t.codeSnippets}</button><MarkdownViewToggle enabled={markdownPreview} onChange={() => setMarkdownPreview(value => !value)} t={t} /><div className="segmented" aria-label={t.preview}><button aria-pressed={mode === 'cleaned'} className={mode === 'cleaned' ? 'active' : ''} onClick={() => setMode('cleaned')}>{t.cleaned}</button><button aria-pressed={mode === 'original'} className={mode === 'original' ? 'active' : ''} onClick={() => setMode('original')}>{t.original}</button></div></div></div>
           <div className="preview-toolbar"><div className="preview-filters"><div className="role-filter">{(['all', 'user', 'assistant', 'tool', 'system'] as const).map(role => <button key={role} aria-pressed={filter === role} className={filter === role ? 'active' : ''} onClick={() => setFilter(role)}>{t[role]}</button>)}</div><button className={`changed-filter ${changedOnly ? 'active' : ''}`} aria-pressed={changedOnly} onClick={() => setChangedOnly(value => !value)}><Check size={11} />{t.changedOnly}</button><button className={`changed-filter ${pinnedOnly ? 'active' : ''}`} aria-pressed={pinnedOnly} onClick={() => setPinnedOnly(value => !value)}><Pin size={11} />{t.pinnedOnly}</button></div><label className="search-box"><Search size={14} /><input type="search" maxLength={1000} value={query} placeholder={t.search} aria-label={t.search} onChange={e => setQuery(e.target.value)} /></label>{filtersActive && <button className="filter-clear icon-button" aria-label={t.clearFilters} title={t.clearFilters} onClick={clearFilters}><RotateCcw size={14} /></button>}<button className="excerpt-trigger" disabled={working || customDirty || !preview?.total} onClick={() => setDialog('excerpt')}><Download size={13} /><span>{t.exportExcerpt}</span><b>{preview?.total.toLocaleString() ?? 0}</b></button></div>
           {mode === 'original' && <div className="original-warning"><LockKeyhole size={14} />{t.originalWarning}</div>}
-          <div ref={messageList} onScroll={event => { if (archive && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
+          <div ref={messageList} onScroll={event => { if (archive && preview && !busy && !querying) rememberReadingPosition(readingPositionKey, event.currentTarget.scrollTop); }} className={`messages-list ${working ? 'processing' : ''}`} aria-busy={working}>
             {working && <div className="processing-overlay" role="status"><span><LoaderCircle size={17} className="spin" />{t.processing}</span></div>}
             {processed && !working && !visible.length && <div className="no-results">{t.noResults}{filtersActive && <button className="button secondary small" onClick={clearFilters}>{t.clearFilters}</button>}</div>}
             {visible.map(({ message, index, bytes: messageBytes, changes, shortened }) => <MessageCard key={`${selected}-${mode}-${message.id}`} message={message} index={index} sizeLabel={bytes(messageBytes)} pinned={pins.includes(message.id)} onPin={() => togglePin(message.id)} onCopy={() => copyMessage(message.id)} onReview={() => void reviewMessage(message.id)} copyDisabled={working || customDirty} changes={changes} query={deferredQuery} sourceShortened={shortened} markdownPreview={markdownPreview} t={t} />)}
@@ -713,15 +744,15 @@ export default function App() {
     {dragging && <div className="drag-overlay"><div><Upload size={44} /><h2>{t.drop}</h2><p>{t.dropHint}</p></div></div>}
 
 
-    {dialog === 'snippets' && archive && processed && <Dialog close={() => setDialog(null)} label={t.codeSnippets} closeLabel={t.close} className="snippet-dialog"><SnippetExplorer key={`${archive.archiveId}:${selected}:${processed.revision}`} archiveId={archive.archiveId} conversationId={selected} revision={processed.revision} request={request} t={t} download={download} notify={notify} /><ThirdPartyNotices t={t} /></Dialog>}
-    {dialog === 'commands' && <Dialog close={() => setDialog(null)} label={t.quickActions} closeLabel={t.close} className="command-dialog"><CommandMenu actions={quickActions} t={t} execute={executeQuickAction} /></Dialog>}
-    {isCompact && settingsOpen && <Dialog close={() => setSettingsOpen(false)} label={t.recipe} closeLabel={t.close} className="settings-sheet"><div className="settings-sheet-content">{cleanupPanel}</div><div className="settings-sheet-actions"><button className="button primary" onClick={finishSettings}>{t.doneSettings}<Check size={16} /></button></div></Dialog>}
-    {dialog === 'compare' && <Dialog close={closeMessageReview} label={t.comparisonTitle} closeLabel={t.close} className="message-review-dialog"><div className="dialog-eyebrow"><Eye size={17} />{t.comparisonTitle}</div><h2>{t.comparisonTitle}</h2><p className="review-message-warning"><ShieldCheck size={14} />{t.compareWarning}</p>{reviewBusy && <p className="review-message-loading" role="status"><LoaderCircle size={16} className="spin" />{t.processing}</p>}{messageReview && <><div className="review-change-list">{messageReview.result.changes.map((change, index) => <span key={`${change.kind}-${index}`}>{change.count} {t[reviewChangeLabels[change.kind]]}</span>)}</div><div className="review-columns"><section className="review-column"><h3>{t.compareOriginal}</h3><pre>{messageReview.result.original.text || '—'}</pre>{messageReview.result.original.shortened && <small>{t.comparisonShortened}</small>}</section><section className="review-column"><h3>{t.compareCleaned}</h3><pre>{messageReview.result.cleaned.text || '—'}</pre>{messageReview.result.cleaned.shortened && <small>{t.comparisonShortened}</small>}</section></div>{(messageReview.result.original.imageHidden || messageReview.result.cleaned.imageHidden) && <p className="review-message-note">{t.imagePreviewHidden}</p>}</>}</Dialog>}
-    {dialog === 'draft-confirm' && pendingHandoffDraft && <Dialog close={() => { setDialog(null); setPendingHandoffDraft(null); }} label={t.draftReplaceTitle} closeLabel={t.close}><div className="dialog-eyebrow"><FileJson size={17} />{t.importDraft}</div><h2>{t.draftReplaceTitle}</h2><p className="dialog-subtitle">{t.draftReplaceHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => { setDialog(null); setPendingHandoffDraft(null); }}>{t.cancel}</button><button className="button primary" onClick={() => applyHandoffDraft(pendingHandoffDraft)}>{t.draftReplaceAction}</button></div></Dialog>}
-    {pendingAction && <Dialog close={() => setPendingAction(null)} label={t.unsavedNotes} closeLabel={t.close}><div className="dialog-eyebrow"><FileText size={17} />{t.unsavedNotes}</div><h2>{t.unsavedNotes}</h2><p className="dialog-subtitle">{t.discardHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => setPendingAction(null)}>{t.keepWorking}</button><button className="button danger" onClick={discardNotes}>{t.discardNotes}</button></div></Dialog>}
-    {dialog === 'help' && <Dialog close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div><div className="help-project-actions"><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a><button className="button secondary small" aria-label={t.shareProject} aria-busy={shareState === 'pending'} disabled={shareState === 'pending'} title={t.shareProjectHint} onClick={() => void shareProject()}>{shareState === 'pending' ? <LoaderCircle size={14} className="spin" /> : shareState === 'success' ? <Check size={14} /> : <Link size={14} />}{shareState === 'success' ? t.copied : t.shareProject}</button></div><ThirdPartyNotices t={t} /></Dialog>}
-    {dialog === 'paste' && <Dialog close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
-    {(dialog === 'export' || dialog === 'excerpt') && <Dialog close={() => { if (!exportLock.current) setDialog(null); }} label={dialog === 'excerpt' ? t.exportExcerpt : t.export} closeLabel={t.close}>
+    {dialog === 'snippets' && archive && processed && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.codeSnippets} closeLabel={t.close} className="snippet-dialog"><SnippetExplorer key={`${archive.archiveId}:${selected}:${processed.revision}`} archiveId={archive.archiveId} conversationId={selected} revision={processed.revision} request={request} t={t} download={download} notify={notify} /><ThirdPartyNotices t={t} /></Dialog>}
+    {dialog === 'commands' && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.quickActions} closeLabel={t.close} className="command-dialog"><CommandMenu actions={quickActions} t={t} execute={executeQuickAction} /></Dialog>}
+    {isCompact && settingsOpen && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setSettingsOpen(false)} label={t.recipe} closeLabel={t.close} className="settings-sheet"><div className="settings-sheet-content">{cleanupPanel}</div><div className="settings-sheet-actions"><button className="button primary" onClick={finishSettings}>{t.doneSettings}<Check size={16} /></button></div></Dialog>}
+    {dialog === 'compare' && <Dialog restoreFocus={dialogReturnFocus.current} close={closeMessageReview} label={t.comparisonTitle} closeLabel={t.close} className="message-review-dialog"><div className="dialog-eyebrow"><Eye size={17} />{t.comparisonTitle}</div><h2>{t.comparisonTitle}</h2><p className="review-message-warning"><ShieldCheck size={14} />{t.compareWarning}</p>{reviewBusy && <p className="review-message-loading" role="status"><LoaderCircle size={16} className="spin" />{t.processing}</p>}{messageReview && <><div className="review-change-list">{messageReview.result.changes.map((change, index) => <span key={`${change.kind}-${index}`}>{change.count} {t[reviewChangeLabels[change.kind]]}</span>)}</div><div className="review-columns"><section className="review-column"><h3>{t.compareOriginal}</h3><pre>{messageReview.result.original.text || '—'}</pre>{messageReview.result.original.shortened && <small>{t.comparisonShortened}</small>}</section><section className="review-column"><h3>{t.compareCleaned}</h3><pre>{messageReview.result.cleaned.text || '—'}</pre>{messageReview.result.cleaned.shortened && <small>{t.comparisonShortened}</small>}</section></div>{(messageReview.result.original.imageHidden || messageReview.result.cleaned.imageHidden) && <p className="review-message-note">{t.imagePreviewHidden}</p>}</>}</Dialog>}
+    {dialog === 'draft-confirm' && pendingHandoffDraft && <Dialog restoreFocus={dialogReturnFocus.current} close={() => { setDialog(null); setPendingHandoffDraft(null); }} label={t.draftReplaceTitle} closeLabel={t.close}><div className="dialog-eyebrow"><FileJson size={17} />{t.importDraft}</div><h2>{t.draftReplaceTitle}</h2><p className="dialog-subtitle">{t.draftReplaceHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => { setDialog(null); setPendingHandoffDraft(null); }}>{t.cancel}</button><button className="button primary" onClick={() => applyHandoffDraft(pendingHandoffDraft)}>{t.draftReplaceAction}</button></div></Dialog>}
+    {pendingAction && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setPendingAction(null)} label={t.unsavedNotes} closeLabel={t.close}><div className="dialog-eyebrow"><FileText size={17} />{t.unsavedNotes}</div><h2>{t.unsavedNotes}</h2><p className="dialog-subtitle">{t.discardHint}</p><div className="dialog-actions"><button className="button secondary" onClick={() => setPendingAction(null)}>{t.keepWorking}</button><button className="button danger" onClick={discardNotes}>{t.discardNotes}</button></div></Dialog>}
+    {dialog === 'help' && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.help} closeLabel={t.close}><div className="dialog-eyebrow"><Package size={18} />THREADPACK</div><h2>{t.helpTitle}</h2><div className="help-steps">{[1, 2, 3].map(n => <div key={n}><strong>{t[`help${n}Title` as TranslationKey]}</strong><p>{t[`help${n}` as TranslationKey]}</p></div>)}</div><div className="help-notice"><h3><LockKeyhole size={15} />{t.helpPrivacy}</h3><p>{t.helpPrivacyText}</p><h3>{t.helpLimits}</h3><p>{t.helpLimitsText}</p></div><div className="help-project-actions"><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a><button className="button secondary small" aria-label={t.shareProject} aria-busy={shareState === 'pending'} disabled={shareState === 'pending'} title={t.shareProjectHint} onClick={() => void shareProject()}>{shareState === 'pending' ? <LoaderCircle size={14} className="spin" /> : shareState === 'success' ? <Check size={14} /> : <Link size={14} />}{shareState === 'success' ? t.copied : t.shareProject}</button></div><ThirdPartyNotices t={t} /></Dialog>}
+    {dialog === 'paste' && <Dialog restoreFocus={dialogReturnFocus.current} close={() => setDialog(null)} label={t.paste} closeLabel={t.close}><div className="dialog-eyebrow"><Clipboard size={17} />{t.paste}</div><h2>{t.pasteTitle}</h2><p className="dialog-subtitle">{t.pasteHint}</p><textarea className="paste-area" value={pasteText} aria-label={t.paste} placeholder={'User: …\nAssistant: …'} onChange={e => setPasteText(e.target.value)} /><div className="dialog-actions"><button className="button secondary" onClick={() => setDialog(null)}>{t.cancel}</button><button className="button primary" disabled={importing || !pasteText.trim()} onClick={() => void openText(pasteText, 'pasted-conversation.txt')}>{t.parseText}<ArrowRight size={15} /></button></div></Dialog>}
+    {(dialog === 'export' || dialog === 'excerpt') && <Dialog restoreFocus={dialogReturnFocus.current} close={() => { if (!exportLock.current) setDialog(null); }} label={dialog === 'excerpt' ? t.exportExcerpt : t.export} closeLabel={t.close}>
       <div className="dialog-eyebrow"><Package size={18} />{dialog === 'excerpt' ? `${preview?.total.toLocaleString() ?? 0} ${t.resultCount}` : t.ready}</div>
       <h2>{dialog === 'excerpt' ? t.excerptTitle : t.exportTitle}</h2><p className="dialog-subtitle">{dialog === 'excerpt' ? t.excerptHint : t.exportSub}</p>
       {dialog === 'excerpt' && <p className="excerpt-cleaned-note"><ShieldCheck size={14} />{t.excerptCleanedNote}</p>}

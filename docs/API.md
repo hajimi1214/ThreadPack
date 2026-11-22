@@ -60,13 +60,15 @@ interface ParsedArchive {
 }
 ```
 
-`parseInput` assigns normalized sequential message references instead of exporting provider message IDs. Valid timestamps are normalized; unsupported timestamps are omitted. `sourceBytes` measures the UTF-8 input string. `format` is derived from supported structural schemas, rather than arbitrary source metadata.
+`parseInput` assigns normalized sequential message references instead of exporting provider message IDs. Valid timestamps are normalized; unsupported timestamps are omitted. `sourceBytes` measures the UTF-8 input string unless the caller supplies its original byte length. `format` is derived from supported structural schemas, rather than arbitrary source metadata.
 
-## `parseInput(text, filename)`
+## `parseInput(text, filename, inputByteLength?)`
 
 ```ts
-parseInput(text: string, filename: string): ParsedArchive
+parseInput(text: string, filename: string, inputByteLength?: number): ParsedArchive
 ```
+
+Pass the original byte length when it is already known to avoid encoding the complete input again for statistics. The value must be a nonnegative safe integer.
 
 Imports Codex and Claude Code JSONL, ChatGPT and Claude JSON exports, generic messages JSON/JSONL, Markdown, plain text, and browser ZIP files containing one of those text exports. A filename extension informs detection; complete JSON and valid pasted JSONL are also recognized from text. Browser ZIP imports apply entry-count, expanded-size, and safe-path limits before selecting a supported export.
 

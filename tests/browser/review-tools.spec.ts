@@ -7,6 +7,13 @@ test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   pageErrors.set(page, errors);
   page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    let clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { clipboardText = text; },
+      readText: async () => clipboardText,
+    } });
+  });
   await page.goto('/');
 });
 test.afterEach(({ page }) => { expect(pageErrors.get(page) ?? []).toEqual([]); });
@@ -259,7 +266,6 @@ test('changed-only review combines with role and search filters and uses the sam
 });
 
 test('pinned-only review composes with role filters and copies the complete message in the active mode', async ({ page }) => {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const longText = `FULL_COPY_START\n${'complete transcript content. '.repeat(700)}\nFULL_COPY_END`;
   await importMessages(page, [
     { role: 'user', content: longText },

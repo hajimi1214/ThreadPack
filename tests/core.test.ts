@@ -88,9 +88,21 @@ test('canonical JSONL round-trips without losing content or Unicode', () => {
   assert.equal(imported.sourceBytes, new TextEncoder().encode(exported).byteLength);
 });
 
+test('JSONL parsing accepts a known source byte length without re-encoding the text', () => {
+  const text = JSON.stringify({ role: 'user', content: '你好' });
+  const imported = parseInput(text, 'session.jsonl', 42);
+  assert.equal(imported.sourceBytes, 42);
+  assert.equal(imported.conversations[0]!.messages[0]!.content, '你好');
+});
+
 test('stdin text automatically recognizes JSONL and generic messages JSON', () => {
   const result = parseInput(jsonl({ role: 'user', content: 'One' }, { role: 'assistant', content: 'Two' }), 'stdin.txt');
   assert.equal(result.conversations[0]!.messages.length, 2);
+  const duplicateIds = parseInput(jsonl(
+    { id: 'provider-id', role: 'user', content: 'First record' },
+    { id: 'provider-id', role: 'assistant', content: 'Second record' },
+  ), 'stdin.txt');
+  assert.deepEqual(duplicateIds.conversations[0]!.messages.map(message => message.id), ['message-1', 'message-2']);
   const json = parseInput(JSON.stringify({ messages: [{ role: 'developer', content: 'A constraint' }, { role: 'user', content: 'Go' }] }), 'stdin.txt');
   assert.equal(json.conversations[0]!.messages[0]!.role, 'system');
 });
@@ -99,8 +111,8 @@ test('invalid JSON errors; partial JSONL explicitly reports dropped lines', () =
   assert.throws(() => parseInput('{broken', 'export.json'), /Invalid JSON/);
   assert.throws(() => parseInput('not json', 'export.jsonl'), /No valid JSONL/);
   assert.throws(() => parseInput('  ', 'empty.txt'), /empty/);
-  const result = parseInput('{broken\n' + JSON.stringify({ role: 'user', content: 'Recover me' }), 'partial.jsonl');
-  assert.equal(result.conversations[0]!.messages[0]!.content, 'Recover me');
+  const result = parseInput('\r\n{broken\r\n' + JSON.stringify({ role: 'user', content: 'Recover me' }) + '\r\n\r\n' + JSON.stringify({ role: 'assistant', content: 'Keep order.' }), 'partial.jsonl');
+  assert.deepEqual(result.conversations[0]!.messages.map((message) => message.content), ['Recover me', 'Keep order.']);
   assert.ok(result.warnings.some((warning) => warning.includes('1 invalid JSONL')));
 });
 

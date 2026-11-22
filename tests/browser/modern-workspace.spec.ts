@@ -89,9 +89,19 @@ test('desktop opens directly onto useful message content', async ({ page }) => {
 });
 
 test('shows a startup status while the application module is loading', async ({ page }) => {
-  await page.route('**/src/main.tsx', async route => {
-    await new Promise(resolve => setTimeout(resolve, 400));
-    await route.continue();
+  await page.route('**/*', async route => {
+    if (new URL(route.request().url()).pathname !== '/') {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const html = await response.text();
+    const moduleTag = '<script type="module" crossorigin>';
+    if (!html.includes(moduleTag)) throw new Error('The production module entry was not found.');
+    await route.fulfill({
+      response,
+      body: html.replace(moduleTag, moduleTag + '\nawait new Promise(resolve => setTimeout(resolve, 400));'),
+    });
   });
   const navigation = page.reload();
   await expect(page.locator('#app-boot')).toBeVisible();
@@ -159,11 +169,13 @@ test('switching conversations restores each conversation’s reading position', 
 
   const conversations = page.getByRole('combobox', { name: 'Conversation', exact: true });
   await conversations.selectOption({ label: '2. Beta' });
+  await ready(page);
   await expect(page.locator('.messages-list')).toContainText('BETA_1');
   await list.evaluate(element => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')); });
   await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(150);
 
   await conversations.selectOption({ label: '1. Alpha' });
+  await ready(page);
   await expect(page.locator('.messages-list')).toContainText('ALPHA_1');
   await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(200);
 });
@@ -209,7 +221,8 @@ test('large File streaming reports progress and can be cancelled without retaini
   await expect.poll(async () => (await evidence(page)).progress).toBeGreaterThan(0);
   const cancel = page.getByRole('button', { name: 'Cancel and clear', exact: true });
   await expect(cancel).toBeVisible();
-  await cancel.click();
+  await cancel.focus();
+  await cancel.press('Enter');
   await expect(page.getByRole('button', { name: 'Try the demo', exact: true })).toBeVisible();
   await expect(page.locator('.metrics')).not.toBeVisible();
   await expect(page.locator('.messages-list')).not.toBeVisible();

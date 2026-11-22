@@ -4,8 +4,14 @@ import { unzipSync } from 'fflate';
 
 test.use({ locale: 'en-US' });
 
-test('snippet copy and download contain full cleaned code beyond the displayed preview', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+test('snippet copy and download contain full cleaned code beyond the displayed preview', async ({ page }) => {
+  await page.addInitScript(() => {
+    let clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { clipboardText = text; },
+      readText: async () => clipboardText,
+    } });
+  });
   await page.goto('/');
   const secret = 'synthetic_snippet_credential_583192';
   const code = 'const API_KEY="' + secret + '";\n' + '// synthetic code context\n'.repeat(180) + "export const complete = 'FULL_CODE_TAIL';\n";

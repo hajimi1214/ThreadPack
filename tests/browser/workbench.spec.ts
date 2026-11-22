@@ -94,7 +94,14 @@ test('mobile handoff shows its preview and actions without opening the keyboard'
   await expect(page.locator('.handoff-document')).toContainText('Keep the current preview visible.');
 });
 
-test('Markdown reading mode renders GFM while text mode and copy retain source text', async ({ page, context }) => {
+test('Markdown reading mode renders GFM while text mode and copy retain source text', async ({ page }) => {
+  await page.addInitScript(() => {
+    let clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { clipboardText = text; },
+      readText: async () => clipboardText,
+    } });
+  });
   await page.goto('/');
   const source = [
     '# Retry plan', '',
@@ -117,7 +124,6 @@ test('Markdown reading mode renders GFM while text mode and copy retain source t
 
   await page.getByRole('button', { name: 'Text', exact: true }).click();
   await expect(message.locator('.message-content')).toContainText('| Attempt | Result |');
-  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const copy = message.getByRole('button', { name: 'Copy full message', exact: true });
   await copy.click();
   await expect(copy).toHaveAttribute('data-state', 'success');
