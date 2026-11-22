@@ -74,7 +74,7 @@ export interface HandoffOptions {
 }
 
 export type RecentSelectionMode = 'source' | 'timestamp';
-export type OutputLanguage = 'en' | 'zh';
+export type OutputLanguage = 'en' | 'zh' | 'ja' | 'fr' | 'es';
 
 export interface HandoffSummary {
   selectionMode: RecentSelectionMode;

@@ -42,7 +42,7 @@ const en = {
   expand: "Expand preview", collapse: 'Show less', prev: 'Previous', next: 'Next',
   originalWarning: "Original text may contain sensitive data. Long messages and images are shortened in previews.",
   changes: 'CHANGES AT A GLANCE', imagesRemoved: 'images removed', outputsTrimmed: 'outputs clipped', duplicatesRemoved: 'repeats collapsed', secretsRedacted: 'secrets redacted', emailsRedacted: 'emails redacted',
-  export: 'Export transcript', buildHandoff: 'Build a handoff', ready: "Ready to export", exportHint: "Downloads a copy without changing the source file.",
+  export: 'Export transcript', downloadOriginal: 'Download original file', buildHandoff: 'Build a handoff', ready: "Ready to export", exportHint: "Downloads a copy without changing the source file.",
   handoffTitle: "Prepare a handoff.", handoffSub: "Add notes, pinned messages, and recent context.",
   notes: 'The important parts', goal: 'Goal', goalHint: 'What are you trying to achieve?',
   decisions: 'Decisions & completed work', decisionsHint: 'What has been decided or already done?',

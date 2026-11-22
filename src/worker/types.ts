@@ -1,4 +1,4 @@
-import type { Change, CleanOptions, CleanStats, HandoffSummary, Message, RecentSelectionMode, Role } from '../core';
+import type { Change, CleanOptions, CleanStats, HandoffSummary, Message, OutputLanguage, RecentSelectionMode, Role } from '../core';
 
 export interface ConversationInfo { id: string; title: string; source: string; messageCount: number }
 export interface ParseInfo {
@@ -61,8 +61,8 @@ export interface PreviewFilters {
 export interface QueryRequest extends RequestBase, RevisionSelection, PreviewFilters {
   type: 'query'; page: number; pageSize: 30;
 }
-export interface ExportRequest extends RequestBase, RevisionSelection { type: 'export'; format: 'markdown' | 'jsonl' | 'report' }
-export interface ExportExcerptRequest extends RequestBase, RevisionSelection, PreviewFilters { type: 'export-excerpt'; format: 'markdown' | 'jsonl' }
+export interface ExportRequest extends RequestBase, RevisionSelection { type: 'export'; format: 'markdown' | 'jsonl' | 'report'; language?: OutputLanguage }
+export interface ExportExcerptRequest extends RequestBase, RevisionSelection, PreviewFilters { type: 'export-excerpt'; format: 'markdown' | 'jsonl'; language?: OutputLanguage }
 export interface CopyMessageRequest extends RequestBase, RevisionSelection { type: 'copy-message'; messageId: string; mode: 'cleaned' | 'original' }
 export interface CompareMessageRequest extends RequestBase, RevisionSelection { type: 'compare-message'; messageId: string }
 export interface QuerySnippetsRequest extends RequestBase, RevisionSelection, SnippetFilters { type: 'query-snippets'; page: number; pageSize: 20 }
@@ -71,7 +71,7 @@ export interface CopySnippetRequest extends RequestBase, RevisionSelection { typ
 export interface ExportSnippetRequest extends RequestBase, RevisionSelection { type: 'export-snippet'; snippetId: string }
 export interface HandoffRequest extends RequestBase, RevisionSelection {
   type: 'handoff'; notes: HandoffNotes; pinnedIds: string[];
-  recentCount: number; recentMode?: RecentSelectionMode; maxCharacters: number;
+  recentCount: number; recentMode?: RecentSelectionMode; language?: OutputLanguage; maxCharacters: number;
 }
 export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   type: 'export-bundle';
@@ -79,6 +79,7 @@ export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   pinnedIds?: string[];
   recentCount?: number;
   recentMode?: RecentSelectionMode;
+  language?: OutputLanguage;
   maxCharacters?: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }

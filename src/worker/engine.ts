@@ -1,5 +1,6 @@
-import { buildHandoffWithSummary, buildJsonl, buildTranscript, cleanConversation, parseInput, validateCustomSecrets } from '../core';
+import { buildContextBundleReadme, buildFilteredTranscript, buildHandoffWithSummary, buildJsonl, buildTranscript, cleanConversation, outputLabels, parseInput, validateCustomSecrets } from '../core';
 import type { Change, CleanOptions, CleanResult, Conversation, ParsedArchive } from '../core';
+import type { OutputLanguage } from '../core';
 import { extractCodeSnippets } from '../core/snippets';
 import type { CodeSnippet } from '../core/snippets';
 import { searchPattern } from '../preview';
@@ -7,6 +8,7 @@ import { APP_VERSION } from '../version';
 import { buildCodeArchive, codeSnippetFilename, normalizedSnippetLanguage } from './code-archive';
 import { buildContextBundle } from './context-bundle';
 import { extractZipText } from './zip-import';
+import { localizeWarning } from '../../cli/i18n';
 import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
@@ -117,7 +119,7 @@ export class WorkerEngine {
     if (request.type === 'query') return this.query(original, cache, request);
     if (request.type === 'copy-message') return this.copyMessage(original, cache, request);
     if (request.type === 'compare-message') return this.compareMessage(original, cache, request);
-    if (request.type === 'export') return this.export(state.archive, cache, request.format);
+    if (request.type === 'export') return this.export(state.archive, cache, request.format, request.language ?? 'en');
     if (request.type === 'export-excerpt') return this.exportExcerpt(state.archive, original, cache, request);
     if (request.type === 'query-snippets') return this.querySnippets(cache, request);
     if (request.type === 'export-snippets') return this.exportSnippets(state.archive, cache, request);
@@ -280,7 +282,7 @@ export class WorkerEngine {
     const excerpt = { ...cache.result.conversation, messages: cache.result.conversation.messages.filter(message => ids.has(message.id)) };
     const messageCount = excerpt.messages.length;
     const text = request.format === 'markdown'
-      ? `# Filtered excerpt\n\n${messageCount} matching messages · cleaned content\n\n${buildTranscript(excerpt)}`
+      ? buildFilteredTranscript(excerpt, messageCount, request.language ?? 'en')
       : buildJsonl(excerpt);
     const conversationIndex = archive.conversations.findIndex(item => item.id === original.id);
     const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';
@@ -381,21 +383,24 @@ export class WorkerEngine {
     };
   }
 
-  private export(archive: ParsedArchive, cache: CleanCache, format: 'markdown' | 'jsonl' | 'report'): ExportResult {
+  private export(archive: ParsedArchive, cache: CleanCache, format: 'markdown' | 'jsonl' | 'report', language: OutputLanguage): ExportResult {
     const conversation = cache.result.conversation;
     const conversationIndex = archive.conversations.findIndex(item => item.id === conversation.id);
     const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';
     const options = cache.options;
+    const labels = outputLabels(language);
     let text: string;
     let filename: string;
     let mimeType: string;
-    if (format === 'markdown') { text = buildTranscript(conversation); filename = `threadpack-transcript${suffix}.md`; mimeType = 'text/markdown;charset=utf-8'; }
+    if (format === 'markdown') { text = buildTranscript(conversation, language); filename = `threadpack-transcript${suffix}.md`; mimeType = 'text/markdown;charset=utf-8'; }
     else if (format === 'jsonl') { text = buildJsonl(conversation); filename = `threadpack-transcript${suffix}.jsonl`; mimeType = 'application/x-ndjson;charset=utf-8'; }
     else if (format === 'report') {
+      const warnings = [...archive.warnings, ...cache.result.warnings];
       text = JSON.stringify({ tool: 'ThreadPack', version: APP_VERSION, format: archive.format, messageCount: conversation.messages.length, stats: cache.result.stats,
+        warningCount: warnings.length, warnings: warnings.map(warning => localizeWarning(warning, language)),
         options: { stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit, deduplicate: options.deduplicate,
           redact: options.redact, redactEmails: options.redactEmails, customRuleCount: options.customSecrets?.length ?? 0 },
-        scope: 'UTF-8 normalized message text; excludes source metadata. No message text, file paths, or custom redaction values are included in this report.',
+        scope: labels.reportScope,
       }, null, 2);
       filename = `threadpack-report${suffix}.json`; mimeType = 'application/json;charset=utf-8';
     } else throw new Error('Choose a supported export format.');
@@ -414,6 +419,7 @@ export class WorkerEngine {
       pinnedIds: request.pinnedIds,
       recentCount: request.recentCount,
       recentMode: request.recentMode,
+      language: request.language,
       maxCharacters: request.maxCharacters,
     });
   }
@@ -437,33 +443,26 @@ export class WorkerEngine {
     const hasNotes = keys.some(key => notes[key].trim().length > 0);
     const handoff = hasNotes ? this.handoff(cache, {
       id: request.id, type: 'handoff', archiveId: request.archiveId, conversationId: request.conversationId,
-      revision: request.revision, notes, pinnedIds, recentCount, recentMode, maxCharacters,
+      revision: request.revision, notes, pinnedIds, recentCount, recentMode, language: request.language, maxCharacters,
     }).text : undefined;
     const conversation = cache.result.conversation;
     const snippets = cache.snippets ??= extractCodeSnippets(conversation);
     const options = cache.options;
+    const language = request.language ?? 'en';
+    const warnings = [...archive.warnings, ...cache.result.warnings];
     const report = JSON.stringify({
       tool: 'ThreadPack', version: APP_VERSION, format: archive.format,
       messageCount: conversation.messages.length, codeSnippetCount: snippets.length,
       handoffIncluded: hasNotes, stats: cache.result.stats,
+      warningCount: warnings.length, warnings: warnings.map(warning => localizeWarning(warning, language)),
       options: { stripImages: options.stripImages, trimToolOutputs: options.trimToolOutputs, toolLimit: options.toolLimit,
         deduplicate: options.deduplicate, redact: options.redact, redactEmails: options.redactEmails,
         customRuleCount: options.customSecrets?.length ?? 0 },
-      scope: 'Cleaned UTF-8 message text and allowlisted metadata. Original content and custom redaction values are not included.',
+      scope: outputLabels(language).reportScope,
     }, null, 2);
-    const readme = [
-      '# ThreadPack context bundle', '',
-      'A portable context package created locally from a cleaned conversation.', '',
-      '- `transcript.md` — readable cleaned transcript.',
-      '- `messages.jsonl` — normalized cleaned messages, one per line.',
-      '- `cleanup-report.json` — allowlisted counts and cleanup settings.',
-      ...(hasNotes ? ['- `handoff.md` — notes, pinned context, and recent context.'] : []),
-      ...(snippets.length ? [`- code/ — ${snippets.length} cleaned code file(s).`] : []), '',
-      'Review the files before sharing. The original conversation and custom redaction values are not included.', '',
-      'Generated locally with ThreadPack.', '',
-    ].join('\n');
+    const readme = buildContextBundleReadme(language, hasNotes, snippets.length);
     const bytes = buildContextBundle(conversation, snippets, {
-      transcript: buildTranscript(conversation), messages: buildJsonl(conversation), report, readme, handoff,
+      transcript: buildTranscript(conversation, language), messages: buildJsonl(conversation), report, readme, handoff,
     });
     const conversationIndex = archive.conversations.findIndex(item => item.id === conversation.id);
     const suffix = archive.conversations.length > 1 ? `-${Math.max(0, conversationIndex) + 1}` : '';

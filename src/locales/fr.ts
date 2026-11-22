@@ -102,6 +102,7 @@ const fr: Record<TranslationKey, string> = {
   secretsRedacted: 'secrets masqués',
   emailsRedacted: 'e-mails masqués',
   export: 'Exporter la conversation',
+  downloadOriginal: 'Télécharger le fichier d’origine',
   buildHandoff: 'Préparer la reprise',
   ready: "Prêt à exporter",
   exportHint: "Télécharge une copie sans modifier le fichier source.",

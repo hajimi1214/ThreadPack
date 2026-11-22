@@ -9,7 +9,7 @@ import {
   parseInput, cleanConversation, DEFAULT_OPTIONS, validateCustomSecrets,
   buildTranscript, buildJsonl, buildHandoffWithSummary,
 } from '../src/core/index';
-import { HELP_ZH, localizeDiagnostic, localizeWarning } from './i18n';
+import { localizeDiagnostic, localizeSummary, localizeWarning, localizedHelp } from './i18n';
 
 declare const __THREADPACK_VERSION__: string;
 const MAX_BYTES = 100 * 1024 * 1024;
@@ -32,7 +32,7 @@ Options:
   --notes-file <file>                    JSON handoff notes (each field up to 12000 characters)
   --pin <N>                              Pin message number N in the selected conversation (repeatable)
   --original-out <file>                  Save an unmodified copy of the original input
-  --language <en|zh>                     CLI text language (default: en)
+  --language <en|zh|ja|fr|es>            CLI text language (default: en)
   --keep-images                          Keep inline image payloads
   --keep-tool-outputs                    Keep full tool output text
   --keep-duplicates                      Keep repeated tool outputs
@@ -51,7 +51,7 @@ with --no-redact. Input, cleaned output, original copy, notes, and redaction fil
 must be different files, including aliases.
 Email addresses are redacted by default; --no-redact-emails preserves them.
 The original copy preserves the input bytes. --force replaces both output files.
---language zh localizes Markdown labels, warnings, and CLI diagnostics.
+--language selects English, Chinese, Japanese, French, or Spanish for reader-facing CLI output.
 Source files are never overwritten. Exports are portable copies, not native sessions.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 `;
@@ -170,7 +170,7 @@ function requestedLanguage(arguments_: string[]): OutputLanguage {
   for (let index = 0; index < arguments_.length; index++) {
     const argument = arguments_[index]!;
     const value = argument === '--language' ? arguments_[index + 1] : argument.startsWith('--language=') ? argument.slice('--language='.length) : undefined;
-    if (value === 'zh' || value === 'en') return value;
+    if (value === 'en' || value === 'zh' || value === 'ja' || value === 'fr' || value === 'es') return value;
   }
   return 'en';
 }
@@ -199,10 +199,17 @@ async function main() {
   }
 
   const values = args.values;
-  if (values.help) { process.stdout.write(values.language === 'zh' ? HELP_ZH : HELP); return; }
+  if (values.help) {
+    const helpLanguage = values.language === 'en' || values.language === 'zh' || values.language === 'ja' || values.language === 'fr' || values.language === 'es'
+      ? values.language : 'en';
+    process.stdout.write(localizedHelp(helpLanguage, HELP));
+    return;
+  }
   if (values.version) { process.stdout.write(`${__THREADPACK_VERSION__}\n`); return; }
   const language = values.language === undefined ? 'en' : values.language;
-  if (language !== 'en' && language !== 'zh') throw new CliError('--language must be en or zh.');
+  if (language !== 'en' && language !== 'zh' && language !== 'ja' && language !== 'fr' && language !== 'es') {
+    throw new CliError('--language must be en, zh, ja, fr, or es.');
+  }
   diagnosticLanguage = language;
   if (values['redact-emails'] && values['no-redact-emails']) {
     throw new CliError('Choose either --redact-emails or --no-redact-emails, not both.');
@@ -354,27 +361,17 @@ async function main() {
     warningCount: archive.warnings.length + result.warnings.length,
     warnings: localizedWarnings,
     handoff: { ...handoff!.summary },
-    note: language === 'zh'
-      ? '统计描述标准化后的消息文本。不包含对话正文或检测到的秘密值。'
-      : 'Statistics describe normalized message text. No transcript or detected secret values are included.',
+    note: localizeSummary(language, result.stats, result.conversation.messages.length).reportNote,
   }, null, 2);
   else rendered = buildTranscript(result.conversation, language);
 
   await writeOutput(output, rendered, Boolean(values.force));
 
-  if (language === 'zh') {
-    process.stderr.write(`ThreadPack：已导出 ${result.conversation.messages.length} 条消息；消息文本 ${result.stats.beforeBytes} → ${result.stats.afterBytes} 字节。\n`);
-    process.stderr.write(`变更：移除图片 ${result.stats.imagesRemoved} 张，裁剪工具输出 ${result.stats.outputsTrimmed} 条，合并重复项 ${result.stats.duplicatesRemoved} 条，隐藏秘密 ${result.stats.secretsRedacted} 处、邮箱 ${result.stats.emailsRedacted} 处、自定义值 ${result.stats.customRedacted} 处。\n`);
-    process.stderr.write(`脱敏：命中自定义规则 ${result.stats.customRuleMatches} 次；总替换区间 ${result.stats.redactionReplacements} 处（重叠命中已合并）。\n`);
-  } else {
-    process.stderr.write(`ThreadPack: exported ${result.conversation.messages.length} messages; ${result.stats.beforeBytes} → ${result.stats.afterBytes} bytes of message text.\n`);
-    process.stderr.write(`Changes: ${result.stats.imagesRemoved} images, ${result.stats.outputsTrimmed} trimmed outputs, ${result.stats.duplicatesRemoved} duplicates, ${result.stats.secretsRedacted} secrets, ${result.stats.emailsRedacted} emails, ${result.stats.customRedacted} custom replacements.\n`);
-    process.stderr.write(`Redaction: ${result.stats.customRuleMatches} custom rule matches; ${result.stats.redactionReplacements} replacement spans in total (overlapping matches are merged).\n`);
-  }
+  const summary = localizeSummary(language, result.stats, result.conversation.messages.length);
+  process.stderr.write(`${summary.exported}\n${summary.changes}\n${summary.redaction}\n`);
   if (warnings.length) {
-    process.stderr.write(language === 'zh' ? `需要检查：${warnings.length} 条解析/清理警告。\n` : `Review needed: ${warnings.length} parser/cleaner warnings.\n`);
-    const warningLabel = language === 'zh' ? '警告：' : 'Warning:';
-    for (const warning of localizedWarnings) process.stderr.write(`${warningLabel} ${warning}\n`);
+    process.stderr.write(`${summary.warningCount(warnings.length)}\n`);
+    for (const warning of localizedWarnings) process.stderr.write(`${summary.warning} ${warning}\n`);
   }
 }
 

@@ -45,7 +45,7 @@ const ja: Record<TranslationKey, string> = {
   expand: "プレビューを展開", collapse: '折りたたむ', prev: '前へ', next: '次へ',
   originalWarning: "元のテキストには機密情報が含まれる場合があります。長文と画像はプレビューで短縮されます。",
   changes: '変更内容', imagesRemoved: '枚の画像を削除', outputsTrimmed: '件の出力を短縮', duplicatesRemoved: '件の重複を整理', secretsRedacted: '件の認証情報を非表示', emailsRedacted: '件のメールアドレスを非表示',
-  export: '会話を書き出す', buildHandoff: '引き継ぎを作成', ready: "書き出し可能", exportHint: "元のファイルを変更せず、コピーを保存します。",
+  export: '会話を書き出す', downloadOriginal: '元のファイルをダウンロード', buildHandoff: '引き継ぎを作成', ready: "書き出し可能", exportHint: "元のファイルを変更せず、コピーを保存します。",
   handoffTitle: "引き継ぎ内容をまとめる。", handoffSub: "メモ、ピン留めしたメッセージ、最近の会話を追加します。",
   notes: '引き継ぐポイント', goal: '目標', goalHint: '何を達成したいですか？',
   decisions: '決定事項と完了した作業', decisionsHint: '何を決め、どこまで完了していますか？',

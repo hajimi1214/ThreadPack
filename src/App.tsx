@@ -12,6 +12,7 @@ import { useWorkerClient } from './hooks/useWorkerClient';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { isRedactionDraftDirty } from './redaction-draft';
 import { applyCleanupRecipe, identifyCleanupRecipe } from './cleanup-recipes';
+import { localizeDiagnostic, localizeWarning } from '../cli/i18n';
 import MessageCard from './components/MessageCard';
 import LandingShowcase from './components/LandingShowcase';
 import CommandMenu from './components/CommandMenu';
@@ -95,6 +96,7 @@ export default function App() {
   const [dialog, setDialog] = useState<'help' | 'paste' | 'export' | 'excerpt' | 'compare' | 'commands' | 'snippets' | null>(null);
   const [shareState, setShareState] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [archive, setArchive] = useState<ParseInfo | null>(null);
+  const [originalSource, setOriginalSource] = useState<{ blob: Blob; name: string } | null>(null);
   const [selected, setSelected] = useState('');
   const [processed, setProcessed] = useState<(CleanSummary & { generation: number; optionsKey: string }) | null>(null);
   const [preview, setPreview] = useState<QueryResult | null>(null);
@@ -154,13 +156,14 @@ export default function App() {
   const optionsKey = JSON.stringify(options);
   const customDirty = isRedactionDraftDirty(customText, options.customSecrets);
   const currentConversation = archive?.conversations.find(c => c.id === selected);
+  const visibleWarnings = [...(archive?.warnings ?? []), ...(processed?.warnings ?? [])];
   const handoffTimeRange = handoffSummaryTimeRange(handoffSummary?.timeRange, lang, t.noTimeRange);
   const activeRecipe = identifyCleanupRecipe(options);
   const activeRecipeHint: TranslationKey = activeRecipe === 'share-safe' ? 'shareSafeRecipeHint'
     : activeRecipe === 'keep-text' ? 'keepTextRecipeHint' : activeRecipe === 'balanced' ? 'balancedRecipeHint' : 'customRecipeHint';
   const queryPinnedIds = pinnedOnly ? pins : NO_PIN_FILTER;
   const readingPositionKey = archive ? JSON.stringify([archive.archiveId, selected, mode, deferredQuery, filter, changedOnly, pinnedOnly, pinnedOnly ? [...pins].sort() : [], page]) : '';
-  const actionContext = JSON.stringify([archive?.archiveId, selected, processed?.revision, mode, customDirty, optionsKey]);
+  const actionContext = JSON.stringify([archive?.archiveId, selected, processed?.revision, mode, customDirty, optionsKey, lang]);
   const actionContextRef = useRef(actionContext);
   actionContextRef.current = actionContext;
   const handoffCopyContext = JSON.stringify([actionContext, handoffText, notes, recent, recentMode, budget]);
@@ -250,32 +253,33 @@ export default function App() {
     setHandoffError(false);
     const timer = setTimeout(() => {
       request<HandoffResult>({ type: 'handoff', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-        notes, pinnedIds: pins, recentCount: recent, recentMode, maxCharacters: budget }).then(data => {
+        notes, pinnedIds: pins, recentCount: recent, recentMode, language: lang, maxCharacters: budget }).then(data => {
         if (active && processed.generation === cleanupGeneration.current) { setHandoffText(data.text); setHandoffSummary(data.summary); setHandoffBusy(false); setHandoffError(false); }
       }).catch(err => { if (active && processed.generation === cleanupGeneration.current && err.message !== 'Cancelled') { setError(err.message); setHandoffBusy(false); setHandoffError(true); } });
     }, 120);
     return () => { active = false; clearTimeout(timer); };
-  }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, recentMode, budget, request]);
+  }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, recentMode, budget, lang, request]);
 
   async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
     ++exportGeneration.current; exportLock.current = false; setExporting(false); setExportFormat(null);
     if (dialog === 'compare') closeMessageReview();
     else if (dialog === 'commands' || dialog === 'excerpt' || dialog === 'snippets') setDialog(null);
     const generation = ++importGeneration.current;
-    if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError(t.tooLarge); setImporting(false); return; }
+    if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError('This file exceeds the 100 MiB limit. Split it into smaller exports first.'); setImporting(false); return; }
     setImporting(true); setImportProgress(null); setError('');
     try {
       const result = await request<ParseInfo>({ type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current,
         ...content, filename: name }, progress => { if (generation === importGeneration.current) setImportProgress(progress); });
       if (generation !== importGeneration.current) return;
-      if (!result.conversations.length) throw new Error(t.noConversation);
+      if (!result.conversations.length) throw new Error('This conversation contains no usable messages.');
       activeArchiveId.current = result.archiveId;
+      setOriginalSource({ blob: content.file ?? new Blob([content.text ?? ''], { type: 'text/plain;charset=utf-8' }), name });
       setArchive(result); setSelected(result.conversations[0].id); setProcessed(null); setPreview(null);
       readingPositions.current.clear();
       setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
       setFilename(name); setDemo(isDemo); clearDrafts(); setQuery(''); setFilter('all'); setMode('cleaned'); setPage(0);
       setSettingsOpen(false); setView('workbench'); setDialog(null); setPasteText(''); setHandoffCopyState('idle'); window.scrollTo({ top: 0 });
-    } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setError(err instanceof Error ? err.message : t.errorTitle); }
+    } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setError(err instanceof Error ? err.message : 'Could not open this conversation.'); }
     finally { if (generation === importGeneration.current) { setImporting(false); setImportProgress(null); } }
   }
   function importArchive(name: string, content: { text?: string; file?: File }, isDemo = false) {
@@ -293,7 +297,7 @@ export default function App() {
     ++messageReviewGeneration.current; setMessageReview(null); setReviewBusy(false);
     activeArchiveId.current = null; ++importGeneration.current; ++cleanupGeneration.current; stopWorker();
     setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
-    setArchive(null); setProcessed(null); setPreview(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText('');
+    setArchive(null); setOriginalSource(null); setProcessed(null); setPreview(null); setSelected(''); setFilename(''); clearDrafts(); setQuery(''); setPasteText('');
     setError(''); setBusy(false); setImporting(false); setImportProgress(null); setQuerying(false); setExporting(false); setHandoffBusy(false);
     setHandoffText(''); setDemo(false); setView('workbench'); setSettingsOpen(false); setDialog(null); setExportFormat(null); setHandoffCopyState('idle'); notify(t.cleared);
     readingPositions.current.clear();
@@ -346,6 +350,10 @@ export default function App() {
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; document.body.append(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500); notify(t.downloaded);
   }
+  function downloadOriginalSource() {
+    if (!originalSource) return;
+    download(originalSource.blob, originalSource.name, originalSource.blob.type || 'application/octet-stream');
+  }
   async function exportFile(format: 'markdown' | 'jsonl' | 'report' | 'bundle', excerpt = false) {
     if (!archive || !processed || working || customDirty || exportLock.current || excerpt && (format === 'report' || format === 'bundle' || !preview?.total)) return;
     const generation = importGeneration.current;
@@ -355,14 +363,14 @@ export default function App() {
     try {
       const result = excerpt
         ? await request<ExcerptExportResult>({ type: 'export-excerpt', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-          format, mode, query: deferredQuery, role: filter, changedOnly, pinnedOnly, pinnedIds: queryPinnedIds })
+          format, language: lang, mode, query: deferredQuery, role: filter, changedOnly, pinnedOnly, pinnedIds: queryPinnedIds })
         : format === 'bundle'
           ? await request<ContextBundleResult>({ type: 'export-bundle', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision,
-            notes, pinnedIds: pins, recentCount: recent, recentMode, maxCharacters: budget })
-          : await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format });
+            notes, pinnedIds: pins, recentCount: recent, recentMode, language: lang, maxCharacters: budget })
+          : await request<ExportResult>({ type: 'export', archiveId: archive.archiveId, conversationId: selected, revision: processed.revision, format, language: lang });
       if (operation !== exportGeneration.current || generation !== importGeneration.current || context !== actionContextRef.current) return;
       download(result.buffer, result.filename, result.mimeType); setDialog(null);
-    } catch (err) { if (operation === exportGeneration.current && generation === importGeneration.current && (err as Error).message !== 'Cancelled') { setError(t.exportFailed); setDialog(null); } }
+    } catch (err) { if (operation === exportGeneration.current && generation === importGeneration.current && (err as Error).message !== 'Cancelled') { setError('Export failed. Please try again.'); setDialog(null); } }
     finally { if (operation === exportGeneration.current) { exportLock.current = false; setExporting(false); setExportFormat(null); } }
   }
   async function copyHandoff() {
@@ -405,7 +413,7 @@ export default function App() {
       if (generation !== importGeneration.current || reviewGeneration !== messageReviewGeneration.current || processed.generation !== cleanupGeneration.current) return;
       setMessageReview({ messageId, result });
     } catch (err) {
-      if (generation === importGeneration.current && reviewGeneration === messageReviewGeneration.current && (err as Error).message !== 'Cancelled') { setError(t.comparisonFailed); setDialog(null); }
+      if (generation === importGeneration.current && reviewGeneration === messageReviewGeneration.current && (err as Error).message !== 'Cancelled') { setError('Could not load the comparison. Please try again.'); setDialog(null); }
     } finally { if (generation === importGeneration.current && reviewGeneration === messageReviewGeneration.current) setReviewBusy(false); }
   }
   function closeMessageReview() {
@@ -497,7 +505,7 @@ export default function App() {
       <div className="workbench-surface"><div className="workspace-kicker"><span /><strong>{view === 'handoff' ? t.handoff : t.workbench}</strong><span>{t.privacy}</span></div>
       <div className="privacy-strip"><span><LockKeyhole size={13} /><strong>{t.local}</strong></span><span className="privacy-formats">{t.supported}</span></div>
 
-      {error && <div className="error-banner" role="alert"><div><strong>{t.errorTitle}</strong><p>{error}</p></div><button className="icon-button" aria-label={t.close} onClick={() => setError('')}><X size={17} /></button></div>}
+      {error && <div className="error-banner" role="alert"><div><strong>{t.errorTitle}</strong><p>{localizeDiagnostic(error, lang)}</p></div><button className="icon-button" aria-label={t.close} onClick={() => setError('')}><X size={17} /></button></div>}
 
       <section className={`import-panel ${archive ? 'has-file' : ''}`}>
         <input ref={input} type="file" tabIndex={-1} accept=".zip,.jsonl,.ndjson,.json,.md,.txt,.log" aria-label={t.import} className="file-input" onChange={e => { const f = e.target.files?.[0]; if (f) void openFile(f); e.target.value = ''; }} />
@@ -506,7 +514,7 @@ export default function App() {
 
       {importing && <div className="import-loading" role="status"><div className="import-progress"><strong><LoaderCircle size={17} className="spin" />{importProgress && importProgress.loaded < importProgress.total ? t.readingFile : t.parsingFile}</strong>{importProgress && <><progress max={Math.max(1, importProgress.total)} value={importProgress.loaded} /><small>{bytes(importProgress.loaded)} / {bytes(importProgress.total)}</small></>}</div><button className="button secondary small" onClick={clear}>{t.cancelImport}</button></div>}
 
-      {archive?.warnings.length ? <details className="warnings"><summary>{t.warnings} <span>{archive.warnings.length}</span></summary><ul>{archive.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></details> : null}
+      {visibleWarnings.length ? <details className="warnings"><summary>{t.warnings} <span>{visibleWarnings.length}</span></summary><ul>{visibleWarnings.map((warning, i) => <li key={i}>{localizeWarning(warning, lang)}</li>)}</ul></details> : null}
 
       {archive && <section className="metrics" aria-label={t.payloadHint}>
         <div className="metric"><div className="metric-title">{t.sourceSize}<FileText size={14} /></div><strong>{stats ? bytes(stats.beforeBytes) : '—'}</strong><small>{t.payloadHint}</small></div>
@@ -575,7 +583,23 @@ export default function App() {
         </section>
       </div>}
 
-      {archive && <section className="export-bar">{customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}<div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div><div className="export-actions">{view === 'handoff' ? <><button className="button secondary handoff-copy" aria-label={t.copy} aria-busy={handoffCopyState === 'pending'} data-state={handoffCopyState} disabled={working || customDirty || handoffBusy || !handoffText || handoffCopyState === 'pending'} onClick={() => void copyHandoff()}>{handoffCopyState === 'pending' ? <LoaderCircle size={15} className="spin" /> : handoffCopyState === 'success' ? <Check size={15} /> : handoffCopyState === 'error' ? <AlertCircle size={15} /> : <Clipboard size={15} />}{handoffCopyState === 'pending' ? t.copying : handoffCopyState === 'success' ? t.copied : t.copy}</button><button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button></> : <><button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button><button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button></>}</div></section>}
+      {archive && <section className="export-bar">
+        {customDirty && <div className="pending-redactions" role="status"><div><strong>{t.unappliedRules}</strong><small>{t.unappliedHint}</small></div><button className="button secondary small" onClick={applyCustomRules}>{t.applyCustom}</button></div>}
+        <div className="export-copy"><span className="ready-mark"><Check size={19} /></span><div><strong>{view === 'handoff' ? t.handoffPreview : t.ready}</strong><small>{view === 'handoff' ? t.handoffNote : t.exportHint}</small></div></div>
+        <div className="export-actions">
+          {view === 'handoff' ? <>
+            <button className="button secondary handoff-copy" aria-label={t.copy} aria-busy={handoffCopyState === 'pending'} data-state={handoffCopyState} disabled={working || customDirty || handoffBusy || !handoffText || handoffCopyState === 'pending'} onClick={() => void copyHandoff()}>
+              {handoffCopyState === 'pending' ? <LoaderCircle size={15} className="spin" /> : handoffCopyState === 'success' ? <Check size={15} /> : handoffCopyState === 'error' ? <AlertCircle size={15} /> : <Clipboard size={15} />}
+              {handoffCopyState === 'pending' ? t.copying : handoffCopyState === 'success' ? t.copied : handoffCopyState === 'error' ? t.copyFailed : t.copy}
+            </button>
+            <button className="button primary" disabled={working || customDirty || handoffBusy || !handoffText} onClick={() => download(handoffText, 'threadpack-handoff.md', 'text/markdown;charset=utf-8')}><ArrowDownToLine size={16} />{t.downloadHandoff}</button>
+          </> : <>
+            <button className="button secondary" disabled={working || !processed} onClick={() => navigate('handoff')}>{t.buildHandoff}<ArrowUpRight size={15} /></button>
+            <button className="button primary" disabled={working || customDirty || !processed} onClick={() => setDialog('export')}><ArrowDownToLine size={16} />{t.export}</button>
+          </>}
+          <button className="button secondary" disabled={!originalSource} onClick={downloadOriginalSource}><Download size={15} />{t.downloadOriginal}</button>
+        </div>
+      </section>}
 
       {!archive && !importing && <><LandingShowcase t={t} onDemo={() => void openText(createDemo(), 'checkout-session.jsonl', true)} onShare={() => void shareProject()} sharing={shareState === 'pending'} shared={shareState === 'success'} /><section className="import-guide-card" aria-labelledby="import-guide-heading"><div><h2 id="import-guide-heading">{t.guideTitle}</h2><p>{t.guideCodex}</p><p>{t.guideChatgpt}</p><p>{t.guideText}</p></div><a className="button secondary small" href="https://hajimi1214.github.io/ThreadPack/import-guide.html" target="_blank" rel="noopener noreferrer">{t.guideLink}<ArrowUpRight size={14} /></a></section><div className="empty-formats landing-formats"><span><Terminal size={13} />Codex & Claude Code</span><span><FileJson size={13} />ChatGPT & Claude</span><span><FileText size={13} />Markdown & text</span></div></>}
       </div>

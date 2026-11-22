@@ -41,7 +41,7 @@ const zh: Record<TranslationKey, string> = {
   expand: "展开预览", collapse: '收起', prev: '上一页', next: '下一页',
   originalWarning: "原始文本可能包含敏感信息。长消息和图片在预览中会被缩短。",
   changes: '本次清理', imagesRemoved: '张图片已移除', outputsTrimmed: '条输出已裁剪', duplicatesRemoved: '条重复已合并', secretsRedacted: '处密钥已隐藏', emailsRedacted: '处邮箱已隐藏',
-  export: '导出对话', buildHandoff: '生成交接包', ready: "可以导出", exportHint: "下载副本，不修改原始文件。",
+  export: '导出对话', downloadOriginal: '下载原始文件', buildHandoff: '生成交接包', ready: "可以导出", exportHint: "下载副本，不修改原始文件。",
   handoffTitle: "整理交接内容。", handoffSub: "加入笔记、固定消息和最近的对话。",
   notes: '重要的事情', goal: '目标', goalHint: '你要完成什么？',
   decisions: '已决定与已完成', decisionsHint: '做过哪些决定？已经完成了什么？',

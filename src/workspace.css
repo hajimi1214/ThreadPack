@@ -153,8 +153,8 @@ main.loaded .metric-saved .metric-title, main.loaded .metric-saved > small { col
   .settings-toggle > svg:last-child { margin-left: auto; }
   .has-archive .preview-panel { flex: 1; min-height: 0; }
   .has-archive .export-copy { display: none; }
-  .has-archive .export-actions { display: flex; width: 100%; gap: 8px; }
-  .has-archive .export-actions > .button { flex: 1; }
+  .has-archive .export-actions { display: flex; flex-wrap: wrap; width: 100%; gap: 8px; }
+  .has-archive .export-actions > .button { flex: 1 1 120px; min-width: 0; }
   .has-archive .handoff-grid { display: block; overflow: auto; }
   .has-archive .notes-panel { height: auto; display: block; overflow: visible; margin-bottom: 12px; }
   .has-archive .notes-body { display: block; overflow: visible; }
