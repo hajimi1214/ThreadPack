@@ -51,7 +51,7 @@ with --no-redact. Input, cleaned output, original copy, notes, and redaction fil
 must be different files, including aliases.
 Email addresses are redacted by default; --no-redact-emails preserves them.
 The original copy preserves the input bytes. --force replaces both output files.
---language selects English, Chinese, Japanese, French, or Spanish for reader-facing CLI output.
+--language selects English, Chinese, Japanese, French, or Spanish for reader-facing CLI output, reports, and handoffs.
 Source files are never overwritten. Exports are portable copies, not native sessions.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 `;

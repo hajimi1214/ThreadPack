@@ -185,7 +185,7 @@ Timestamp selection chooses the most recently dated messages with valid timestam
 
 When the text budget is tight, ThreadPack reserves space for message structure and excerpt markers, then distributes the remaining context space across multiple recent messages. Short messages use only the space they need, which leaves more room for longer excerpts. Messages that cannot fit even a useful marked excerpt are listed as omitted. This remains deterministic excerpting rather than semantic compression.
 
-The CLI defaults to English. `--language` selects English, Chinese, Japanese, French, or Spanish for reader-facing Markdown headings, handoff labels, warnings, and diagnostics. JSON property names, message roles, and machine aliases such as `[SECRET_1]` remain unchanged.
+The CLI defaults to English. `--language` selects English, Chinese, Japanese, French, or Spanish for reader-facing Markdown headings, filtered excerpts, handoffs, report notes and warnings, context-bundle documents, and diagnostics. JSON property names, message roles, report option names, and machine aliases such as `[SECRET_1]` remain unchanged.
 
 For handoffs, `--notes-file` accepts `goal`, `decisions`, `constraints`, and `nextSteps` strings. Each field is limited to 12000 characters and the JSON file to 256 KiB. Notes use the same enabled built-in, email, and custom redaction rules as the conversation, with independent `[NOTE_SECRET_n]`, `[NOTE_EMAIL_n]`, and `[NOTE_CUSTOM_n]` aliases. Repeat `--pin N` to include messages by their 1-based order in the original selected conversation. Notes and pins can also be passed with `--format report` to calculate its handoff summary without including note text.
 

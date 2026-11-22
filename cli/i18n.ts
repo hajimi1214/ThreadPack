@@ -3,7 +3,6 @@ import type { CleanStats, OutputLanguage } from '../src/core';
 export const HELP_ZH = `ThreadPack — 携带 AI 对话中的重要内容。
 
 用法：threadpack <input.jsonl|json|md|txt|-> --out <file> [选项]
-  --language <en|zh|ja|fr|es>              CLI 输出语言（默认 en）
 
 选项：
   --format <markdown|jsonl|handoff|report>  导出格式（默认 markdown）
@@ -27,6 +26,7 @@ export const HELP_ZH = `ThreadPack — 携带 AI 对话中的重要内容。
   --version                                显示版本
 
 输入为 '-' 时从 stdin 读取 UTF-8 内容，输入上限为 100 MiB。
+--language 也会本地化 Markdown、交接包、报告说明和警告。
 默认启用严格邮箱脱敏；使用 --no-redact-emails 可保留邮箱。
 笔记、规则、原始副本、清理输出和输入文件必须互不相同。
 原始副本按输入字节保存，输入文件不会被修改。
@@ -133,8 +133,6 @@ export function localizedHelp(language: OutputLanguage, english: string): string
 const DIAGNOSTICS_ZH: Record<string, string> = {
   'This file exceeds the 100 MiB limit. Split it into smaller exports first.': '文件超过 100 MiB 限制，请先拆分为较小的导出文件。',
   'This conversation contains no usable messages.': '此文件中没有可用的对话消息。',
-  'Export failed. Please try again.': '导出失败，请重试。',
-  'Could not load the comparison. Please try again.': '无法加载消息对比，请重试。',
   'Input exceeds the 100 MiB limit.': '输入超过 100 MiB 限制。',
   'The redaction file must be a regular UTF-8 file.': '脱敏规则文件必须是普通 UTF-8 文件。',
   'The redaction file exceeds the 64 KiB limit.': '脱敏规则文件超过 64 KiB 限制。',
