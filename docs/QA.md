@@ -7,6 +7,7 @@
 - Versioned session JSONL retains the phase-two provenance and structured session data. Worker tests confirm project snapshots are generated from original conversation data, before cleanup redactions.
 - Backup export and restore cover multiple revisions, project records, source metadata, SHA-256 verification, ordered records, staging cleanup on failure, and restoration as a separate project.
 - Project-specific coverage includes persistence across reloads, duplicate imports, all-version content search, historical revision restore, backup round trip, corruption rejection, project isolation and deletion, ChatGPT inactive-branch preservation, narrow-screen fit, and operation when IndexedDB is disabled.
+- Unchanged re-imports refresh the source filename on both the session metadata and current revision while retaining one immutable revision; the browser test verifies the resulting portable backup fields.
 - Final Chromium browser regression: 80 tests passed with one worker. All five project-library browser tests passed in Chromium and WebKit. Core and CLI tests: 181 passed. `npm run build` and `npm pack --dry-run` succeeded, and `npm audit --omit=dev` reported zero vulnerabilities.
 - Firefox and Linux were not validated in this run. The installed Firefox binary could not launch on this Windows host because Windows reported a Side-by-Side configuration error before the tests started. No Linux runner was available locally.
 

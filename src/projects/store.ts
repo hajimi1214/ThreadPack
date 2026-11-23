@@ -308,8 +308,28 @@ async function storeSession(projectId: string, input: ProjectSessionInput, finge
     const previous = await idbRequest<ProjectSessionRecord | undefined>(sessions.index('projectSessionKey').get(sessionRecordKey(projectId, sessionKey)));
     const now = Date.now();
     if (previous?.fingerprint === fingerprint) {
+      previous.title = input.title;
+      previous.sourceName = input.sourceName;
+      previous.platform = input.platform;
+      previous.format = input.format;
+      previous.messageCount = input.messageCount;
+      if (input.sourceId) previous.sourceId = input.sourceId;
+      else delete previous.sourceId;
       previous.updatedAt = now;
       sessions.put(previous);
+      const currentRevision = await idbRequest<RevisionRecord | undefined>(
+        revisions.get([projectId, previous.id, previous.currentVersion]));
+      if (!currentRevision || currentRevision.fingerprint !== fingerprint) {
+        throw new Error('The current project revision is unavailable. No import changes were saved.');
+      }
+      currentRevision.title = input.title;
+      currentRevision.sourceName = input.sourceName;
+      currentRevision.platform = input.platform;
+      currentRevision.format = input.format;
+      currentRevision.messageCount = input.messageCount;
+      if (input.sourceId) currentRevision.sourceId = input.sourceId;
+      else delete currentRevision.sourceId;
+      revisions.put(currentRevision);
       project.updatedAt = now;
       projects.put(project);
       return { projectId, sessionId: previous.id, version: previous.currentVersion, duplicate: true };

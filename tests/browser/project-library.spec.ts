@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 async function importConversation(page: Page, name: string, content: string) {
   await page.getByLabel('Import file', { exact: true }).setInputFiles({
@@ -91,6 +92,43 @@ test('project history survives reloads, deduplicates imports, restores versions 
   await dialog.locator('.project-session-item').getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page.locator('.file-details > strong')).toHaveText('threadpack-session.jsonl');
   await expect(page.locator('.message-content').first()).toContainText('ORIGINAL_VERSION_ONE_SEARCH_MARKER');
+});
+
+test('unchanged session imports refresh source metadata without adding a revision', async ({ page }) => {
+  await page.goto('/');
+  const source = JSON.stringify({ id: 'stable-metadata-session', title: 'Stable title',
+    messages: [{ id: 'same-message', role: 'user', content: 'Same normalized session body.' }] });
+  const importFile = (name: string) => page.getByLabel('Import file', { exact: true }).setInputFiles({
+    name, mimeType: 'application/json', buffer: Buffer.from(source),
+  });
+  await importFile('initial-export.json');
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+  const dialog = await openProjects(page);
+  await dialog.getByLabel('Project name', { exact: true }).fill('Metadata project');
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await dialog.getByRole('button', { name: /Save current conversation/ }).click();
+  await expect(dialog.locator('.project-session-item')).toContainText('Version 1');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+
+  await importFile('renamed-export.json');
+  await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await dialog.getByRole('button', { name: /Save current conversation/ }).click();
+  await expect(dialog.locator('.project-session-item')).toContainText('Version 1');
+
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await download).path();
+  expect(backupPath).toBeTruthy();
+  const backup = (await readFile(backupPath!, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as {
+    type: string; data: Record<string, unknown>;
+  });
+  const savedSession = backup.find(record => record.type === 'session')!.data;
+  const currentRevision = backup.find(record => record.type === 'revision')!.data;
+  expect(savedSession.sourceName).toBe('renamed-export.json');
+  expect(currentRevision.sourceName).toBe('renamed-export.json');
+  expect(savedSession.currentVersion).toBe(1);
+  expect(backup.filter(record => record.type === 'revision')).toHaveLength(1);
 });
 
 test('project records stay isolated and deleting a project removes its history', async ({ page }) => {
