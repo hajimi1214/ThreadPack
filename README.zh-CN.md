@@ -92,6 +92,12 @@ AI 提取默认关闭。使用时需设置 HTTPS Chat Completions 接口和模�
 
 使用「导出跨 AI 上下文包」可生成包含已选上下文、证据元数据，以及 Codex、Claude Code 和 Gemini 代码工作流入口说明的快照。可将说明文件和上下文文件放入代码仓库，供代码 Agent 读取；也可通过浏览器 AI 工具支持的项目文件功能上传。上下文包不会自动同步，ThreadPack 不宣称已直接连接 ChatGPT 或 Claude 账号。
 
+### 经授权的本地 MCP 桥接
+
+支持本地 stdio MCP 的客户端可以直接读取项目备份，减少复制粘贴。先在浏览器中下载项目备份，再将客户端配置为启动 `threadpack mcp --backup /path/to/project-backup.jsonl`。桥接会在每次请求时重新读取明确指定的备份文件，并提供 `threadpack_project_context` 工具和 `threadpack://project/context` 资源，返回与上下文包相同的证据感知上下文。
+
+桥接只读取配置中指定的文件，不访问浏览器存储、AI 账号、凭据或网络服务。项目变化后需要用户明确重新导出备份。不支持用户配置本地 MCP 进程的 ChatGPT 或 Claude 网页对话无法直接使用此桥接。
+
 ## 安装与使用
 
 ### 浏览器应用

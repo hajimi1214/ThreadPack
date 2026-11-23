@@ -27,6 +27,7 @@
     "offline-first",
     "jsonl",
     "context-management",
+    "mcp",
     "pwa"
   ],
   "engines": {

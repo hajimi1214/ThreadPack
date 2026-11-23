@@ -90,6 +90,12 @@ AI extraction is optional and off by default. To use it, choose an HTTPS Chat Co
 
 Use **Export AI context pack** to create a portable snapshot with the selected context, evidence metadata, and instruction-file entry points for Codex, Claude Code, and Gemini coding workflows. Place the instruction and context files in a repository for coding agents, or upload the context files through a browser tool's supported project controls. The pack does not sync automatically. ThreadPack does not claim direct ChatGPT or Claude account integration.
 
+### Authorized local MCP bridge
+
+Clients that support local stdio MCP can read a project backup without copy-pasting context. Download a project backup from the browser, then configure the client to launch `threadpack mcp --backup /path/to/project-backup.jsonl`. The bridge rereads that explicitly selected backup for each request, exposes `threadpack_project_context` and `threadpack://project/context`, and returns the same evidence-aware context format used by the context pack.
+
+This bridge reads only the file named in its configuration. It does not access browser storage, AI accounts, credentials, or network services. Refresh the backup explicitly after project changes. ChatGPT or Claude web conversations that do not support user-configured local MCP processes cannot use this bridge directly.
+
 ## Installation and usage
 
 ### Browser application

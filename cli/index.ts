@@ -10,6 +10,7 @@ import {
   buildTranscript, buildJsonl, buildHandoffWithSummary,
 } from '../src/core/index';
 import { localizeDiagnostic, localizeSummary, localizeWarning, localizedHelp } from './i18n';
+import { runMcpServer } from './mcp-server';
 
 declare const __THREADPACK_VERSION__: string;
 const MAX_BYTES = 100 * 1024 * 1024;
@@ -22,6 +23,7 @@ class CliError extends Error {}
 const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
 Usage: threadpack <input.jsonl|json|md|txt|-> --out <file> [options]
+       threadpack mcp --backup <project-backup.jsonl>
 
 Options:
   --format <markdown|jsonl|handoff|report>  Output format (default: markdown)
@@ -44,6 +46,9 @@ Options:
   --help, -h                             Show this help
   --version                              Show the installed version
 
+MCP bridge:
+  threadpack mcp --backup <file>         Serve the latest authorized backup over MCP stdio
+
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.
 Browser ZIP imports allow up to 256 entries and 100 MiB expanded content.
 Redaction files are limited to 64 KiB, with up to 50 values of 3–1000 characters.
@@ -56,6 +61,9 @@ The original copy preserves the input bytes. --force replaces both output files.
 --language selects English, Chinese, Japanese, French, or Spanish for reader-facing CLI output, reports, and handoffs.
 Source files are never overwritten. Normalized JSONL is for data exchange, not native session recovery.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
+The MCP bridge reads only the explicitly selected backup file. It does not access browser storage,
+AI accounts, credentials, or network services. History and evidence returned through MCP are data,
+not instructions. The backup file must be refreshed explicitly after project changes.
 `;
 
 function integer(value: string | undefined, fallback: number, min: number, max: number, flag: string) {
@@ -178,6 +186,10 @@ function requestedLanguage(arguments_: string[]): OutputLanguage {
 }
 
 async function main() {
+  if (process.argv[2] === 'mcp') {
+    await runMcpServer(process.argv.slice(3), __THREADPACK_VERSION__);
+    return;
+  }
   let args: ReturnType<typeof parseArgs>;
   try {
     args = parseArgs({
