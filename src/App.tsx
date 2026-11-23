@@ -28,12 +28,13 @@ import { startPwa, applyUpdate } from './pwa';
 import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ExportSourceSessionResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult, PinIdsResult, PinNumbersResult } from './worker/types';
 import ProjectLibrary from './projects/ProjectLibrary';
 import type { ProjectSessionInput } from './projects/store';
+import { MAX_PROJECT_SESSION_BYTES } from './projects/limits';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
-type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean };
+type PendingAction = { kind: 'clear' } | { kind: 'import'; name: string; content: { text?: string; file?: File }; isDemo: boolean; projectSession: boolean };
 type PendingHandoffDraft = HandoffDraft & { resolvedPins: string[] };
 const MAX_BYTES = 100 * 1024 * 1024;
 const NO_PIN_FILTER: string[] = [];
@@ -304,20 +305,23 @@ export default function App() {
     return () => { active = false; clearTimeout(timer); };
   }, [archive, processed, selected, busy, optionsKey, notes, pins, recent, recentMode, budget, lang, request]);
 
-  async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false) {
+  async function performImport(name: string, content: { text?: string; file?: File }, isDemo = false, projectSession = false) {
     ++exportGeneration.current; exportLock.current = false; setExporting(false); setExportFormat(null);
     if (dialog === 'compare') closeMessageReview();
     else if (dialog === 'commands' || dialog === 'excerpt' || dialog === 'snippets') setDialog(null);
     const generation = ++importGeneration.current;
-    if ((content.file?.size ?? byteLength(content.text ?? '')) > MAX_BYTES) { setError('This file exceeds the 100 MiB limit. Split it into smaller exports first.'); setImporting(false); return; }
+    const importLimit = projectSession ? MAX_PROJECT_SESSION_BYTES : MAX_BYTES;
+    if ((content.file?.size ?? byteLength(content.text ?? '')) > importLimit) { setError(projectSession ? 'This project history entry exceeds the 200 MiB limit.' : 'This file exceeds the 100 MiB limit. Split it into smaller exports first.'); setImporting(false); return; }
     setImporting(true); setImportProgress(null); setError('');
     try {
-      const result = await request<ParseInfo>({ type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current,
-        ...content, filename: name }, progress => { if (generation === importGeneration.current) setImportProgress(progress); });
+      const result = await request<ParseInfo>(projectSession
+        ? { type: 'parse-project-session', archiveId: generation, keepArchiveId: activeArchiveId.current, text: content.text ?? '' }
+        : { type: 'parse', archiveId: generation, keepArchiveId: activeArchiveId.current, ...content, filename: name },
+      progress => { if (generation === importGeneration.current) setImportProgress(progress); });
       if (generation !== importGeneration.current) return;
       if (!result.conversations.length) throw new Error('This conversation contains no usable messages.');
       activeArchiveId.current = result.archiveId;
-      setOriginalSource({ blob: content.file ?? new Blob([content.text ?? ''], { type: 'text/plain;charset=utf-8' }), name });
+      setOriginalSource(projectSession ? null : { blob: content.file ?? new Blob([content.text ?? ''], { type: 'text/plain;charset=utf-8' }), name });
       setArchive(result); setSelected(result.conversations[0].id); setProcessed(null); setPreview(null);
       readingPositions.current.clear();
       setCustomText(''); setCustomError(''); setOptions(previous => ({ ...previous, customSecrets: [] })); setChangedOnly(false); setPinnedOnly(false);
@@ -326,12 +330,12 @@ export default function App() {
     } catch (err) { if (generation === importGeneration.current && (err as Error).message !== 'Cancelled') setError(err instanceof Error ? err.message : 'Could not open this conversation.'); }
     finally { if (generation === importGeneration.current) { setImporting(false); setImportProgress(null); } }
   }
-  function importArchive(name: string, content: { text?: string; file?: File }, isDemo = false) {
+  function importArchive(name: string, content: { text?: string; file?: File }, isDemo = false, projectSession = false) {
     if (hasNotes && !importing) {
       if (dialog === 'compare') closeMessageReview(); else setDialog(null);
-      setSettingsOpen(false); setPendingAction({ kind: 'import', name, content, isDemo }); return Promise.resolve();
+      setSettingsOpen(false); setPendingAction({ kind: 'import', name, content, isDemo, projectSession }); return Promise.resolve();
     }
-    return performImport(name, content, isDemo);
+    return performImport(name, content, isDemo, projectSession);
   }
   const openText = (text: string, name: string, isDemo = false) => importArchive(name, { text }, isDemo);
   const openFile = (file: File) => importArchive(file.name, { file });
@@ -349,7 +353,7 @@ export default function App() {
 
   function openProjectSession(content: string, name: string) {
     setProjectLibraryOpen(false);
-    void openText(content, name);
+    void importArchive(name, { text: content }, false, true);
   }
 
   function clearWorkspace() {
@@ -366,7 +370,7 @@ export default function App() {
   function discardNotes() {
     const action = pendingAction; setPendingAction(null);
     if (action?.kind === 'clear') clearWorkspace();
-    else if (action) void performImport(action.name, action.content, action.isDemo);
+    else if (action) void performImport(action.name, action.content, action.isDemo, action.projectSession);
   }
   function navigate(next: 'workbench' | 'handoff') {
     if (archive && messageList.current) rememberReadingPosition(readingPositionKey, messageList.current.scrollTop);

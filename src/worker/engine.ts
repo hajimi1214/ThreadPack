@@ -10,7 +10,8 @@ import { buildContextBundle } from './context-bundle';
 import { extractZipText } from './zip-import';
 import { sha256Fingerprint } from '../handoff-draft';
 import { localizeWarning } from '../../cli/i18n';
-import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, ExportSourceSessionResult, HandoffRequest, ImportProgress, ParseInfo, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
+import { MAX_PROJECT_SESSION_BYTES } from '../projects/limits';
+import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, ExportSourceSessionResult, HandoffRequest, ImportProgress, ParseInfo, ParseProjectSessionRequest, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export const MAX_PREVIEW_CHARACTERS = 12000;
@@ -91,6 +92,7 @@ export class WorkerEngine {
     }
     if (!Number.isSafeInteger(request.archiveId) || request.archiveId < 1) throw new Error('A valid archive reference is required. Import the conversation again.');
     if (request.type === 'parse') return this.parse(request, progress);
+    if (request.type === 'parse-project-session') return this.parseProjectSession(request, progress);
     const state = this.archives.get(request.archiveId);
     const original = state?.archive.conversations.find(conversation => conversation.id === request.conversationId);
     if (!state || !original) throw new Error('This conversation is unavailable. Import the conversation again.');
@@ -176,7 +178,33 @@ export class WorkerEngine {
     throw new Error('This operation is not supported.');
   }
 
-  private async parse(request: ParseRequest, progress?: (value: ImportProgress) => void): Promise<ParseInfo> {
+  private async parseProjectSession(request: ParseProjectSessionRequest, progress?: (value: ImportProgress) => void): Promise<ParseInfo> {
+    if (typeof request.text !== 'string') throw new Error('This project history entry is invalid.');
+    const sourceBytes = byteLength(request.text);
+    if (sourceBytes > MAX_PROJECT_SESSION_BYTES) throw new Error('This project history entry exceeds the 200 MiB limit.');
+    const firstLineEnd = request.text.indexOf('\n');
+    const firstLine = request.text.slice(0, firstLineEnd < 0 ? request.text.length : firstLineEnd).replace(/^\uFEFF/, '').trim();
+    let header: unknown;
+    try { header = JSON.parse(firstLine); } catch { throw new Error('This project history entry is invalid.'); }
+    const isSessionHeader = !!header && typeof header === 'object' && !Array.isArray(header)
+      && (header as { type?: unknown }).type === 'threadpack_session'
+      && (header as { version?: unknown }).version === 2;
+    const sessionHeaders = request.text.match(/(?:^|\n)\s*\{\s*"type"\s*:\s*"threadpack_session"\s*,/g);
+    if (sessionHeaders && sessionHeaders.length > 1) throw new Error('This project history entry must contain one session header.');
+    const result = await this.parse({ id: request.id, type: 'parse', archiveId: request.archiveId,
+      keepArchiveId: request.keepArchiveId, filename: 'threadpack-session.jsonl', text: request.text },
+    progress, MAX_PROJECT_SESSION_BYTES, true, sourceBytes);
+    if ((!isSessionHeader && result.format !== 'ThreadPack normalized JSONL' && result.format !== 'Messages JSONL')
+      || (isSessionHeader && result.format !== 'ThreadPack session JSONL')
+      || result.conversations.length !== 1) {
+      this.archives.delete(request.archiveId);
+      throw new Error('This project history entry must contain exactly one conversation.');
+    }
+    return result;
+  }
+
+  private async parse(request: ParseRequest, progress?: (value: ImportProgress) => void,
+    maxBytes = MAX_IMPORT_BYTES, projectSession = false, knownTextBytes?: number): Promise<ParseInfo> {
     const sequence = ++this.parseSequence;
     if (this.archives.has(request.archiveId)) throw new Error('This archive reference is already in use. Start a new import.');
     const checkActive = (): void => { if (sequence !== this.parseSequence) throw new Error(CANCELLED_IMPORT); };
@@ -258,8 +286,8 @@ export class WorkerEngine {
       }
     } else {
       text = request.text ?? '';
-      sourceBytes = byteLength(text);
-      if (sourceBytes > MAX_IMPORT_BYTES) throw new Error('This file exceeds the 100 MiB limit. Split it into smaller exports first.');
+      sourceBytes = knownTextBytes ?? byteLength(text);
+      if (sourceBytes > maxBytes) throw new Error(projectSession ? 'This project history entry exceeds the 200 MiB limit.' : 'This file exceeds the 100 MiB limit. Split it into smaller exports first.');
     }
     checkActive();
     const archive = parseInput(text, parsedFilename, sourceBytes);

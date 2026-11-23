@@ -63,6 +63,9 @@ export interface ParseRequest extends RequestBase {
   type: 'parse'; archiveId: number; keepArchiveId: number | null;
   text?: string; filename?: string; file?: File;
 }
+export interface ParseProjectSessionRequest extends RequestBase {
+  type: 'parse-project-session'; archiveId: number; keepArchiveId: number | null; text: string;
+}
 export interface PinNumbersRequest extends RequestBase, Selection { type: 'pin-numbers'; pinnedIds: string[] }
 export interface PinIdsRequest extends RequestBase, Selection { type: 'pin-ids'; pinnedMessages: { number: number; fingerprint: string }[] }
 export interface CleanRequest extends RequestBase, Selection { type: 'clean'; options: CleanOptions }
@@ -96,7 +99,7 @@ export interface ExportBundleRequest extends RequestBase, RevisionSelection {
   maxCharacters?: number;
 }
 export interface ClearRequest extends RequestBase { type: 'clear' }
-export type WorkerRequest = ParseRequest | PinNumbersRequest | PinIdsRequest | CleanRequest | QueryRequest | ExportRequest | ExportSourceSessionRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
+export type WorkerRequest = ParseRequest | ParseProjectSessionRequest | PinNumbersRequest | PinIdsRequest | CleanRequest | QueryRequest | ExportRequest | ExportSourceSessionRequest | ExportExcerptRequest | CopyMessageRequest | CompareMessageRequest | QuerySnippetsRequest | ExportSnippetsRequest | CopySnippetRequest | ExportSnippetRequest | HandoffRequest | ExportBundleRequest | ClearRequest;
 export type WorkerResult = ParseInfo | PinNumbersResult | PinIdsResult | CleanSummary | QueryResult | SnippetQueryResult | SnippetArchiveResult | ContextBundleResult | ExportResult | ExportSourceSessionResult | ExcerptExportResult | CopyMessageResult | CompareMessageResult | HandoffResult | null;
 export type WorkerResponse = { id: number; data: WorkerResult } | { id: number; error: string } | { id: number; progress: ImportProgress };
-export interface WorkerResultMap { parse: ParseInfo; 'pin-numbers': PinNumbersResult; 'pin-ids': PinIdsResult; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-source-session': ExportSourceSessionResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }
+export interface WorkerResultMap { parse: ParseInfo; 'parse-project-session': ParseInfo; 'pin-numbers': PinNumbersResult; 'pin-ids': PinIdsResult; clean: CleanSummary; query: QueryResult; export: ExportResult; 'export-source-session': ExportSourceSessionResult; 'export-excerpt': ExcerptExportResult; 'copy-message': CopyMessageResult; 'compare-message': CompareMessageResult; 'query-snippets': SnippetQueryResult; 'export-snippets': SnippetArchiveResult; 'copy-snippet': CopyMessageResult; 'export-snippet': ExportResult; handoff: HandoffResult; 'export-bundle': ContextBundleResult; clear: null }

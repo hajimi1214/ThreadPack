@@ -2,11 +2,11 @@ import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
 import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, ProjectMemoryFact, ProjectMemoryInput, TaskState } from './memory-types';
+import { MAX_PROJECT_SESSION_BYTES } from './limits';
 
 const DATABASE_NAME = 'threadpack-project-library';
 const DATABASE_VERSION = 2;
 const RESTORE_STALE_AFTER = 24 * 60 * 60 * 1000;
-const MAX_REVISION_BYTES = 200 * 1024 * 1024;
 const encoder = new TextEncoder();
 
 export interface ProjectRecord {
@@ -213,7 +213,7 @@ function normalizeName(name: string): string {
 
 function validateSessionInput(input: ProjectSessionInput): void {
   if (!input || typeof input !== 'object' || typeof input.content !== 'string'
-    || encoder.encode(input.content).byteLength > MAX_REVISION_BYTES
+    || encoder.encode(input.content).byteLength > MAX_PROJECT_SESSION_BYTES
     || typeof input.title !== 'string' || input.title.length > 2000
     || typeof input.sourceName !== 'string' || input.sourceName.length > 1000
     || typeof input.format !== 'string' || input.format.length > 200
@@ -808,7 +808,7 @@ function readBackupLines(file: Blob): AsyncGenerator<string> {
           pending = pending.slice(newline + 1);
           newline = pending.indexOf('\n');
         }
-        if (pending.length > MAX_REVISION_BYTES * 2) throw new Error('A project backup record exceeds the supported size.');
+        if (pending.length > MAX_PROJECT_SESSION_BYTES * 2) throw new Error('A project backup record exceeds the supported size.');
       }
       pending += decoder.decode();
       if (pending.trim()) yield pending.replace(/\r$/, '');
@@ -965,7 +965,7 @@ async function writeRestoredRevision(projectId: string, session: ProjectSessionR
     || !Number.isSafeInteger(value.messageCount) || (value.messageCount as number) < 0
     || typeof value.sourceName !== 'string' || value.sourceName.length > 1000
     || !Number.isSafeInteger(value.createdAt)) throw new Error('The project backup contains invalid history.');
-  if (encoder.encode(value.content).byteLength > MAX_REVISION_BYTES || await sha256Fingerprint(value.content) !== value.fingerprint) {
+  if (encoder.encode(value.content).byteLength > MAX_PROJECT_SESSION_BYTES || await sha256Fingerprint(value.content) !== value.fingerprint) {
     throw new Error('A project history entry failed its integrity check.');
   }
   const snapshot = inspectSnapshot(value.content);

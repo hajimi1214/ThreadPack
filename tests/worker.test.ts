@@ -4,6 +4,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { DEFAULT_OPTIONS, parseInput } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
+import { MAX_PROJECT_SESSION_BYTES } from '../src/projects/limits';
 import type { CleanSummary, ExportExcerptRequest, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
 
 let rpcId = 0;
@@ -773,4 +774,34 @@ test('oversized files are rejected before streaming and unreadable files return 
   await assert.rejects(engine.handle({ id: next(), type: 'parse', archiveId: 2, keepArchiveId: null, file: unreadable }), (error: unknown) => error instanceof Error && error.message.includes('could not be read') && !error.message.includes(secret));
   const unavailableStream = { name: 'private-file', size: 1, stream: () => { throw new Error(secret); } } as unknown as File;
   await assert.rejects(engine.handle({ id: next(), type: 'parse', archiveId: 3, keepArchiveId: null, file: unavailableStream }), (error: unknown) => error instanceof Error && error.message.includes('could not be read') && !error.message.includes(secret));
+});
+
+test('project session parsing accepts stored revisions above the external import limit', async () => {
+  const engine = new WorkerEngine();
+  const marker = 'PROJECT_REVISION_TAIL_MARKER';
+  const content = 'x'.repeat(MAX_IMPORT_BYTES + 1024) + marker;
+  const snapshot = [
+    JSON.stringify({ type: 'threadpack_session', version: 2, id: 'large-session', title: 'Large stored session', source: 'stored', branches: [], activeBranchId: '' }),
+    JSON.stringify({ type: 'threadpack_message', message: { id: 'large-message', role: 'user', content } }),
+  ].join('\n') + '\n';
+  assert.ok(new TextEncoder().encode(snapshot).byteLength > MAX_IMPORT_BYTES);
+  assert.ok(new TextEncoder().encode(snapshot).byteLength < MAX_PROJECT_SESSION_BYTES);
+
+  await assert.rejects(load(engine, snapshot, 1, 'threadpack-session.jsonl'), /100 MiB/);
+  const archive = await engine.handle({ id: next(), type: 'parse-project-session', archiveId: 2, keepArchiveId: null, text: snapshot });
+  assert.equal(archive.conversations.length, 1);
+  const summary = await clean(engine, archive);
+  const result = await preview(engine, archive, summary, { query: marker });
+  assert.equal(result.total, 1);
+  assert.match(result.items[0]!.message.content, new RegExp(marker));
+});
+
+test('project session parsing only accepts a single ThreadPack snapshot', async () => {
+  const engine = new WorkerEngine();
+  await assert.rejects(engine.handle({ id: next(), type: 'parse-project-session', archiveId: 1, keepArchiveId: null,
+    text: 'plain text without a stored message record\n' }), /invalid|exactly one conversation|No valid JSONL/);
+  const header = JSON.stringify({ type: 'threadpack_session', version: 2, id: 'stored', title: 'Stored', source: 'stored', branches: [], activeBranchId: '' });
+  const message = JSON.stringify({ type: 'threadpack_message', message: { id: 'message', role: 'user', content: 'stored' } });
+  await assert.rejects(engine.handle({ id: next(), type: 'parse-project-session', archiveId: 2, keepArchiveId: null,
+    text: `${header}\n${header}\n${message}\n` }), /invalid session record|single conversation|one session header/);
 });
