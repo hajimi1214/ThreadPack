@@ -11,6 +11,18 @@ const statusLabel: Record<MemoryStatus, string> = {
 
 const stopWords = new Set(['project', 'threadpack', 'current', 'status', 'fact', 'memory', 'context', 'task', 'next']);
 
+export function memoryFactsStateKey(facts: ProjectMemoryFact[]): string {
+  return JSON.stringify([...facts].sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0).map(fact => ({
+    id: fact.id, status: fact.status, statement: fact.statement, taskState: fact.taskState,
+    updatedAt: fact.updatedAt, conflictsWith: fact.conflictsWith, supersedes: fact.supersedes,
+    supersededBy: fact.supersededBy, evidence: fact.evidence, statusHistory: fact.statusHistory,
+  })));
+}
+
+export function memoryProjectStateKey(project: MemoryProjectContext): string {
+  return JSON.stringify([project.name, project.summary, project.importantNotes]);
+}
+
 function terms(value: string): string[] {
   return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? [])]
     .filter(term => !stopWords.has(term));
@@ -111,7 +123,7 @@ export function generateProjectContext(input: {
     || fact.evidence.every(evidence => evidence.verification === 'unattached')).length;
   const unverifiedEvidenceCount = includedFacts.filter(fact => fact.evidence.some(evidence => evidence.verification !== 'source-matched')).length;
   return {
-    text: included.join('\n\n'), budget: input.budget, usedCharacters, includedFactIds, omissions, omittedSections,
+    text: included.join('\n\n'), factStateKey: memoryFactsStateKey(input.facts), projectStateKey: memoryProjectStateKey(input.project), budget: input.budget, usedCharacters, includedFactIds, omissions, omittedSections,
     conflictCount, proposedCount, staleEvidenceCount, uncitedCount, unverifiedEvidenceCount,
   };
 }

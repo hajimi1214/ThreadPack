@@ -9,7 +9,7 @@ import {
   listProjectSessionStates, updateProjectMemoryStatus,
 } from './store';
 import type { MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
-import { generateProjectContext } from './memory-context';
+import { generateProjectContext, memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from './memory-ai';
 import type { AIEvidenceMessage } from './memory-ai';
 import { buildProjectContextPackage } from './memory-export';
@@ -133,6 +133,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   async function refreshMemory() {
     setRefreshing(true);
+    setGenerated(null);
     setError('');
     let source = 'memory records';
     try {
@@ -147,6 +148,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   useEffect(() => {
     let active = true;
+    setGenerated(null);
     let source = 'memory records';
     void listProjectMemory(project.id).then(async nextFacts => {
       source = 'session index';
@@ -225,6 +227,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     setWorking(fact.id); setError('');
     try {
       await updateProjectMemoryStatus(project.id, fact.id, status);
+      setGenerated(null);
       await refreshMemory();
       await onChanged();
       notify(status === 'confirmed' ? t.memoryFactConfirmed : status === 'rejected' ? t.memoryFactRejected : t.memoryFactNeedsReview);
@@ -249,6 +252,10 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   async function copyContext() {
     if (!generated?.text) return;
+    if (generated.factStateKey && generated.factStateKey !== memoryFactsStateKey(facts)
+      || generated.projectStateKey && generated.projectStateKey !== memoryProjectStateKey(project)) {
+      setGenerated(null); setError(t.memoryContextFailed); return;
+    }
     try {
       await navigator.clipboard.writeText(generated.text);
       notify(t.memoryContextCopied);
@@ -257,6 +264,10 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   function downloadContext() {
     if (!generated?.text) return;
+    if (generated.factStateKey && generated.factStateKey !== memoryFactsStateKey(facts)
+      || generated.projectStateKey && generated.projectStateKey !== memoryProjectStateKey(project)) {
+      setGenerated(null); setError(t.memoryContextFailed); return;
+    }
     const url = URL.createObjectURL(new Blob([generated.text], { type: 'text/markdown;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = 'threadpack-project-context.md';
@@ -266,7 +277,9 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   function downloadContextPackage() {
     if (!generated) return;
-    const pack = buildProjectContextPackage({ project, facts, sessions: sessionChoices, generated });
+    let pack: ReturnType<typeof buildProjectContextPackage>;
+    try { pack = buildProjectContextPackage({ project, facts, sessions: sessionChoices, generated }); }
+    catch (value) { setGenerated(null); setError(diagnosticMessage(value, t.memoryContextFailed)); return; }
     const url = URL.createObjectURL(new Blob([pack.bytes], { type: 'application/zip' }));
     const anchor = document.createElement('a');
     anchor.href = url; anchor.download = pack.filename;

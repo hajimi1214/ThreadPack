@@ -1,5 +1,6 @@
 import { strToU8, zipSync } from 'fflate';
 import type { GeneratedProjectContext, MemorySessionState, ProjectMemoryFact } from './memory-types';
+import { memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
 
 export interface ProjectContextPackageInput {
   project: { name: string; summary: string; importantNotes: string };
@@ -15,6 +16,12 @@ function safeFilename(value: string): string {
 }
 
 export function buildProjectContextPackage(input: ProjectContextPackageInput): { bytes: Uint8Array; filename: string } {
+  if (input.generated.factStateKey && input.generated.factStateKey !== memoryFactsStateKey(input.facts)) {
+    throw new Error('The project context is out of date. Build it again before exporting.');
+  }
+  if (input.generated.projectStateKey && input.generated.projectStateKey !== memoryProjectStateKey(input.project)) {
+    throw new Error('The project context is out of date. Build it again before exporting.');
+  }
   const included = new Set(input.generated.includedFactIds);
   const facts = input.facts.filter(fact => included.has(fact.id));
   const sessions = new Map(input.sessions.map(session => [session.id, session]));
@@ -39,7 +46,7 @@ export function buildProjectContextPackage(input: ProjectContextPackageInput): {
     },
     facts: facts.map(fact => ({
       id: fact.id, category: fact.category, topic: fact.topic, statement: fact.statement,
-      origin: fact.origin, status: fact.status, taskState: fact.taskState,
+      origin: fact.origin, status: fact.status, statusHistory: fact.statusHistory, taskState: fact.taskState,
       conflictsWith: fact.conflictsWith, supersedes: fact.supersedes,
       evidence: fact.evidence.map(evidence => ({
         ...evidence,

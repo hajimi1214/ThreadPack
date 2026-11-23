@@ -1,7 +1,7 @@
 import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
-import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, ProjectMemoryFact, ProjectMemoryInput, TaskState } from './memory-types';
+import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, TaskState } from './memory-types';
 import { MAX_PROJECT_SESSION_BYTES } from './limits';
 
 const DATABASE_NAME = 'threadpack-project-library';
@@ -114,6 +114,35 @@ const MEMORY_CATEGORIES: MemoryCategory[] = ['goal', 'decision', 'constraint', '
 const MEMORY_STATUSES: MemoryStatus[] = ['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded'];
 const EVIDENCE_KINDS: EvidenceKind[] = ['conversation', 'repository', 'test', 'user'];
 const TASK_STATES: TaskState[] = ['not-started', 'in-progress', 'done', 'blocked', 'unclear'];
+
+function appendStatusChange(fact: ProjectMemoryFact, status: MemoryStatus, changedAt: number): void {
+  const history = fact.statusHistory ?? [{ status: fact.status, changedAt: fact.createdAt }];
+  if (history.at(-1)?.status === status) {
+    fact.statusHistory = history;
+    return;
+  }
+  fact.statusHistory = [...history, { status, changedAt }];
+}
+
+function readStatusHistory(value: unknown, status: MemoryStatus, createdAt: number): MemoryStatusChange[] {
+  if (value === undefined) return [{ status, changedAt: createdAt }];
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw new Error('The project backup contains an invalid memory status history.');
+  const history = value.map(item => {
+    if (!isRecord(item) || !MEMORY_STATUSES.includes(item.status as MemoryStatus) || !Number.isSafeInteger(item.changedAt)) {
+      throw new Error('The project backup contains an invalid memory status history.');
+    }
+    return { status: item.status as MemoryStatus, changedAt: item.changedAt as number };
+  });
+  if (history[0]!.changedAt < createdAt || history.at(-1)!.status !== status) {
+    throw new Error('The project backup contains an inconsistent memory status history.');
+  }
+  for (let index = 1; index < history.length; index++) {
+    if (history[index]!.changedAt < history[index - 1]!.changedAt || history[index]!.status === history[index - 1]!.status) {
+      throw new Error('The project backup contains an inconsistent memory status history.');
+    }
+  }
+  return history;
+}
 
 function database(): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) return Promise.reject(new Error('Local project storage is unavailable in this browser.'));
@@ -608,6 +637,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
     const fact: ProjectMemoryFact = {
       key: `${projectId}\0${id}`, id, projectId, category: input.category, topic, normalizedTopic,
       statement: input.statement.trim(), origin: input.origin, status: input.status,
+      statusHistory: [{ status: input.status, changedAt: now }],
       ...(input.category === 'task' ? { taskState: input.taskState ?? 'unclear' } : {}),
       evidence, conflictsWith: [], createdAt: now, updatedAt: now,
     };
@@ -617,6 +647,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
       const previous = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${input.supersedes}`));
       if (!previous || previous.status === 'rejected' || previous.status === 'superseded') throw new Error('The selected previous fact is unavailable.');
       previous.status = 'superseded';
+      appendStatusChange(previous, 'superseded', now);
       previous.supersededBy = fact.id;
       previous.updatedAt = now;
       fact.supersedes = previous.id;
@@ -625,7 +656,9 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
         if (other) {
           other.conflictsWith = other.conflictsWith.filter(id => id !== previous.id);
           if (!other.conflictsWith.length && other.status === 'needs-review' && other.reviewStateBeforeConflict) {
-            other.status = other.reviewStateBeforeConflict;
+            const restoredStatus = other.reviewStateBeforeConflict;
+            other.status = restoredStatus;
+            appendStatusChange(other, restoredStatus, now);
             delete other.reviewStateBeforeConflict;
           }
           other.updatedAt = now;
@@ -652,6 +685,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
         const additions = evidence.filter(item => !knownEvidence.has(evidenceKey(item)));
         if (sameUserFact.evidence.length + additions.length > 20) throw new Error('A memory fact can hold at most 20 evidence entries.');
         sameUserFact.evidence.push(...additions);
+        if (sameUserFact.status !== input.status) appendStatusChange(sameUserFact, input.status, now);
         sameUserFact.status = input.status;
         sameUserFact.updatedAt = now;
         memory.put(sameUserFact);
@@ -685,11 +719,13 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
     if (conflicts.length) {
       if (fact.origin === 'user') {
         if (fact.status === 'confirmed') fact.reviewStateBeforeConflict = 'confirmed';
+        if (fact.status !== 'needs-review') appendStatusChange(fact, 'needs-review', now);
         fact.status = 'needs-review';
       }
       fact.conflictsWith = conflicts.map(previous => previous.id);
       for (const previous of conflicts) {
         if (previous.status !== 'needs-review') previous.reviewStateBeforeConflict = previous.status === 'proposed' ? 'proposed' : 'confirmed';
+        if (previous.status !== 'needs-review') appendStatusChange(previous, 'needs-review', now);
         previous.status = 'needs-review';
         previous.conflictsWith = [...new Set([...previous.conflictsWith, fact.id])];
         previous.updatedAt = now;
@@ -713,16 +749,19 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
     if (!project || project.restoringSince || !fact) throw new Error('This project memory entry is unavailable.');
     if (fact.status === 'rejected' || fact.status === 'superseded') throw new Error('Rejected or superseded entries are read-only.');
     if (status === 'confirmed' && fact.conflictsWith.length) throw new Error('Resolve the listed conflicts before confirming this fact.');
+    const now = Date.now();
     if (status === 'rejected') {
       for (const conflictId of fact.conflictsWith) {
         const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
         if (conflict) {
           conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
           if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
-            conflict.status = conflict.reviewStateBeforeConflict;
+            const restoredStatus = conflict.reviewStateBeforeConflict;
+            conflict.status = restoredStatus;
+            appendStatusChange(conflict, restoredStatus, now);
             delete conflict.reviewStateBeforeConflict;
           }
-          conflict.updatedAt = Date.now();
+          conflict.updatedAt = now;
           memory.put(conflict);
         }
       }
@@ -730,7 +769,8 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
       delete fact.reviewStateBeforeConflict;
     }
     fact.status = status;
-    fact.updatedAt = Date.now();
+    appendStatusChange(fact, status, now);
+    fact.updatedAt = now;
     memory.put(fact);
     project.updatedAt = fact.updatedAt;
     projects.put(project);
@@ -866,6 +906,7 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     || typeof value.statement !== 'string' || !value.statement.trim() || value.statement.length > 4000
     || value.taskState !== undefined && !TASK_STATES.includes(value.taskState as TaskState)
     || value.category !== 'task' && value.taskState !== undefined
+    || value.statusHistory !== undefined && (!Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 100)
     || !Array.isArray(value.evidence) || value.evidence.length < 1 || value.evidence.length > 20
     || !Array.isArray(value.conflictsWith) || value.conflictsWith.some(id => typeof id !== 'string' || id.length > 200)
     || value.supersedes !== undefined && (typeof value.supersedes !== 'string' || value.supersedes.length > 200)
@@ -919,10 +960,11 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     });
   }
   const normalizedTopic = normalizeMemoryTopic(value.topic);
+  const statusHistory = readStatusHistory(value.statusHistory, value.status as MemoryStatus, value.createdAt as number);
   return {
     key: `${projectId}\0${id}`, id, projectId, category: value.category as MemoryCategory,
     topic: value.topic, normalizedTopic, statement: value.statement, origin: value.origin as MemoryOrigin,
-    status: value.status as MemoryStatus, evidence, conflictsWith: [...value.conflictsWith as string[]],
+    status: value.status as MemoryStatus, statusHistory, evidence, conflictsWith: [...value.conflictsWith as string[]],
     ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
     ...(value.reviewStateBeforeConflict === 'confirmed' || value.reviewStateBeforeConflict === 'proposed'
       ? { reviewStateBeforeConflict: value.reviewStateBeforeConflict } : {}),

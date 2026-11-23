@@ -4,6 +4,11 @@ export type MemoryOrigin = 'user' | 'ai';
 export type EvidenceKind = 'conversation' | 'repository' | 'test' | 'user';
 export type TaskState = 'not-started' | 'in-progress' | 'done' | 'blocked' | 'unclear';
 
+export interface MemoryStatusChange {
+  status: MemoryStatus;
+  changedAt: number;
+}
+
 export interface MemoryEvidence {
   id: string;
   kind: EvidenceKind;
@@ -30,6 +35,7 @@ export interface ProjectMemoryFact {
   taskState?: TaskState;
   origin: MemoryOrigin;
   status: MemoryStatus;
+  statusHistory?: MemoryStatusChange[];
   reviewStateBeforeConflict?: 'confirmed' | 'proposed';
   evidence: MemoryEvidence[];
   conflictsWith: string[];
@@ -82,6 +88,8 @@ export interface ContextOmission {
 
 export interface GeneratedProjectContext {
   text: string;
+  factStateKey?: string;
+  projectStateKey?: string;
   budget: number;
   usedCharacters: number;
   includedFactIds: string[];

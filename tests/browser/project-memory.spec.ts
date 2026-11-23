@@ -89,6 +89,46 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   expect(strFromU8(packageFiles['AGENTS.md']!)).toContain('AI proposals are not confirmed facts');
 });
 
+test('rejecting a fact invalidates generated Markdown and JSON context together', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'state.json', 'The runtime must remain offline.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Runtime policy');
+  await form.locator('textarea').nth(0).fill('The runtime must remain offline.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  await expect(dialog.locator('.memory-fact')).toContainText('Confirmed by user');
+
+  await dialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  const context = dialog.getByRole('textbox', { name: 'Generate project context', exact: true });
+  await expect(context).toHaveValue(/The runtime must remain offline\./);
+  const rejected = dialog.locator('.memory-fact').filter({ hasText: 'The runtime must remain offline.' });
+  await rejected.getByRole('button', { name: 'Reject', exact: true }).click();
+  await expect(context).toHaveCount(0);
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  expect(backupPath).toBeTruthy();
+  const memoryRecord = (await readFile(backupPath!, 'utf8')).split('\n').filter(Boolean)
+    .map(line => JSON.parse(line) as { type: string; data?: { status?: string; statusHistory?: { status: string }[] } })
+    .find(record => record.type === 'memory');
+  expect(memoryRecord?.data?.statusHistory?.map(item => item.status)).toEqual(['confirmed', 'rejected']);
+
+  await dialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  await expect(dialog.getByRole('textbox', { name: 'Generate project context', exact: true })).not.toHaveValue(/The runtime must remain offline\./);
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
+  const packagePath = await (await download).path();
+  expect(packagePath).toBeTruthy();
+  const files = unzipSync(await readFile(packagePath!));
+  expect(strFromU8(files['PROJECT_CONTEXT.md']!)).not.toContain('The runtime must remain offline.');
+  expect(JSON.parse(strFromU8(files['threadpack-memory.json']!)).facts).toHaveLength(0);
+});
+
 test('AI proposals are source-checked, stay pending review, and leave no stored API key', async ({ page }) => {
   await page.goto('/');
   await importConversation(page, 'ai-evidence.json', 'The service must never send conversation text over the network.');

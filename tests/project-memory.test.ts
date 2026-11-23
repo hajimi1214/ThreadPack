@@ -99,6 +99,9 @@ test('portable AI context package retains evidence and tool entry instructions w
   assert.equal(memory.facts[0]!.evidence[0]!.verification, 'source-matched');
   assert.deepEqual(memory.budget.includedFactIds, ['decision-1']);
   assert.doesNotMatch(JSON.stringify(memory), /synthetic-api-key-do-not-store/);
+  const rejected = { ...entry, status: 'rejected' as const, updatedAt: 2 };
+  assert.throws(() => buildProjectContextPackage({ project: { name: 'ThreadPack Stage 5', summary: 'Connect tools.', importantNotes: '' },
+    facts: [rejected], sessions: [{ id: 'session', title: 'Design session', currentVersion: 2 }], generated }), /out of date/);
 });
 
 test('continuation benchmark retrieves every labeled fact within budget without dropping its evidence status', () => {
