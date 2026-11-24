@@ -46,35 +46,35 @@ D:\Github项目\ThreadPack-source-baseline-backup-20261124-190319
 - untracked-files：两个未跟踪浏览器测试的逐文件副本。
 - original-test-records：49 份 artifacts-*.log 原始测试记录。
 - Git status、revision、ahead/behind 和备份 SHA-256 清单。
-- 备份 SHA-256 清单包含 59 个构件，逐项复核无失败。
+- 初始备份 SHA-256 清单包含 59 个构件，逐项复核无失败。另从完整归档提取 21 个受审文件并与原始工作区逐字节比较，差异为 0；比较副本保存在 workspace-source-verification。
 
 原始 worktree.patch 保持不变。Windows 命令行备份写入时将补丁行尾转成 CRLF，故另生成 worktree-lf.patch，仅规范化行尾。该副本应用检查通过，随后按它在原始 HEAD 上恢复候选内容。
 
 ## 3. 全部修改文件审查
 
-| 文件 | 修改类型和原因 | 影响产品行为 | 影响测试结果 | 审查处置 |
-|---|---|---:|---:|---|
-| README.md | 文档更新，说明本地实时 MCP、任务协作和平台限制 | 否 | 否 | 保留；已核对接口名称与限制，真实客户端仍不可宣称通过 |
-| README.zh-CN.md | 中文文档对应更新 | 否 | 否 | 保留；发布前由负责人确认中文产品措辞 |
-| SECURITY.md | 新增共享文件、read-only、任务租约、客户端身份和数据边界说明 | 否 | 否 | 保留；明确客户端标签不是认证身份 |
-| cli/index.ts | 更新 MCP 命令参数和帮助信息 | CLI 帮助行为 | 帮助测试 | 保留 |
-| cli/mcp-server.ts | 实现共享快照 MCP、候选写入、文件锁、幂等、任务租约、read-only、备份校验和上下文信任边界 | 是 | 是 | 保留为主要产品成果；真实客户端和目标浏览器矩阵仍需复核 |
-| src/App.tsx | 将字节统计改用分块 UTF-8 计数，降低大文本统计的单次编码分配 | 是，大小统计路径 | 是 | 保留；候选 check/unit/build 通过 |
-| src/locales/en.ts | 英文共享、认领、审核 UI 标签 | 界面文案 | 字典完整性 | 保留 |
-| src/locales/es.ts | 西班牙文共享、认领、审核 UI 标签 | 界面文案 | 字典完整性 | 保留 |
-| src/locales/fr.ts | 法文共享、认领、审核 UI 标签 | 界面文案 | 字典完整性 | 保留 |
-| src/locales/ja.ts | 日文共享、认领、审核 UI 标签 | 界面文案 | 字典完整性 | 保留 |
-| src/locales/zh.ts | 中文共享、认领、审核 UI 标签 | 界面文案 | 字典完整性 | 保留 |
-| src/projects/ProjectLibrary.tsx | 添加本地共享状态连接、候选审查及任务认领活动显示 | 是 | 是 | 保留；本阶段不运行浏览器测试 |
-| src/projects/limits.ts | 添加共享文件上限及分块 UTF-8 字节计数函数 | 是 | 是 | 保留 |
-| src/projects/memory-types.ts | 添加候选审计与任务租约类型、候选来源 ID | 运行时无独立行为 | 类型检查 | 保留 |
-| src/projects/projects.css | 添加共享状态、候选审核及任务认领面板样式 | 仅视觉呈现 | 浏览器视觉 | 保留；本阶段不运行浏览器测试 |
-| src/projects/store.ts | IndexedDB schema 迁移、共享备份、候选状态机、审核恢复、任务租约导入及 v7 备份恢复 | 是，核心数据行为 | 是 | 保留为主要产品成果；并发/崩溃边界需要后续持续测试 |
-| src/worker/engine.ts | 使用分块字节计数检查会话大小 | 是，大小测量 | 是 | 保留；候选 check/unit/build 通过 |
-| tests/mcp.test.ts | 新增收件箱、并发、租约、read-only 和信任边界测试；修正一处重试 fixture | 不影响产品运行 | 是 | 保留全部断言；fixture 单独分析见下一节 |
-| tests/project-memory.test.ts | 新增跨代理项边界的 UTF-8 字节计数测试 | 否 | 是 | 保留 |
-| tests/browser/project-coordination.spec.ts | 新增任务认领、候选审核、冲突及备份恢复 E2E | 否 | 是 | 保留；依本阶段约束没有执行浏览器测试 |
-| tests/browser/project-shared-state.spec.ts | 新增共享文件、收件箱和审核恢复 E2E | 否 | 是 | 保留；依本阶段约束没有执行浏览器测试 |
+| 文件 | 修改类型/原因 | 产品行为影响 | 测试结果影响 | 保留 | 是否需重新验证 |
+|---|---|---:|---:|---|---|
+| README.md | 文档：实时 MCP、任务协作、支持限制 | 否 | 否 | 是 | 发布前核对文档与行为 |
+| README.zh-CN.md | 中文版对应能力和限制 | 否 | 否 | 是 | 发布前核对中文术语 |
+| SECURITY.md | 新增共享文件、只读、租约、身份与权限边界 | 否 | 否 | 是 | 后续安全审查复核声明 |
+| cli/index.ts | 更新 MCP 参数和帮助 | CLI 帮助输出 | 帮助测试 | 是 | CLI 帮助测试已覆盖 |
+| cli/mcp-server.ts | 快照读取、候选写入、锁/幂等、任务租约、只读、备份和信任校验 | 是 | 是 | 是 | check/unit/build 通过；真实客户端待后续 |
+| src/App.tsx | 分块 UTF-8 字节统计，降低大文本临时分配 | 是，大小统计 | 是 | 是 | check/unit/build 已通过 |
+| src/locales/en.ts | 英文共享/认领/审核文案 | 仅文案 | 字典完整性 | 是 | 字典测试已覆盖 |
+| src/locales/es.ts | 西班牙文对应文案 | 仅文案 | 字典完整性 | 是 | 字典测试已覆盖 |
+| src/locales/fr.ts | 法文对应文案 | 仅文案 | 字典完整性 | 是 | 字典测试已覆盖 |
+| src/locales/ja.ts | 日文对应文案 | 仅文案 | 字典完整性 | 是 | 字典测试已覆盖 |
+| src/locales/zh.ts | 中文对应文案 | 仅文案 | 字典完整性 | 是 | 字典测试已覆盖 |
+| src/projects/ProjectLibrary.tsx | 共享连接、候选审查、任务认领活动 UI | 是 | 浏览器流程 | 是 | 本阶段禁跑；后续浏览器 E2E |
+| src/projects/limits.ts | 共享上限和分块 UTF-8 字节计数 | 是 | 是 | 是 | check/unit/build 已通过 |
+| src/projects/memory-types.ts | 审计、租约及证据来源类型 | 无独立运行时行为 | 类型检查 | 是 | check 已通过 |
+| src/projects/projects.css | 共享、候选和任务面板样式 | 仅视觉 | 浏览器视觉 | 是 | 本阶段禁跑；后续视觉/E2E |
+| src/projects/store.ts | IndexedDB 迁移、共享备份、候选状态机/恢复、租约、v7 备份 | 是，数据核心 | 是 | 是 | check/unit/build 已通过；后续并发/浏览器复验 |
+| src/worker/engine.ts | 分块 UTF-8 会话大小检查 | 是，大小测量 | 是 | 是 | check/unit/build 已通过 |
+| tests/mcp.test.ts | 收件箱、并发/幂等、租约、只读和信任边界回归 | 否 | 是 | 是，fixture 待负责人确认 | 197 项测试通过；Ubuntu MCP 专项 8 轮 |
+| tests/project-memory.test.ts | UTF-8 代理项边界测试 | 否 | 是 | 是 | unit 已通过 |
+| tests/browser/project-coordination.spec.ts | 任务认领、审核、冲突、备份恢复 E2E | 否 | 新增覆盖 | 是 | 本阶段禁跑；后续运行 |
+| tests/browser/project-shared-state.spec.ts | 共享文件、收件箱、审核恢复 E2E | 否 | 新增覆盖 | 是 | 本阶段禁跑；后续运行 |
 
 合计为 19 个原修改文件和 2 个原未跟踪测试文件。没有发现额外的未跟踪源码或配置文件。
 
@@ -98,12 +98,13 @@ Linux 审计测试发现的 fixture 差异如下：
 - 候选源码及测试提交 SHA：0259745261b34386722184aca5964e2434f43f70
 - 该源码提交以原始审计 HEAD 为父提交，包含上述 19 个修改文件和 2 个新增测试文件，共 21 个路径。
 - 提交前在候选 worktree 执行了 npm run check、npm test、npm run build，分别通过；npm test 为 197/197。依本阶段约束，未运行浏览器测试。
-- 本报告为随后添加的审计文档，单独提交。代码/测试候选 SHA 保持为上面的 SHA；分支最终 HEAD 由报告提交形成，handoff 中同时提供。
-- 源码提交前的候选暂存区通过 git diff --cached --check，stage 后没有未暂存跟踪修改。报告文档提交后复核最终候选 worktree：干净，无 staged、unstaged 或 untracked 文件。
+- 本报告为单独的审计文档提交。代码/测试候选 SHA 保持为上面的 SHA；分支最终 HEAD 是源码提交加报告提交，handoff 会同时提供。
+- 源码候选暂存区通过 git diff --cached --check。报告文档提交后复核最终候选 worktree：干净，无 staged、unstaged 或 untracked 文件。
+- docs/release 报告路径被原有 .gitignore 的 release/ 规则匹配。仅对用户指定的这一个报告文件使用 git add -f；未修改忽略规则，也未添加发布目录或发布产物。
 
 ## 6. 未解决项与第二阶段前置条件
 
-1. 负责人审核本表全部 21 个路径，并决定是否接受 MCP fixture 修正及候选源码提交。
+1. 负责人审核本表全部 21 个路径，并决定是否接受 MCP fixture 修正及候选源码提交 0259745261b34386722184aca5964e2434f43f70。
 2. 第二阶段真实 Claude Code MCP 接续测试需要 relay 确认兼容 Claude Code CLI 的模型解析路径。此前直接 /v1/messages 调用可成功，但 Claude Code CLI 对该模型返回 HTTP 404。需先确认可用模型名/别名与 Anthropic-compatible base URL，再按负责人授权的费用上限测试。
 3. 需真实客户端从共享状态读取项目、提交一个经用户审查的候选更新，并由另一真实客户端读取相同更新后接续。
 4. 真实供应商导出样本须获授权并适当脱敏。合成样本不得替代该项证据。
