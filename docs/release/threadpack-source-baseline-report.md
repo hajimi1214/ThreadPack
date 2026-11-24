@@ -99,7 +99,7 @@ Linux 审计测试发现的 fixture 差异如下：
 - 该源码提交以原始审计 HEAD 为父提交，包含上述 19 个修改文件和 2 个新增测试文件，共 21 个路径。
 - 提交前在候选 worktree 执行了 npm run check、npm test、npm run build，分别通过；npm test 为 197/197。依本阶段约束，未运行浏览器测试。
 - 本报告为随后添加的审计文档，单独提交。代码/测试候选 SHA 保持为上面的 SHA；分支最终 HEAD 由报告提交形成，handoff 中同时提供。
-- 源码提交前的候选暂存区通过 git diff --cached --check，stage 后没有未暂存跟踪修改。报告文档提交完成后，将复核最终候选 worktree 完全干净。
+- 源码提交前的候选暂存区通过 git diff --cached --check，stage 后没有未暂存跟踪修改。报告文档提交后复核最终候选 worktree：干净，无 staged、unstaged 或 untracked 文件。
 
 ## 6. 未解决项与第二阶段前置条件
 
