@@ -1,12 +1,13 @@
 import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
-import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, TaskState } from './memory-types';
-import { MAX_PROJECT_SESSION_BYTES } from './limits';
+import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, ProjectTaskClaim, ProjectTaskClaimAction, ProjectTaskClaimEvent, ProjectUpdateAction, ProjectUpdateAuditEntry, ProjectUpdateProposal, ProjectUpdateStatus, ProjectUpdateStatusChange, TaskState } from './memory-types';
+import { MAX_PROJECT_SESSION_BYTES, MAX_SHARED_PROJECT_BACKUP_BYTES, utf8ByteLength } from './limits';
 
 const DATABASE_NAME = 'threadpack-project-library';
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 5;
 const RESTORE_STALE_AFTER = 24 * 60 * 60 * 1000;
+const UPDATE_REVIEW_STALE_AFTER = 5 * 60 * 1000;
 const encoder = new TextEncoder();
 
 export interface ProjectRecord {
@@ -17,6 +18,36 @@ export interface ProjectRecord {
   createdAt: number;
   updatedAt: number;
   restoringSince?: number;
+}
+
+export interface SharedProjectFileHandle extends FileSystemFileHandle {
+  queryPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
+  requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
+}
+
+interface SharedProjectBackupRecord {
+  projectId: string;
+  handle: SharedProjectFileHandle;
+  inboxHandle?: SharedProjectFileHandle;
+  inboxReadOffset?: number;
+  syncedAt: number;
+  syncedProjectUpdatedAt: number;
+}
+
+export interface SharedProjectBackupStatus {
+  connected: boolean;
+  state: 'disconnected' | 'current' | 'out-of-date' | 'permission-required' | 'error';
+  filename?: string;
+  syncedAt?: number;
+  inboxConnected?: boolean;
+  inboxFilename?: string;
+  pendingUpdates?: number;
+}
+
+export interface ProjectUpdateImportResult {
+  imported: number;
+  pending: number;
+  changed: boolean;
 }
 
 export interface ProjectSessionInput {
@@ -109,11 +140,46 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 let databasePromise: Promise<IDBDatabase> | undefined;
+const sharedBackupWrites = new Map<string, Promise<SharedProjectBackupStatus>>();
+
+function touchProject(project: ProjectRecord, timestamp = Date.now()): void {
+  project.updatedAt = Math.max(timestamp, project.updatedAt + 1);
+}
 
 const MEMORY_CATEGORIES: MemoryCategory[] = ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'];
 const MEMORY_STATUSES: MemoryStatus[] = ['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded'];
 const EVIDENCE_KINDS: EvidenceKind[] = ['conversation', 'repository', 'test', 'user'];
 const TASK_STATES: TaskState[] = ['not-started', 'in-progress', 'done', 'blocked', 'unclear'];
+
+function proposalSnapshot(proposal: Pick<ProjectUpdateProposal, 'category' | 'topic' | 'statement' | 'taskState' | 'sessionId' | 'sessionVersion' | 'messageId' | 'taskId' | 'claimId' | 'evidenceReference' | 'evidenceQuote'>): ProjectUpdateAuditEntry['snapshot'] {
+  return { category: proposal.category, topic: proposal.topic, statement: proposal.statement,
+    ...(proposal.taskState ? { taskState: proposal.taskState } : {}),
+    evidenceReference: proposal.evidenceReference, evidenceQuote: proposal.evidenceQuote,
+    ...(proposal.sessionId ? { sessionId: proposal.sessionId } : {}),
+    ...(proposal.sessionVersion !== undefined ? { sessionVersion: proposal.sessionVersion } : {}),
+    ...(proposal.messageId ? { messageId: proposal.messageId } : {}),
+    ...(proposal.taskId ? { taskId: proposal.taskId } : {}),
+    ...(proposal.claimId ? { claimId: proposal.claimId } : {}),
+  };
+}
+
+function appendProposalAudit(proposal: ProjectUpdateProposal, action: ProjectUpdateAction, actor: ProjectUpdateAuditEntry['actor'], changedAt: number): void {
+  proposal.auditHistory.push({ action, actor, ...(actor === 'mcp-client' ? { clientClaim: proposal.client } : {}),
+    status: proposal.status, changedAt, snapshot: proposalSnapshot(proposal) });
+}
+
+async function revokeAcceptedProposals(transaction: IDBTransaction, projectId: string, factId: string, changedAt: number): Promise<void> {
+  const updates = transaction.objectStore('updates');
+  const proposals = await idbRequest<ProjectUpdateProposal[]>(updates.index('projectId').getAll(IDBKeyRange.only(projectId)));
+  for (const proposal of proposals) {
+    if (proposal.acceptedFactId !== factId || proposal.status !== 'accepted') continue;
+    proposal.status = 'revoked';
+    proposal.reviewedAt = changedAt;
+    proposal.statusHistory.push({ status: 'revoked', changedAt });
+    appendProposalAudit(proposal, 'revoked', 'user', changedAt);
+    updates.put(proposal);
+  }
+}
 
 function appendStatusChange(fact: ProjectMemoryFact, status: MemoryStatus, changedAt: number): void {
   const history = fact.statusHistory ?? [{ status: fact.status, changedAt: fact.createdAt }];
@@ -172,6 +238,18 @@ function database(): Promise<IDBDatabase> {
           memory.createIndex('projectId', 'projectId');
           memory.createIndex('projectTopic', ['projectId', 'category', 'normalizedTopic']);
         }
+        if (!db.objectStoreNames.contains('shared')) db.createObjectStore('shared', { keyPath: 'projectId' });
+        if (!db.objectStoreNames.contains('updates')) {
+          const updates = db.createObjectStore('updates', { keyPath: 'key' });
+          updates.createIndex('projectId', 'projectId');
+          updates.createIndex('projectStatus', ['projectId', 'status']);
+        }
+        if (!db.objectStoreNames.contains('claims')) {
+          const claims = db.createObjectStore('claims', { keyPath: 'key' });
+          claims.createIndex('projectId', 'projectId');
+          claims.createIndex('projectClaim', ['projectId', 'claimId']);
+          claims.createIndex('projectTask', ['projectId', 'taskId']);
+        }
       };
       request.onsuccess = () => {
         if (blocked) { request.result.close(); return; }
@@ -212,6 +290,9 @@ async function removeProjectRows(transaction: IDBTransaction, projectId: string)
   const sessions = transaction.objectStore('sessions');
   const revisions = transaction.objectStore('revisions');
   const memory = transaction.objectStore('memory');
+  const shared = transaction.objectStore('shared');
+  const updates = transaction.objectStore('updates');
+  const claims = transaction.objectStore('claims');
   const [sessionKeys, revisionKeys, memoryKeys] = await Promise.all([
     idbRequest(sessions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
     idbRequest(revisions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
@@ -220,12 +301,17 @@ async function removeProjectRows(transaction: IDBTransaction, projectId: string)
   for (const key of sessionKeys) sessions.delete(key);
   for (const key of revisionKeys) revisions.delete(key);
   for (const key of memoryKeys) memory.delete(key);
+  shared.delete(projectId);
+  const updateKeys = await idbRequest(updates.index('projectId').getAllKeys(IDBKeyRange.only(projectId)));
+  for (const key of updateKeys) updates.delete(key);
+  const claimKeys = await idbRequest(claims.index('projectId').getAllKeys(IDBKeyRange.only(projectId)));
+  for (const key of claimKeys) claims.delete(key);
   projects.delete(projectId);
 }
 
 async function cleanAbandonedRestores(): Promise<void> {
   const cutoff = Date.now() - RESTORE_STALE_AFTER;
-  await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', async transaction => {
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', async transaction => {
     const projects = await idbRequest<ProjectRecord[]>(transaction.objectStore('projects').getAll());
     for (const project of projects) {
       if (project.restoringSince && project.restoringSince < cutoff) await removeProjectRows(transaction, project.id);
@@ -242,7 +328,7 @@ function normalizeName(name: string): string {
 
 function validateSessionInput(input: ProjectSessionInput): void {
   if (!input || typeof input !== 'object' || typeof input.content !== 'string'
-    || encoder.encode(input.content).byteLength > MAX_PROJECT_SESSION_BYTES
+    || utf8ByteLength(input.content) > MAX_PROJECT_SESSION_BYTES
     || typeof input.title !== 'string' || input.title.length > 2000
     || typeof input.sourceName !== 'string' || input.sourceName.length > 1000
     || typeof input.format !== 'string' || input.format.length > 200
@@ -359,7 +445,7 @@ async function storeSession(projectId: string, input: ProjectSessionInput, finge
       if (input.sourceId) currentRevision.sourceId = input.sourceId;
       else delete currentRevision.sourceId;
       revisions.put(currentRevision);
-      project.updatedAt = now;
+      touchProject(project, now);
       projects.put(project);
       return { projectId, sessionId: previous.id, version: previous.currentVersion, duplicate: true };
     }
@@ -380,7 +466,7 @@ async function storeSession(projectId: string, input: ProjectSessionInput, finge
     };
     revisions.put(revision);
     sessions.put(session);
-    project.updatedAt = now;
+    touchProject(project, now);
     projects.put(project);
     return { projectId, sessionId, version, duplicate: false };
   });
@@ -415,14 +501,15 @@ export async function updateProject(projectId: string, changes: Partial<Pick<Pro
     const store = transaction.objectStore('projects');
     const project = await idbRequest<ProjectRecord | undefined>(store.get(projectId));
     if (!project || project.restoringSince) throw new Error('This project is unavailable.');
-    Object.assign(project, next, { updatedAt: Date.now() });
+    Object.assign(project, next);
+    touchProject(project);
     store.put(project);
     return project;
   });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
 }
 
 export async function saveProjectSession(projectId: string, input: ProjectSessionInput): Promise<ProjectImportResult> {
@@ -532,7 +619,7 @@ export async function restoreProjectRevision(projectId: string, sessionId: strin
       messageCount: selected.messageCount, updatedAt: now,
     });
     sessions.put(session);
-    project.updatedAt = now;
+    touchProject(project, now);
     projects.put(project);
     return { projectId, sessionId, version: nextVersion, duplicate: false };
   });
@@ -562,7 +649,8 @@ function findSnapshotMessage(content: string, messageId: string): { id: string; 
 
 async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInput): Promise<MemoryEvidence> {
   if (!input || !EVIDENCE_KINDS.includes(input.kind) || typeof input.reference !== 'string' || input.reference.length > 1000
-    || typeof input.quote !== 'undefined' && (typeof input.quote !== 'string' || input.quote.length > 1000)) {
+    || typeof input.quote !== 'undefined' && (typeof input.quote !== 'string' || input.quote.length > 1000)
+    || input.proposalId !== undefined && (input.kind !== 'conversation' || typeof input.proposalId !== 'string' || !input.proposalId || input.proposalId.length > 200)) {
     throw new Error('A memory evidence entry is invalid.');
   }
   const recordedAt = Date.now();
@@ -578,6 +666,7 @@ async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInp
       id: makeId(), kind: input.kind,
       reference: `${saved.summary.title} · v${saved.version} · ${message.id}`,
       quote, sessionId: input.sessionId, version: input.version, messageId: input.messageId,
+      ...(input.proposalId ? { proposalId: input.proposalId } : {}),
       messageFingerprint: await sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`),
       recordedAt, verification: 'source-matched',
     };
@@ -605,7 +694,7 @@ export async function listProjectMemory(projectId: string): Promise<ProjectMemor
       .sort((a, b) => b.updatedAt - a.updatedAt));
 }
 
-export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
+async function createProjectMemoryFactInternal(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
   if (!input || !MEMORY_CATEGORIES.includes(input.category) || !['user', 'ai'].includes(input.origin)
     || !MEMORY_STATUSES.includes(input.status) || typeof input.topic !== 'string' || !input.topic.trim()
     || input.topic.length > 160 || typeof input.statement !== 'string' || !input.statement.trim()
@@ -628,7 +717,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
     throw new Error('Every AI suggestion must cite selected conversation evidence.');
   }
   const id = makeId();
-  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+  return withTransaction(['projects', 'memory', 'updates'], 'readwrite', async transaction => {
     const projects = transaction.objectStore('projects');
     const memory = transaction.objectStore('memory');
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
@@ -650,6 +739,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
       appendStatusChange(previous, 'superseded', now);
       previous.supersededBy = fact.id;
       previous.updatedAt = now;
+      await revokeAcceptedProposals(transaction, projectId, previous.id, now);
       fact.supersedes = previous.id;
       for (const otherId of previous.conflictsWith) {
         const other = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${otherId}`));
@@ -689,7 +779,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
         sameUserFact.status = input.status;
         sameUserFact.updatedAt = now;
         memory.put(sameUserFact);
-        project.updatedAt = now;
+        touchProject(project, now);
         projects.put(project);
         return sameUserFact;
       }
@@ -707,7 +797,7 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
         duplicateAIFact.evidence.push(...additions);
         duplicateAIFact.updatedAt = now;
         memory.put(duplicateAIFact);
-        project.updatedAt = now;
+        touchProject(project, now);
         projects.put(project);
         return duplicateAIFact;
       }
@@ -733,15 +823,19 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
       }
     }
     memory.add(fact);
-    project.updatedAt = now;
+    touchProject(project, now);
     projects.put(project);
     return fact;
   });
 }
 
+export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
+  return createProjectMemoryFactInternal(projectId, input);
+}
+
 export async function updateProjectMemoryStatus(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
   if (!MEMORY_STATUSES.includes(status)) throw new Error('Choose a valid memory review state.');
-  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+  return withTransaction(['projects', 'memory', 'updates'], 'readwrite', async transaction => {
     const projects = transaction.objectStore('projects');
     const memory = transaction.objectStore('memory');
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
@@ -771,8 +865,9 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
     fact.status = status;
     appendStatusChange(fact, status, now);
     fact.updatedAt = now;
+    if (status === 'rejected') await revokeAcceptedProposals(transaction, projectId, fact.id, now);
     memory.put(fact);
-    project.updatedAt = fact.updatedAt;
+    touchProject(project, fact.updatedAt);
     projects.put(project);
     return fact;
   });
@@ -785,11 +880,15 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
   const sessions = await withTransaction(['sessions'], 'readonly', async transaction =>
     idbRequest<ProjectSessionRecord[]>(transaction.objectStore('sessions').index('projectId').getAll(IDBKeyRange.only(projectId))));
   const facts = await listProjectMemory(projectId);
+  const updates = await listProjectUpdateProposals(projectId);
+  const claims = await withTransaction(['claims'], 'readonly', async transaction =>
+    idbRequest<ProjectTaskClaimEvent[]>(transaction.objectStore('claims').index('projectId').getAll(IDBKeyRange.only(projectId))));
+  claims.sort((first, second) => first.createdAt - second.createdAt || first.id.localeCompare(second.id));
   let revisionCount = 0;
   for (const session of sessions) revisionCount += session.currentVersion;
-  yield JSON.stringify({ type: 'threadpack_project', version: 2, createdAt: Date.now(), project: {
+  yield JSON.stringify({ type: 'threadpack_project', version: 7, projectId, createdAt: Date.now(), project: {
     name: project.name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt, updatedAt: project.updatedAt,
-  }, sessionCount: sessions.length, revisionCount, factCount: facts.length }) + '\n';
+  }, sessionCount: sessions.length, revisionCount, factCount: facts.length, updateCount: updates.length, claimCount: claims.length }) + '\n';
   for (const session of sessions) {
     yield JSON.stringify({ type: 'session', data: {
       id: session.id, sessionKey: session.sessionKey, title: session.title, sourceName: session.sourceName,
@@ -813,6 +912,27 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
     const { key: _key, projectId: _projectId, ...data } = fact;
     yield JSON.stringify({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data }) + '\n';
   }
+  for (const update of updates) {
+    const { key: _key, reviewingSince: _reviewingSince, ...record } = update;
+    const exportRecord = { ...record, projectId };
+    let data = exportRecord;
+    if (exportRecord.status === 'reviewing') {
+      const acceptedFact = facts.find(fact => matchesAcceptedProposalFact(fact, exportRecord));
+      const status = !acceptedFact ? 'pending' : acceptedFact.status === 'rejected' || acceptedFact.status === 'superseded' ? 'revoked' : 'accepted';
+      const changedAt = Math.max(Date.now(), exportRecord.statusHistory.at(-1)?.changedAt ?? 0);
+      const action = status === 'pending' ? 'review-reopened' : status;
+      data = { ...exportRecord, status, ...(acceptedFact ? { acceptedFactId: acceptedFact.id } : {}),
+        statusHistory: [...exportRecord.statusHistory, { status, changedAt }],
+        auditHistory: [...exportRecord.auditHistory, { action, actor: 'user', status, changedAt, snapshot: proposalSnapshot(exportRecord) }],
+      };
+    }
+    yield JSON.stringify({ type: 'update', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+  }
+  for (const claim of claims) {
+    const { key: _key, ...record } = claim;
+    const data = { ...record, projectId };
+    yield JSON.stringify({ type: 'claim', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+  }
 }
 
 export async function exportProjectBackup(projectId: string): Promise<Blob> {
@@ -828,6 +948,575 @@ export async function exportProjectBackup(projectId: string): Promise<Blob> {
     async cancel() { await iterator.return(undefined); },
   });
   return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson;charset=utf-8' } }).blob();
+}
+
+async function sharedProjectStatus(projectId: string): Promise<{ project: ProjectRecord | undefined; shared: SharedProjectBackupRecord | undefined }> {
+  return withTransaction(['projects', 'shared'], 'readonly', async transaction => {
+    const [project, shared] = await Promise.all([
+      idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)),
+      idbRequest<SharedProjectBackupRecord | undefined>(transaction.objectStore('shared').get(projectId)),
+    ]);
+    return { project, shared };
+  });
+}
+
+function validUpdateProposal(value: unknown, projectId: string): ProjectUpdateProposal | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
+    || value.projectId !== projectId || typeof value.client !== 'string' || !value.client.trim() || value.client.length > 200
+    || typeof value.idempotencyKey !== 'string' || !value.idempotencyKey.trim() || value.idempotencyKey.length > 200
+    || !MEMORY_CATEGORIES.includes(value.category as MemoryCategory) || typeof value.topic !== 'string' || !value.topic.trim() || value.topic.length > 160
+    || value.taskState !== undefined && !TASK_STATES.includes(value.taskState as TaskState)
+    || value.category !== 'task' && value.taskState !== undefined
+    || value.category === 'task' && ['in-progress', 'done', 'blocked'].includes(value.taskState as string) && (!value.taskId || !value.claimId)
+    || typeof value.statement !== 'string' || !value.statement.trim() || value.statement.length > 4000
+    || typeof value.evidenceReference !== 'string' || value.evidenceReference.length > 1000
+    || typeof value.evidenceQuote !== 'string' || value.evidenceQuote.length > 1000
+    || typeof value.sessionId !== 'string' || !value.sessionId || value.sessionId.length > 200
+    || !Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 1
+    || typeof value.messageId !== 'string' || !value.messageId || value.messageId.length > 500
+    || value.taskId !== undefined && (typeof value.taskId !== 'string' || !value.taskId || value.taskId.length > 200 || typeof value.claimId !== 'string' || !value.claimId || value.category !== 'task')
+    || value.claimId !== undefined && (typeof value.claimId !== 'string' || !value.claimId || value.claimId.length > 200 || typeof value.taskId !== 'string')
+    || !Number.isSafeInteger(value.createdAt)) return null;
+  const proposal: ProjectUpdateProposal = {
+    key: `${projectId}\0${value.id}`, id: value.id, projectId, client: value.client.trim(),
+    idempotencyKey: value.idempotencyKey,
+    sessionId: value.sessionId, sessionVersion: value.sessionVersion as number, messageId: value.messageId,
+    ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}),
+    ...(typeof value.claimId === 'string' ? { claimId: value.claimId } : {}),
+    category: value.category as MemoryCategory, topic: value.topic.trim(), statement: value.statement.trim(),
+    ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
+    evidenceReference: value.evidenceReference, evidenceQuote: value.evidenceQuote,
+    status: 'pending', statusHistory: [{ status: 'pending', changedAt: value.createdAt as number }], auditHistory: [], createdAt: value.createdAt as number,
+  };
+  appendProposalAudit(proposal, 'submitted', 'mcp-client', value.createdAt as number);
+  return proposal;
+}
+
+function validateTaskClaimEvent(value: unknown, projectId: string): ProjectTaskClaimEvent {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
+    || value.projectId !== projectId || typeof value.claimId !== 'string' || !value.claimId || value.claimId.length > 200
+    || typeof value.taskId !== 'string' || !value.taskId || value.taskId.length > 200
+    || typeof value.client !== 'string' || !value.client.trim() || value.client.length > 200
+    || typeof value.idempotencyKey !== 'string' || !value.idempotencyKey.trim() || value.idempotencyKey.length > 200
+    || !['claimed', 'renewed', 'released'].includes(value.action as string)
+    || !Number.isSafeInteger(value.createdAt)
+    || value.action === 'released' && value.expiresAt !== undefined
+    || value.action !== 'released' && (!Number.isSafeInteger(value.leaseSeconds) || (value.leaseSeconds as number) < 60 || (value.leaseSeconds as number) > 900
+      || !Number.isSafeInteger(value.expiresAt)
+      || (value.expiresAt as number) <= (value.createdAt as number)
+      || value.expiresAt !== (value.createdAt as number) + (value.leaseSeconds as number) * 1000)) {
+    throw new Error('The shared inbox contains an invalid task coordination event.');
+  }
+  return {
+    key: `${projectId}\0${value.id}`, id: value.id, projectId, claimId: value.claimId, taskId: value.taskId,
+    client: value.client.trim(), idempotencyKey: value.idempotencyKey,
+    action: value.action as ProjectTaskClaimAction, createdAt: value.createdAt as number,
+    ...(typeof value.leaseSeconds === 'number' ? { leaseSeconds: value.leaseSeconds } : {}),
+    ...(typeof value.expiresAt === 'number' ? { expiresAt: value.expiresAt } : {}),
+  };
+}
+
+function latestTaskClaimEvents(events: ProjectTaskClaimEvent[]): Map<string, ProjectTaskClaimEvent> {
+  const latest = new Map<string, ProjectTaskClaimEvent>();
+  for (const event of [...events].sort((first, second) => first.createdAt - second.createdAt || first.id.localeCompare(second.id))) {
+    latest.set(event.claimId, event);
+  }
+  return latest;
+}
+
+function taskClaimHeldAt(events: ProjectTaskClaimEvent[], claimId: string, taskId: string, client: string, timestamp: number): boolean {
+  const event = [...events]
+    .filter(candidate => candidate.claimId === claimId && candidate.createdAt <= timestamp)
+    .sort((first, second) => first.createdAt - second.createdAt || first.id.localeCompare(second.id)).at(-1);
+  return !!event && event.taskId === taskId && event.client === client && event.action !== 'released'
+    && (event.expiresAt ?? 0) > timestamp;
+}
+
+function validateTaskClaimTransition(event: ProjectTaskClaimEvent, events: ProjectTaskClaimEvent[], now: number): void {
+  const latest = latestTaskClaimEvents(events);
+  if (event.action === 'claimed') {
+    const activeForTask = [...latest.values()].find(previous => previous.taskId === event.taskId
+      && previous.action !== 'released' && (previous.expiresAt ?? 0) > now);
+    if (activeForTask) throw new Error('This task is already claimed by another client.');
+    return;
+  }
+  const current = latest.get(event.claimId);
+  if (!current || current.taskId !== event.taskId || current.client !== event.client || current.action === 'released') {
+    throw new Error('This task claim is unavailable to the requesting client.');
+  }
+  if (event.action === 'renewed' && (current.expiresAt ?? 0) <= now) {
+    throw new Error('This task claim has expired. Claim the task again before renewing it.');
+  }
+}
+
+export async function listProjectTaskClaims(projectId: string): Promise<ProjectTaskClaim[]> {
+  const [events, facts] = await withTransaction(['claims', 'memory'], 'readonly', async transaction => Promise.all([
+    idbRequest<ProjectTaskClaimEvent[]>(transaction.objectStore('claims').index('projectId').getAll(IDBKeyRange.only(projectId))),
+    idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))),
+  ]));
+  const tasks = new Map(facts.filter(fact => fact.category === 'task').map(fact => [fact.id, fact]));
+  const now = Date.now();
+  const latest = latestTaskClaimEvents(events);
+  return events
+    .sort((first, second) => second.createdAt - first.createdAt || second.id.localeCompare(first.id))
+    .slice(0, 100)
+    .map(event => ({
+      projectId, claimId: event.claimId, taskId: event.taskId, client: event.client, action: event.action,
+      active: latest.get(event.claimId)?.id === event.id && event.action !== 'released' && (event.expiresAt ?? 0) > now
+        && tasks.get(event.taskId)?.status === 'confirmed' && !tasks.get(event.taskId)?.conflictsWith.length
+        && tasks.get(event.taskId)?.taskState !== 'done' && tasks.get(event.taskId)?.taskState !== 'blocked',
+      claimedAt: event.createdAt, ...(typeof event.leaseSeconds === 'number' ? { leaseSeconds: event.leaseSeconds } : {}),
+      ...(typeof event.expiresAt === 'number' ? { expiresAt: event.expiresAt } : {}),
+      ...(event.action === 'released' ? { releasedAt: event.createdAt } : {}),
+      ...(tasks.get(event.taskId) ? { taskTopic: tasks.get(event.taskId)!.topic, taskStatement: tasks.get(event.taskId)!.statement } : {}),
+    }));
+}
+
+function matchesAcceptedProposalFact(fact: ProjectMemoryFact,
+  proposal: Pick<ProjectUpdateProposal, 'id' | 'sessionId' | 'sessionVersion' | 'messageId' | 'evidenceQuote'>): boolean {
+  return fact.evidence.some(evidence => evidence.proposalId === proposal.id
+    && evidence.kind === 'conversation' && evidence.sessionId === proposal.sessionId
+    && evidence.version === proposal.sessionVersion && evidence.messageId === proposal.messageId
+    && evidence.quote === proposal.evidenceQuote);
+}
+
+function recoverInterruptedProposal(proposal: ProjectUpdateProposal, facts: ProjectMemoryFact[], changedAt: number): void {
+  const acceptedFact = facts.find(fact => matchesAcceptedProposalFact(fact, proposal));
+  proposal.status = !acceptedFact ? 'pending'
+    : acceptedFact.status === 'rejected' || acceptedFact.status === 'superseded' ? 'revoked' : 'accepted';
+  if (acceptedFact) proposal.acceptedFactId = acceptedFact.id;
+  delete proposal.reviewingSince;
+  proposal.reviewedAt = acceptedFact ? changedAt : undefined;
+  proposal.statusHistory.push({ status: proposal.status, changedAt });
+  appendProposalAudit(proposal, acceptedFact ? proposal.status === 'revoked' ? 'revoked' : 'accepted' : 'review-reopened', 'user', changedAt);
+}
+
+function sameUpdateSubmission(existing: ProjectUpdateProposal, candidate: ProjectUpdateProposal): boolean {
+  const submitted = existing.auditHistory[0]?.snapshot;
+  return existing.id === candidate.id && existing.projectId === candidate.projectId
+    && existing.client === candidate.client && existing.idempotencyKey === candidate.idempotencyKey
+    && !!submitted && submitted.category === candidate.category && submitted.topic === candidate.topic
+    && submitted.statement === candidate.statement && submitted.taskState === candidate.taskState
+    && submitted.evidenceReference === candidate.evidenceReference && submitted.evidenceQuote === candidate.evidenceQuote
+    && submitted.sessionId === candidate.sessionId && submitted.sessionVersion === candidate.sessionVersion
+    && submitted.messageId === candidate.messageId && submitted.taskId === candidate.taskId && submitted.claimId === candidate.claimId;
+}
+
+async function readSharedInbox(handle: SharedProjectFileHandle, offset = 0): Promise<{ text: string; nextOffset: number }> {
+  if (await handle.queryPermission({ mode: 'read' }) !== 'granted') throw new Error('The update inbox permission is required.');
+  const file = await handle.getFile();
+  if (file.size > MAX_SHARED_PROJECT_BACKUP_BYTES) throw new Error('The update inbox exceeds the 256 MiB limit.');
+  const start = file.size < offset ? 0 : offset;
+  const appended = await file.slice(start).text();
+  const completeLength = appended.lastIndexOf('\n') + 1;
+  const completeText = appended.slice(0, completeLength);
+  return { text: completeText, nextOffset: start + utf8ByteLength(completeText) };
+}
+
+export async function recoverStaleProjectUpdateReviews(projectId: string, changedAt = Date.now()): Promise<boolean> {
+  const candidates = await withTransaction(['updates'], 'readonly', async transaction =>
+    idbRequest<ProjectUpdateProposal[]>(transaction.objectStore('updates').index('projectId').getAll(IDBKeyRange.only(projectId))));
+  if (!candidates.some(proposal => proposal.status === 'reviewing'
+    && (proposal.reviewingSince ?? 0) < changedAt - UPDATE_REVIEW_STALE_AFTER)) return false;
+  return withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
+    const updates = transaction.objectStore('updates');
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const existing = await idbRequest<ProjectUpdateProposal[]>(updates.index('projectId').getAll(IDBKeyRange.only(projectId)));
+    const stale = existing.filter(proposal => proposal.status === 'reviewing'
+      && (proposal.reviewingSince ?? 0) < changedAt - UPDATE_REVIEW_STALE_AFTER);
+    if (!stale.length) return false;
+    const facts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
+    for (const proposal of stale) {
+      recoverInterruptedProposal(proposal, facts, changedAt);
+      updates.put(proposal);
+    }
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    if (project && !project.restoringSince) { touchProject(project, changedAt); projects.put(project); }
+    return true;
+  });
+}
+
+export async function listProjectUpdateProposals(projectId: string): Promise<ProjectUpdateProposal[]> {
+  return withTransaction(['updates'], 'readonly', async transaction =>
+    (await idbRequest<ProjectUpdateProposal[]>(transaction.objectStore('updates').index('projectId').getAll(IDBKeyRange.only(projectId))))
+      .sort((first, second) => second.createdAt - first.createdAt));
+}
+
+export async function importSharedProjectUpdates(projectId: string): Promise<ProjectUpdateImportResult> {
+  const { project, shared } = await sharedProjectStatus(projectId);
+  if (!project || !shared?.inboxHandle) return { imported: 0, pending: 0, changed: false };
+  const inbox = await readSharedInbox(shared.inboxHandle, shared.inboxReadOffset ?? 0);
+  const candidates: ProjectUpdateProposal[] = [];
+  const taskClaimCandidates: ProjectTaskClaimEvent[] = [];
+  for (const line of inbox.text.split(/\r?\n/).filter(Boolean)) {
+    if (utf8ByteLength(line) > 64 * 1024) throw new Error('The update inbox contains an oversized record.');
+    let value: unknown;
+    try { value = JSON.parse(line) as unknown; }
+    catch { throw new Error('The update inbox contains invalid JSON.'); }
+    if (!isRecord(value) || value.version !== 1) {
+      throw new Error('The update inbox contains an unsupported record.');
+    }
+    if (value.type === 'threadpack_update') {
+      const proposal = validUpdateProposal(value.proposal, projectId);
+      if (!proposal || typeof value.fingerprint !== 'string'
+        || await sha256Fingerprint(JSON.stringify(value.proposal)) !== value.fingerprint) {
+        throw new Error('The update inbox candidate failed validation.');
+      }
+      const expectedId = `mcp-${(await sha256Fingerprint(JSON.stringify([projectId, proposal.client, proposal.idempotencyKey]))).slice(0, 40)}`;
+      if (proposal.id !== expectedId) throw new Error('The update inbox candidate identity is invalid.');
+      const saved = await getProjectSession(projectId, proposal.sessionId!, proposal.sessionVersion!);
+      const message = findSnapshotMessage(saved.content, proposal.messageId!);
+      if (!message || !message.content.includes(proposal.evidenceQuote)) {
+        throw new Error('The update inbox candidate evidence does not match its saved session.');
+      }
+      candidates.push(proposal);
+    } else if (value.type === 'threadpack_task_claim') {
+      const event = validateTaskClaimEvent(value.event, projectId);
+      if (typeof value.fingerprint !== 'string'
+        || await sha256Fingerprint(JSON.stringify(value.event)) !== value.fingerprint) {
+        throw new Error('A task coordination event failed its integrity check.');
+      }
+      const expectedId = `claim-event-${(await sha256Fingerprint(JSON.stringify([projectId, event.client, event.idempotencyKey]))).slice(0, 40)}`;
+      if (event.id !== expectedId) throw new Error('A task coordination event has an invalid identity.');
+      taskClaimCandidates.push(event);
+    } else {
+      throw new Error('The update inbox contains an unsupported record.');
+    }
+  }
+  let imported = 0;
+  const staleReviewsReopened = await recoverStaleProjectUpdateReviews(projectId);
+  const now = Date.now();
+  await withTransaction(['updates', 'claims', 'projects', 'shared', 'memory'], 'readwrite', async transaction => {
+    const updates = transaction.objectStore('updates');
+    const claims = transaction.objectStore('claims');
+    const projects = transaction.objectStore('projects');
+    const [existingClaims, facts] = await Promise.all([
+      idbRequest<ProjectTaskClaimEvent[]>(claims.index('projectId').getAll(IDBKeyRange.only(projectId))),
+      idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))),
+    ]);
+    const claimEvents = [...existingClaims];
+    const factsById = new Map(facts.map(fact => [fact.id, fact]));
+    for (const event of taskClaimCandidates) {
+      const existing = await idbRequest<ProjectTaskClaimEvent | undefined>(claims.get(event.key));
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(event)) throw new Error('A task claim idempotency key was reused for different content.');
+        continue;
+      }
+      const task = factsById.get(event.taskId);
+      if (!task || task.category !== 'task') throw new Error('A task claim refers to an unknown project task.');
+      if (event.action !== 'released' && (task.status !== 'confirmed' || task.conflictsWith.length
+        || task.taskState === 'done' || task.taskState === 'blocked')) {
+        throw new Error('Only confirmed, conflict-free, unfinished tasks can be claimed.');
+      }
+      validateTaskClaimTransition(event, claimEvents, now);
+      claims.add(event);
+      claimEvents.push(event);
+      imported++;
+    }
+    const latestClaims = latestTaskClaimEvents(claimEvents);
+    for (const proposal of candidates) {
+      if (proposal.taskId) {
+        const task = factsById.get(proposal.taskId);
+        const claim = proposal.claimId ? latestClaims.get(proposal.claimId) : undefined;
+        if (proposal.category !== 'task' || !task || task.category !== 'task' || task.status !== 'confirmed'
+          || task.conflictsWith.length || !claim || !taskClaimHeldAt(claimEvents, proposal.claimId!, proposal.taskId, proposal.client, proposal.createdAt)) {
+          throw new Error('The task result candidate is not bound to an active matching task claim.');
+        }
+      }
+      const existing = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
+      if (!existing) { updates.add(proposal); imported++; }
+      else if (!sameUpdateSubmission(existing, proposal)) {
+        throw new Error('An idempotency key was reused for a different candidate update.');
+      }
+    }
+    const sharedStore = transaction.objectStore('shared');
+    const currentShared = await idbRequest<SharedProjectBackupRecord | undefined>(sharedStore.get(projectId));
+    if (currentShared?.inboxHandle) {
+      currentShared.inboxReadOffset = Math.max(currentShared.inboxReadOffset ?? 0, inbox.nextOffset);
+      sharedStore.put(currentShared);
+    }
+    if (imported || staleReviewsReopened) {
+      const currentProject = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+      if (currentProject && !currentProject.restoringSince) { touchProject(currentProject, now); projects.put(currentProject); }
+    }
+  });
+  const pending = (await listProjectUpdateProposals(projectId)).filter(proposal => proposal.status === 'pending').length;
+  return { imported, pending, changed: imported > 0 || staleReviewsReopened };
+}
+
+export async function connectSharedProjectInbox(projectId: string, handle: SharedProjectFileHandle): Promise<ProjectUpdateImportResult> {
+  if (!handle || typeof handle.getFile !== 'function' || typeof handle.queryPermission !== 'function') throw new Error('Choose a browser-supported update inbox file.');
+  const project = await withTransaction(['projects'], 'readonly', transaction => idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+  if (!project || project.restoringSince) throw new Error('This project is unavailable.');
+  const { shared: currentShared } = await sharedProjectStatus(projectId);
+  if (!currentShared) throw new Error('Connect the shared project file before connecting its update inbox.');
+  if (await handle.isSameEntry(currentShared.handle)) throw new Error('Choose a separate file for candidate updates.');
+  if (await handle.requestPermission({ mode: 'read' }) !== 'granted') throw new Error('Read permission is required for the candidate update inbox.');
+  await withTransaction(['shared'], 'readwrite', async transaction => {
+    const shared = await idbRequest<SharedProjectBackupRecord | undefined>(transaction.objectStore('shared').get(projectId));
+    if (!shared) throw new Error('Connect the shared project file before connecting its update inbox.');
+    shared.inboxHandle = handle;
+    shared.inboxReadOffset = 0;
+    transaction.objectStore('shared').put(shared);
+  });
+  return importSharedProjectUpdates(projectId);
+}
+
+export async function reviewProjectUpdateProposal(projectId: string, proposalId: string, decision: 'accepted' | 'rejected'): Promise<MemoryStatus | undefined> {
+  const now = Date.now();
+  const proposal = await withTransaction(['updates'], 'readwrite', async transaction => {
+    const updates = transaction.objectStore('updates');
+    const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(`${projectId}\0${proposalId}`));
+    if (!current || current.status !== 'pending') throw new Error('This project update is already being reviewed or has been closed.');
+    current.status = 'reviewing';
+    current.reviewingSince = now;
+    current.statusHistory.push({ status: 'reviewing', changedAt: now });
+    appendProposalAudit(current, 'review-started', 'user', now);
+    updates.put(current);
+    return current;
+  });
+  try {
+    let acceptedFactStatus: MemoryStatus | undefined;
+    let acceptedFactId: string | undefined;
+    if (decision === 'accepted') {
+      const acceptedFact = await createProjectMemoryFactInternal(projectId, {
+        category: proposal.category, topic: proposal.topic, statement: proposal.statement, taskState: proposal.taskState,
+        origin: 'user', status: 'confirmed',
+        evidence: [{ kind: 'conversation', reference: `MCP candidate · ${proposal.client} · ${proposal.id}`,
+          sessionId: proposal.sessionId, version: proposal.sessionVersion, messageId: proposal.messageId,
+          proposalId: proposal.id, quote: proposal.evidenceQuote }],
+      });
+      acceptedFactStatus = acceptedFact.status;
+      acceptedFactId = acceptedFact.id;
+      await withTransaction(['updates'], 'readwrite', async transaction => {
+        const updates = transaction.objectStore('updates');
+        const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
+        if (!current || current.status !== 'reviewing' || current.reviewingSince !== now) throw new Error('This project update changed during review.');
+        current.acceptedFactId = acceptedFact.id;
+        updates.put(current);
+      });
+    }
+    await withTransaction(['updates', 'projects'], 'readwrite', async transaction => {
+      const updates = transaction.objectStore('updates');
+      const projects = transaction.objectStore('projects');
+      const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
+      if (!current || current.status !== 'reviewing' || current.reviewingSince !== now) throw new Error('This project update changed during review.');
+      current.status = decision;
+      current.reviewedAt = Date.now();
+      if (acceptedFactId) current.acceptedFactId = acceptedFactId;
+      delete current.reviewingSince;
+      current.statusHistory.push({ status: decision, changedAt: current.reviewedAt });
+      appendProposalAudit(current, decision, 'user', current.reviewedAt);
+      updates.put(current);
+      const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+      if (project && !project.restoringSince) { touchProject(project, current.reviewedAt); projects.put(project); }
+    });
+    return acceptedFactStatus;
+  } catch (error) {
+    await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
+      const updates = transaction.objectStore('updates');
+      const projects = transaction.objectStore('projects');
+      const memory = transaction.objectStore('memory');
+      const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
+      if (current?.status === 'reviewing' && current.reviewingSince === now) {
+        const reopenedAt = Date.now();
+        const facts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
+        recoverInterruptedProposal(current, facts, reopenedAt);
+        updates.put(current);
+        const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+        if (project && !project.restoringSince) { touchProject(project, reopenedAt); projects.put(project); }
+      }
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+export async function editProjectUpdateProposal(projectId: string, proposalId: string, input: Pick<ProjectUpdateProposal, 'category' | 'topic' | 'statement' | 'taskState' | 'evidenceReference' | 'evidenceQuote'>): Promise<void> {
+  if (!MEMORY_CATEGORIES.includes(input.category) || !input.topic.trim() || input.topic.length > 160
+    || !input.statement.trim() || input.statement.length > 4000
+    || input.taskState !== undefined && !TASK_STATES.includes(input.taskState)
+    || input.category !== 'task' && input.taskState !== undefined
+    || input.evidenceReference.length > 1000 || !input.evidenceQuote.trim() || input.evidenceQuote.length > 1000) throw new Error('The edited project update is invalid.');
+  const beforeEdit = await withTransaction(['updates'], 'readonly', async transaction =>
+    idbRequest<ProjectUpdateProposal | undefined>(transaction.objectStore('updates').get(`${projectId}\0${proposalId}`)));
+  if (!beforeEdit || beforeEdit.status !== 'pending') throw new Error('Only a pending project update can be edited.');
+  await prepareMemoryEvidence(projectId, { kind: 'conversation', reference: input.evidenceReference,
+    sessionId: beforeEdit.sessionId, version: beforeEdit.sessionVersion, messageId: beforeEdit.messageId, quote: input.evidenceQuote });
+  await withTransaction(['updates', 'projects'], 'readwrite', async transaction => {
+    const updates = transaction.objectStore('updates');
+    const projects = transaction.objectStore('projects');
+    const proposal = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(`${projectId}\0${proposalId}`));
+    if (!proposal || proposal.status !== 'pending') throw new Error('Only a pending project update can be edited.');
+    Object.assign(proposal, {
+      category: input.category, topic: input.topic.trim(), statement: input.statement.trim(),
+      taskState: input.taskState, evidenceReference: input.evidenceReference.trim(), evidenceQuote: input.evidenceQuote.trim(),
+    });
+    if (input.taskState === undefined) delete proposal.taskState;
+    if (input.category !== 'task') { delete proposal.taskId; delete proposal.claimId; }
+    const now = Date.now();
+    appendProposalAudit(proposal, 'edited', 'user', now);
+    updates.put(proposal);
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    if (project && !project.restoringSince) { touchProject(project, now); projects.put(project); }
+  });
+}
+
+export async function revokeAcceptedProjectUpdate(projectId: string, proposalId: string): Promise<void> {
+  const now = Date.now();
+  await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
+    const updates = transaction.objectStore('updates');
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(`${projectId}\0${proposalId}`));
+    if (!current || current.status !== 'accepted' || !current.acceptedFactId) throw new Error('This accepted project update cannot be revoked.');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${current.acceptedFactId}`));
+    if (!project || project.restoringSince || !fact || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact is unavailable for revocation.');
+    current.status = 'reviewing';
+    current.reviewingSince = now;
+    current.statusHistory.push({ status: 'reviewing', changedAt: now });
+    appendProposalAudit(current, 'review-started', 'user', now);
+    fact.status = 'rejected';
+    appendStatusChange(fact, 'rejected', now);
+    fact.updatedAt = now;
+    if (fact.conflictsWith.length) {
+      for (const conflictId of fact.conflictsWith) {
+        const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
+        if (conflict) {
+          conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
+          if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
+            const restoredStatus = conflict.reviewStateBeforeConflict;
+            conflict.status = restoredStatus;
+            appendStatusChange(conflict, restoredStatus, now);
+            delete conflict.reviewStateBeforeConflict;
+          }
+          conflict.updatedAt = now;
+          memory.put(conflict);
+        }
+      }
+      fact.conflictsWith = [];
+      delete fact.reviewStateBeforeConflict;
+    }
+    memory.put(fact);
+    touchProject(project, now);
+    projects.put(project);
+    updates.put(current);
+    current.status = 'revoked';
+    current.reviewedAt = now;
+    delete current.reviewingSince;
+    current.statusHistory.push({ status: 'revoked', changedAt: now });
+    appendProposalAudit(current, 'revoked', 'user', now);
+    updates.put(current);
+  });
+}
+
+function publicSharedStatus(project: ProjectRecord | undefined, shared: SharedProjectBackupRecord | undefined,
+  state?: SharedProjectBackupStatus['state']): SharedProjectBackupStatus {
+  if (!project || !shared) return { connected: false, state: 'disconnected' };
+  return {
+    connected: true,
+    state: state ?? (shared.syncedProjectUpdatedAt >= project.updatedAt ? 'current' : 'out-of-date'),
+    filename: shared.handle.name,
+    syncedAt: shared.syncedAt || undefined,
+    inboxConnected: !!shared.inboxHandle,
+    inboxFilename: shared.inboxHandle?.name,
+  };
+}
+
+export async function getSharedProjectBackupStatus(projectId: string): Promise<SharedProjectBackupStatus> {
+  const { project, shared } = await sharedProjectStatus(projectId);
+  if (!project || !shared) return { connected: false, state: 'disconnected' };
+  try {
+    const permission = await shared.handle.queryPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') return publicSharedStatus(project, shared, 'permission-required');
+    if (shared.inboxHandle && await shared.inboxHandle.queryPermission({ mode: 'read' }) !== 'granted') {
+      return publicSharedStatus(project, shared, 'permission-required');
+    }
+    return publicSharedStatus(project, shared);
+  } catch { return publicSharedStatus(project, shared, 'error'); }
+}
+
+async function syncSharedProjectBackupOnce(projectId: string): Promise<SharedProjectBackupStatus> {
+  const { project, shared } = await sharedProjectStatus(projectId);
+  if (!project || project.restoringSince || !shared) return { connected: false, state: 'disconnected' };
+  try {
+    if (await shared.handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+      return publicSharedStatus(project, shared, 'permission-required');
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = await withTransaction(['projects'], 'readonly', transaction =>
+        idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+      if (!before || before.restoringSince) return { connected: false, state: 'disconnected' };
+      const backup = await exportProjectBackup(projectId);
+      const afterExport = await withTransaction(['projects'], 'readonly', transaction =>
+        idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+      if (!afterExport || afterExport.updatedAt !== before.updatedAt) continue;
+      if (backup.size > MAX_SHARED_PROJECT_BACKUP_BYTES) return publicSharedStatus(afterExport, shared, 'error');
+      const writable = await shared.handle.createWritable();
+      try {
+        await writable.write(backup);
+        await writable.close();
+      } catch {
+        await writable.abort().catch(() => {});
+        throw new Error('The shared project file could not be updated.');
+      }
+      const afterWrite = await withTransaction(['projects'], 'readonly', transaction =>
+        idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+      if (!afterWrite || afterWrite.updatedAt !== before.updatedAt) continue;
+      const synced = { ...shared, syncedAt: Date.now(), syncedProjectUpdatedAt: afterWrite.updatedAt };
+      await withTransaction(['shared'], 'readwrite', async transaction => {
+        transaction.objectStore('shared').put(synced);
+      });
+      return publicSharedStatus(afterWrite, synced);
+    }
+    return publicSharedStatus(await withTransaction(['projects'], 'readonly', transaction =>
+      idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId))), shared, 'out-of-date');
+  } catch { return publicSharedStatus(project, shared, 'error'); }
+}
+
+export function syncSharedProjectBackup(projectId: string): Promise<SharedProjectBackupStatus> {
+  const previous = sharedBackupWrites.get(projectId) ?? Promise.resolve<SharedProjectBackupStatus>({ connected: false, state: 'disconnected' });
+  const current = previous.catch(() => ({ connected: false, state: 'error' as const }))
+    .then(() => syncSharedProjectBackupOnce(projectId))
+    .catch(() => ({ connected: true, state: 'error' as const }));
+  sharedBackupWrites.set(projectId, current);
+  const release = () => { if (sharedBackupWrites.get(projectId) === current) sharedBackupWrites.delete(projectId); };
+  void current.then(release, release);
+  return current;
+}
+
+export async function connectSharedProjectBackup(projectId: string, handle: SharedProjectFileHandle): Promise<SharedProjectBackupStatus> {
+  if (!handle || typeof handle.createWritable !== 'function' || typeof handle.queryPermission !== 'function') {
+    throw new Error('Choose a browser-supported local project file.');
+  }
+  const project = await withTransaction(['projects'], 'readonly', transaction =>
+    idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+  if (!project || project.restoringSince) throw new Error('This project is unavailable.');
+  if ((await handle.getFile()).size > 0) throw new Error('Choose a new, empty file for live project sharing. Existing backup files are never replaced during connection.');
+  await withTransaction(['shared'], 'readwrite', async transaction => {
+    transaction.objectStore('shared').put({ projectId, handle, syncedAt: 0, syncedProjectUpdatedAt: 0 } satisfies SharedProjectBackupRecord);
+  });
+  const status = await syncSharedProjectBackup(projectId);
+  if (status.state === 'error') throw new Error('The selected project file could not be initialized.');
+  return status;
+}
+
+export async function reconnectSharedProjectBackup(projectId: string): Promise<SharedProjectBackupStatus> {
+  const { shared } = await sharedProjectStatus(projectId);
+  if (!shared) return { connected: false, state: 'disconnected' };
+  try {
+    let permission = await shared.handle.queryPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') permission = await shared.handle.requestPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') return getSharedProjectBackupStatus(projectId);
+    return syncSharedProjectBackup(projectId);
+  } catch { return getSharedProjectBackupStatus(projectId); }
+}
+
+export async function disconnectSharedProjectBackup(projectId: string): Promise<void> {
+  await withTransaction(['shared'], 'readwrite', async transaction => {
+    transaction.objectStore('shared').delete(projectId);
+  });
 }
 
 function readBackupLines(file: Blob): AsyncGenerator<string> {
@@ -864,32 +1553,43 @@ function parseBackupLine(line: string): Record<string, unknown> {
 }
 
 interface ProjectBackupHeader {
-  version: 1 | 2;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  projectId?: string;
   project: Omit<ProjectRecord, 'id' | 'restoringSince'>;
   sessionCount: number;
   revisionCount: number;
   factCount: number;
+  updateCount: number;
+  claimCount: number;
 }
 
 function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHeader {
   const project = value.project;
-  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 || !isRecord(project)
+  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 || !isRecord(project)
     || !Number.isSafeInteger(value.createdAt)
+    || value.projectId !== undefined && (typeof value.projectId !== 'string' || !value.projectId || value.projectId.length > 200)
     || typeof project.name !== 'string' || typeof project.summary !== 'string' || typeof project.importantNotes !== 'string'
     || !Number.isSafeInteger(project.createdAt) || !Number.isSafeInteger(project.updatedAt)
     || typeof value.sessionCount !== 'number' || !Number.isSafeInteger(value.sessionCount) || value.sessionCount < 0
     || typeof value.revisionCount !== 'number' || !Number.isSafeInteger(value.revisionCount) || value.revisionCount < 0
     || value.sessionCount > value.revisionCount || value.revisionCount > 1_000_000
-    || value.version === 2 && (!Number.isSafeInteger(value.factCount) || (value.factCount as number) < 0 || (value.factCount as number) > 100_000)) {
+    || value.version >= 2 && (!Number.isSafeInteger(value.factCount) || (value.factCount as number) < 0 || (value.factCount as number) > 100_000)
+    || value.version >= 6 && (!Number.isSafeInteger(value.updateCount) || (value.updateCount as number) < 0 || (value.updateCount as number) > 1_000_000)
+    || value.version < 6 && value.updateCount !== undefined && value.updateCount !== 0
+    || value.version === 7 && (!Number.isSafeInteger(value.claimCount) || (value.claimCount as number) < 0 || (value.claimCount as number) > 1_000_000)
+    || value.version < 7 && value.claimCount !== undefined && value.claimCount !== 0) {
     throw new Error('This project backup has an unsupported or invalid header.');
   }
   const name = normalizeName(project.name);
   if (project.summary.length > 10000 || project.importantNotes.length > 20000) throw new Error('The project backup contains oversized project notes.');
   return {
+    ...(typeof value.projectId === 'string' ? { projectId: value.projectId } : {}),
     project: { name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt as number, updatedAt: project.updatedAt as number },
     version: value.version,
     sessionCount: value.sessionCount, revisionCount: value.revisionCount,
-    factCount: value.version === 2 ? value.factCount as number : 0,
+    factCount: value.version >= 2 ? value.factCount as number : 0,
+    updateCount: value.version >= 6 ? value.updateCount as number : 0,
+    claimCount: value.version === 7 ? value.claimCount as number : 0,
   };
 }
 
@@ -924,6 +1624,7 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
       || !EVIDENCE_KINDS.includes(candidate.kind as EvidenceKind)
       || typeof candidate.reference !== 'string' || candidate.reference.length > 1000
       || typeof candidate.quote !== 'string' || candidate.quote.length > 1000
+      || candidate.proposalId !== undefined && (candidate.kind !== 'conversation' || typeof candidate.proposalId !== 'string' || !candidate.proposalId || candidate.proposalId.length > 200)
       || !Number.isSafeInteger(candidate.recordedAt)
       || !['source-matched', 'user-recorded', 'unattached'].includes(candidate.verification as string)) {
       throw new Error('The project backup contains invalid memory evidence.');
@@ -955,6 +1656,7 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
       ...(typeof candidate.version === 'number' ? { version: candidate.version } : {}),
       ...(typeof candidate.messageId === 'string' ? { messageId: candidate.messageId } : {}),
       ...(typeof candidate.messageFingerprint === 'string' ? { messageFingerprint: candidate.messageFingerprint } : {}),
+      ...(typeof candidate.proposalId === 'string' ? { proposalId: candidate.proposalId } : {}),
       ...(typeof candidate.commit === 'string' ? { commit: candidate.commit } : {}),
       ...(typeof candidate.command === 'string' ? { command: candidate.command } : {}),
     });
@@ -971,6 +1673,79 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     ...(typeof value.supersedes === 'string' ? { supersedes: value.supersedes } : {}),
     ...(typeof value.supersededBy === 'string' ? { supersededBy: value.supersededBy } : {}),
     createdAt: value.createdAt as number, updatedAt: value.updatedAt as number,
+  };
+}
+
+function validateBackupUpdate(value: unknown, projectId: string, sourceProjectId: string, ids: Set<string>): ProjectUpdateProposal {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
+    || value.projectId !== sourceProjectId || typeof value.client !== 'string' || !value.client.trim() || value.client.length > 200
+    || !MEMORY_CATEGORIES.includes(value.category as MemoryCategory) || typeof value.topic !== 'string' || !value.topic.trim() || value.topic.length > 160
+    || typeof value.statement !== 'string' || !value.statement.trim() || value.statement.length > 4000
+    || typeof value.evidenceReference !== 'string' || value.evidenceReference.length > 1000
+    || typeof value.evidenceQuote !== 'string' || value.evidenceQuote.length > 1000
+    || typeof value.sessionId !== 'string' || !value.sessionId || value.sessionId.length > 200
+    || !Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 1
+    || typeof value.messageId !== 'string' || !value.messageId || value.messageId.length > 500
+    || !['pending', 'reviewing', 'accepted', 'rejected', 'revoked'].includes(value.status as string)
+    || typeof value.idempotencyKey !== 'string' || !value.idempotencyKey || value.idempotencyKey.length > 200
+    || !Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 100
+    || !Array.isArray(value.auditHistory) || value.auditHistory.length < 1 || value.auditHistory.length > 200
+    || value.acceptedFactId !== undefined && (typeof value.acceptedFactId !== 'string' || !value.acceptedFactId || value.acceptedFactId.length > 200)
+    || !Number.isSafeInteger(value.createdAt) || value.reviewedAt !== undefined && !Number.isSafeInteger(value.reviewedAt)) {
+    throw new Error('The project backup contains an invalid candidate update.');
+  }
+  const statusHistory = value.statusHistory.map(change => {
+    if (!isRecord(change) || !['pending', 'reviewing', 'accepted', 'rejected', 'revoked'].includes(change.status as string)
+      || !Number.isSafeInteger(change.changedAt)) throw new Error('The project backup contains invalid update status history.');
+    return { status: change.status as ProjectUpdateStatus, changedAt: change.changedAt as number } satisfies ProjectUpdateStatusChange;
+  });
+  if (statusHistory.at(-1)?.status !== value.status || statusHistory.some((change, index) => index > 0 && change.changedAt < statusHistory[index - 1]!.changedAt)) {
+    throw new Error('The project backup contains inconsistent update status history.');
+  }
+  const auditHistory = value.auditHistory.map(entry => {
+    if (!isRecord(entry) || !['submitted', 'review-started', 'edited', 'accepted', 'rejected', 'revoked', 'review-reopened'].includes(entry.action as string)
+      || !['mcp-client', 'user'].includes(entry.actor as string) || !['pending', 'reviewing', 'accepted', 'rejected', 'revoked'].includes(entry.status as string)
+      || !Number.isSafeInteger(entry.changedAt) || !isRecord(entry.snapshot)
+      || !MEMORY_CATEGORIES.includes(entry.snapshot.category as MemoryCategory) || typeof entry.snapshot.topic !== 'string'
+      || typeof entry.snapshot.statement !== 'string' || typeof entry.snapshot.evidenceReference !== 'string' || typeof entry.snapshot.evidenceQuote !== 'string'
+      || typeof entry.snapshot.sessionId !== 'string' || !Number.isSafeInteger(entry.snapshot.sessionVersion)
+      || typeof entry.snapshot.messageId !== 'string'
+      || entry.snapshot.taskId !== undefined && (typeof entry.snapshot.taskId !== 'string' || !entry.snapshot.taskId || entry.snapshot.taskId.length > 200)
+      || entry.snapshot.claimId !== undefined && (typeof entry.snapshot.claimId !== 'string' || !entry.snapshot.claimId || entry.snapshot.claimId.length > 200 || typeof entry.snapshot.taskId !== 'string')
+      || entry.snapshot.taskState !== undefined && !TASK_STATES.includes(entry.snapshot.taskState as TaskState)) {
+      throw new Error('The project backup contains invalid candidate update audit history.');
+    }
+    return { action: entry.action as ProjectUpdateAuditEntry['action'], actor: entry.actor as ProjectUpdateAuditEntry['actor'],
+      ...(typeof entry.clientClaim === 'string' ? { clientClaim: entry.clientClaim } : {}), status: entry.status as ProjectUpdateStatus,
+      changedAt: entry.changedAt as number, snapshot: entry.snapshot as ProjectUpdateAuditEntry['snapshot'] };
+  });
+  if (auditHistory.at(-1)?.status !== (value.status === 'reviewing' ? 'reviewing' : value.status)) {
+    throw new Error('The project backup contains inconsistent candidate update audit history.');
+  }
+  if (auditHistory[0]!.action !== 'submitted' || auditHistory[0]!.actor !== 'mcp-client'
+    || auditHistory[0]!.status !== 'pending' || auditHistory[0]!.clientClaim !== value.client
+    || auditHistory.some((entry, index) => index > 0 && (entry.changedAt < auditHistory[index - 1]!.changedAt || entry.actor !== 'user'))) {
+    throw new Error('The project backup contains inconsistent candidate update provenance.');
+  }
+  const stateChanges = auditHistory.filter(entry => entry.action !== 'edited');
+  if (stateChanges.length !== statusHistory.length || stateChanges.some((entry, index) =>
+    entry.status !== statusHistory[index]!.status || entry.changedAt !== statusHistory[index]!.changedAt)) {
+    throw new Error('The project backup candidate update audit does not match its status history.');
+  }
+  const id = value.id;
+  if (ids.has(id)) throw new Error('The project backup contains duplicate candidate update IDs.');
+  ids.add(id);
+  return {
+    key: `${projectId}\0${id}`, id, projectId, client: value.client, category: value.category as MemoryCategory,
+    sessionId: value.sessionId as string, sessionVersion: value.sessionVersion as number, messageId: value.messageId as string,
+    ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}),
+    ...(typeof value.claimId === 'string' ? { claimId: value.claimId } : {}),
+    topic: value.topic, statement: value.statement, evidenceReference: value.evidenceReference, evidenceQuote: value.evidenceQuote,
+    ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
+    idempotencyKey: value.idempotencyKey as string, status: value.status as ProjectUpdateProposal['status'], statusHistory, auditHistory,
+    ...(typeof value.acceptedFactId === 'string' ? { acceptedFactId: value.acceptedFactId } : {}), createdAt: value.createdAt as number,
+    ...(typeof value.reviewedAt === 'number' ? { reviewedAt: value.reviewedAt } : {}),
+    ...(typeof value.reviewNote === 'string' ? { reviewNote: value.reviewNote } : {}),
   };
 }
 
@@ -1007,7 +1782,7 @@ async function writeRestoredRevision(projectId: string, session: ProjectSessionR
     || !Number.isSafeInteger(value.messageCount) || (value.messageCount as number) < 0
     || typeof value.sourceName !== 'string' || value.sourceName.length > 1000
     || !Number.isSafeInteger(value.createdAt)) throw new Error('The project backup contains invalid history.');
-  if (encoder.encode(value.content).byteLength > MAX_PROJECT_SESSION_BYTES || await sha256Fingerprint(value.content) !== value.fingerprint) {
+  if (utf8ByteLength(value.content) > MAX_PROJECT_SESSION_BYTES || await sha256Fingerprint(value.content) !== value.fingerprint) {
     throw new Error('A project history entry failed its integrity check.');
   }
   const snapshot = inspectSnapshot(value.content);
@@ -1039,8 +1814,14 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   let sessionCount = 0;
   let revisionCount = 0;
   let seenMemory = false;
+  let seenUpdates = false;
+  let seenClaims = false;
   const facts: ProjectMemoryFact[] = [];
   const factIds = new Set<string>();
+  const updates: ProjectUpdateProposal[] = [];
+  const updateIds = new Set<string>();
+  const claims: ProjectTaskClaimEvent[] = [];
+  const claimIds = new Set<string>();
   try {
     const first = await iterator.next();
     if (first.done) throw new Error('The project backup is empty.');
@@ -1073,7 +1854,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         expectedVersion++;
         revisionCount++;
       } else if (record.type === 'memory') {
-        if (header.version !== 2 || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+        if (header.version < 2 || seenUpdates || seenClaims || !isRecord(record.data) || typeof record.fingerprint !== 'string'
           || !/^[a-f0-9]{64}$/.test(record.fingerprint) || facts.length >= header.factCount) {
           throw new Error('The project backup contains unexpected memory records.');
         }
@@ -1082,10 +1863,40 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         const fingerprint = await memoryBackupFingerprint(record.data as Omit<ProjectMemoryFact, 'key' | 'projectId'>);
         if (fingerprint !== record.fingerprint) throw new Error('A project memory record failed its integrity check.');
         facts.push(await validateBackupMemory(record.data, project.id, factIds));
+      } else if (record.type === 'update') {
+        if (header.version < 6 || seenClaims || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+          || !/^[a-f0-9]{64}$/.test(record.fingerprint) || updates.length >= header.updateCount) {
+          throw new Error('The project backup contains an unexpected candidate update.');
+        }
+        if (activeSession && expectedVersion <= activeSession.currentVersion) throw new Error('The project backup has an incomplete conversation history.');
+        seenMemory = true;
+        seenUpdates = true;
+        if (await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint) throw new Error('A candidate update failed its integrity check.');
+        const proposal = validateBackupUpdate(record.data, project.id, header.projectId ?? project.id, updateIds);
+        const saved = await getProjectSession(project.id, proposal.sessionId!, proposal.sessionVersion);
+        const citedMessage = findSnapshotMessage(saved.content, proposal.messageId!);
+        if (!citedMessage || !citedMessage.content.includes(proposal.evidenceQuote)) throw new Error('A candidate update citation does not match its saved session.');
+        updates.push(proposal);
+      } else if (record.type === 'claim') {
+        if (header.version !== 7 || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+          || !/^[a-f0-9]{64}$/.test(record.fingerprint) || claims.length >= header.claimCount
+          || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint) {
+          throw new Error('The project backup contains an invalid task claim event.');
+        }
+        if (activeSession && expectedVersion <= activeSession.currentVersion) throw new Error('The project backup has an incomplete conversation history.');
+        seenMemory = true;
+        seenUpdates = true;
+        seenClaims = true;
+        const sourceProjectId = header.projectId ?? project.id;
+        const claim = validateTaskClaimEvent(record.data, sourceProjectId);
+        if (claimIds.has(claim.id)) throw new Error('The project backup contains duplicate task claim events.');
+        claimIds.add(claim.id);
+        claims.push({ ...claim, key: `${project.id}\0${claim.id}`, projectId: project.id });
       } else throw new Error('The project backup contains an unknown record type.');
     }
     if (activeSession && expectedVersion <= activeSession.currentVersion
-      || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount || facts.length !== header.factCount) {
+      || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount || facts.length !== header.factCount
+      || updates.length !== header.updateCount || claims.length !== header.claimCount) {
       throw new Error('The project backup is incomplete.');
     }
     const factsById = new Map(facts.map(fact => [fact.id, fact]));
@@ -1096,16 +1907,45 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         throw new Error('The project backup contains inconsistent memory relationships.');
       }
     }
-    if (facts.length) await withTransaction(['memory'], 'readwrite', async transaction => {
+    for (const update of updates) if (update.status === 'accepted' || update.status === 'revoked') {
+      const fact = update.acceptedFactId ? factsById.get(update.acceptedFactId) : undefined;
+      if (!fact || update.status === 'revoked' && fact.status !== 'rejected' && fact.status !== 'superseded'
+        || update.status === 'accepted' && !['confirmed', 'needs-review'].includes(fact.status)) {
+        throw new Error('A candidate update status does not match its project fact.');
+      }
+    }
+    const claimHistory: ProjectTaskClaimEvent[] = [];
+    for (const claim of claims) {
+      const task = factsById.get(claim.taskId);
+      if (!task || task.category !== 'task') throw new Error('A task claim refers to an unknown project task.');
+      validateTaskClaimTransition(claim, claimHistory, claim.createdAt);
+      claimHistory.push(claim);
+    }
+    for (const update of updates) if (update.taskId) {
+      const task = factsById.get(update.taskId);
+      if (!task || task.category !== 'task' || !update.claimId
+        || !taskClaimHeldAt(claimHistory, update.claimId, update.taskId, update.client, update.createdAt)) {
+        throw new Error('A task result update does not match its recorded task claim.');
+      }
+    }
+    const activeClaims = [...latestTaskClaimEvents(claims).values()].filter(claim => claim.action !== 'released' && (claim.expiresAt ?? 0) > Date.now());
+    if (activeClaims.some((claim, index) => activeClaims.slice(index + 1).some(other => other.taskId === claim.taskId))) {
+      throw new Error('The project backup contains multiple active claims for one task.');
+    }
+    if (facts.length || updates.length || claims.length) await withTransaction(['memory', 'updates', 'claims'], 'readwrite', async transaction => {
       const memory = transaction.objectStore('memory');
       for (const fact of facts) memory.add(fact);
+      const updateStore = transaction.objectStore('updates');
+      for (const update of updates) updateStore.add(update);
+      const claimStore = transaction.objectStore('claims');
+      for (const claim of claims) claimStore.add(claim);
     });
     const completed = { ...project, restoringSince: undefined, updatedAt: Date.now() };
     delete completed.restoringSince;
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').put(completed); });
     return completed;
   } catch (error) {
-    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
+    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
     throw error;
   } finally { await iterator.return(undefined).catch(() => {}); }
 }

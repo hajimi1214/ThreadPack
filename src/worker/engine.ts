@@ -10,7 +10,7 @@ import { buildContextBundle } from './context-bundle';
 import { extractZipText } from './zip-import';
 import { sha256Fingerprint } from '../handoff-draft';
 import { localizeWarning } from '../../cli/i18n';
-import { MAX_PROJECT_SESSION_BYTES } from '../projects/limits';
+import { MAX_PROJECT_SESSION_BYTES, utf8ByteLength } from '../projects/limits';
 import type { CleanSummary, CompareMessageRequest, CompareMessageResult, ContextBundleResult, ConversationInfo, CopyMessageRequest, ExcerptExportResult, ExportBundleRequest, ExportExcerptRequest, ExportResult, ExportSnippetsRequest, ExportSourceSessionResult, HandoffRequest, ImportProgress, ParseInfo, ParseProjectSessionRequest, ParseRequest, PreviewFilters, PreviewMessage, QueryRequest, QueryResult, QuerySnippetsRequest, SnippetArchiveResult, SnippetFilters, SnippetQueryResult, WorkerRequest, WorkerResult, WorkerResultMap } from './types';
 
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
@@ -20,7 +20,7 @@ const STALE_REVISION = 'This preview is out of date. Refresh the cleanup result 
 const CANCELLED_IMPORT = 'This import was cancelled or replaced by a newer import.';
 const IMAGE_DATA = /data:image\/[a-z0-9.+-]+;base64,(?:[a-z0-9+/=_-]|\\[rn])+/gi;
 const encoder = new TextEncoder();
-const byteLength = (value: string): number => encoder.encode(value).byteLength;
+const byteLength = utf8ByteLength;
 
 async function messageFingerprint(message: Conversation['messages'][number]): Promise<string> {
   return sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`);

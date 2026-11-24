@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ArrowDownToLine, Clock3, FileJson, FolderPlus, LoaderCircle, Search, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { Archive, ArrowDownToLine, Check, Clock3, FileJson, FolderPlus, Inbox, Link2, LoaderCircle, RefreshCw, Search, ShieldCheck, Trash2, Unlink, Upload, X } from 'lucide-react';
 import type { TranslationKey } from '../i18n';
 import type { Lang } from '../i18n';
 import {
-  createProject, deleteProject, exportProjectBackup, getProjectSession, listProjectRevisions,
-  listProjects, listProjectSessions, restoreProjectBackup, restoreProjectRevision, saveProjectSession, updateProject,
+  connectSharedProjectBackup, connectSharedProjectInbox, createProject, deleteProject, disconnectSharedProjectBackup, exportProjectBackup,
+  getProjectSession, getSharedProjectBackupStatus, listProjectRevisions, listProjects, listProjectSessions,
+  importSharedProjectUpdates, listProjectTaskClaims, listProjectUpdateProposals, reconnectSharedProjectBackup, recoverStaleProjectUpdateReviews, reviewProjectUpdateProposal,
+  editProjectUpdateProposal, revokeAcceptedProjectUpdate, restoreProjectBackup, restoreProjectRevision,
+  saveProjectSession, syncSharedProjectBackup, updateProject,
 } from './store';
-import type { ProjectRecord, ProjectRevisionSummary, ProjectSessionInput, ProjectSessionSummary } from './store';
+import type { ProjectRecord, ProjectRevisionSummary, ProjectSessionInput, ProjectSessionSummary, SharedProjectBackupStatus, SharedProjectFileHandle } from './store';
+import type { ProjectTaskClaim, ProjectUpdateProposal } from './memory-types';
 import ProjectMemoryPanel from './ProjectMemoryPanel';
 
 interface ActiveSession { conversationId: string; title: string; messageCount: number }
@@ -36,9 +40,20 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [sharedStatus, setSharedStatus] = useState<SharedProjectBackupStatus>({ connected: false, state: 'disconnected' });
+  const [proposals, setProposals] = useState<ProjectUpdateProposal[]>([]);
+  const [taskClaims, setTaskClaims] = useState<ProjectTaskClaim[]>([]);
+  const [editingProposalId, setEditingProposalId] = useState('');
+  const [editingProposalTopic, setEditingProposalTopic] = useState('');
+  const [editingProposalStatement, setEditingProposalStatement] = useState('');
+  const [editingProposalCategory, setEditingProposalCategory] = useState<ProjectUpdateProposal['category']>('decision');
+  const [editingProposalTaskState, setEditingProposalTaskState] = useState<ProjectUpdateProposal['taskState']>('unclear');
+  const [editingProposalEvidence, setEditingProposalEvidence] = useState('');
+  const [editingProposalQuote, setEditingProposalQuote] = useState('');
   const backupInput = useRef<HTMLInputElement>(null);
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null;
   const dateFormatter = useMemo(() => new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }), [lang]);
+  const sharedFileAvailable = window.isSecureContext && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
 
   async function refreshProjects(preferredId = selectedProjectId) {
     const next = await listProjects();
@@ -46,12 +61,15 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     const nextId = next.some(project => project.id === preferredId) ? preferredId : next[0]?.id ?? '';
     setSelectedProjectId(nextId);
     setProjectReload(value => value + 1);
+    setSharedStatus(nextId ? await syncSharedProjectBackup(nextId) : { connected: false, state: 'disconnected' });
   }
 
   async function refreshProjectMetadata(projectId: string) {
     const next = await listProjects();
     setProjects(next);
     if (next.some(project => project.id === projectId)) setSelectedProjectId(projectId);
+    setProjectReload(value => value + 1);
+    setSharedStatus(await syncSharedProjectBackup(projectId));
   }
 
   useEffect(() => {
@@ -60,6 +78,49 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
       .catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); });
     return () => { active = false; };
   }, [t.projectStorageError]);
+
+  useEffect(() => {
+    if (!selectedProjectId) { setSharedStatus({ connected: false, state: 'disconnected' }); return; }
+    let active = true;
+    void getSharedProjectBackupStatus(selectedProjectId).then(async current => {
+      let latest = current.connected && current.state === 'out-of-date'
+        ? await syncSharedProjectBackup(selectedProjectId) : current;
+      const recovered = await recoverStaleProjectUpdateReviews(selectedProjectId);
+      if (recovered) {
+        if (current.connected) latest = await syncSharedProjectBackup(selectedProjectId);
+        const [nextProjects, nextProposals] = await Promise.all([
+          listProjects(), listProjectUpdateProposals(selectedProjectId),
+        ]);
+        if (active) { setProjects(nextProjects); setProposals(nextProposals); }
+      }
+      if (active) setSharedStatus(latest);
+    }).catch(() => { if (active) setSharedStatus({ connected: true, state: 'error' }); });
+    return () => { active = false; };
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId) { setProposals([]); return; }
+    let active = true;
+    const load = async () => {
+      const result = sharedStatus.inboxConnected
+        ? await importSharedProjectUpdates(selectedProjectId)
+        : { imported: 0, pending: 0, changed: false };
+      const next = await listProjectUpdateProposals(selectedProjectId);
+      const nextTaskClaims = await listProjectTaskClaims(selectedProjectId);
+      if (active) {
+        setProposals(next);
+        setTaskClaims(nextTaskClaims);
+        if (result.changed) {
+          const status = await syncSharedProjectBackup(selectedProjectId);
+          setSharedStatus(status);
+          setProjects(await listProjects());
+        }
+      }
+    };
+    void load().catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); });
+    const timer = sharedStatus.inboxConnected ? window.setInterval(() => { void load().catch(() => {}); }, 2000) : undefined;
+    return () => { active = false; if (timer !== undefined) window.clearInterval(timer); };
+  }, [selectedProjectId, sharedStatus.inboxConnected, projectReload, t.projectStorageError]);
 
   useEffect(() => {
     if (!selectedProject) { setProjectName(''); setSummary(''); setImportantNotes(''); return; }
@@ -110,8 +171,122 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     if (!selectedProject) return;
     void run('details', async () => {
       const project = await updateProject(selectedProject.id, { name: projectName, summary, importantNotes });
-      setProjects(current => current.map(item => item.id === project.id ? project : item));
+      await refreshProjectMetadata(project.id);
       notify(t.projectDetailsSaved);
+    });
+  }
+
+  function connectSharedFile() {
+    if (!selectedProject) return;
+    const picker = (window as Window & {
+      showSaveFilePicker?: (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>;
+    }).showSaveFilePicker;
+    if (!window.isSecureContext || !picker) {
+      setError(t.projectSharedUnsupported);
+      return;
+    }
+    const projectId = selectedProject.id;
+    const suggestedName = `threadpack-shared-${projectId.slice(0, 8)}.jsonl`;
+    void run('shared-connect', async () => {
+      const handle = await picker.call(window, { suggestedName, types: [{ description: 'ThreadPack project state', accept: { 'application/x-ndjson': ['.jsonl'] } }] });
+      const status = await connectSharedProjectBackup(projectId, handle as SharedProjectFileHandle);
+      setSharedStatus(status);
+      if (status.state !== 'current') setError(t.projectSharedFailed);
+      else notify(t.projectSharedCurrent);
+    });
+  }
+
+  function reconnectSharedFile() {
+    if (!selectedProject) return;
+    void run('shared-reconnect', async () => {
+      const status = await reconnectSharedProjectBackup(selectedProject.id);
+      setSharedStatus(status);
+      if (status.state !== 'current') setError(status.state === 'permission-required' ? t.projectSharedPermission : t.projectSharedFailed);
+      else notify(t.projectSharedCurrent);
+    });
+  }
+
+  function disconnectSharedFile() {
+    if (!selectedProject) return;
+    void run('shared-disconnect', async () => {
+      await disconnectSharedProjectBackup(selectedProject.id);
+      setSharedStatus({ connected: false, state: 'disconnected' });
+      notify(t.projectSharedDisconnected);
+    });
+  }
+
+  function connectUpdateInbox() {
+    if (!selectedProject) return;
+    const picker = (window as Window & {
+      showOpenFilePicker?: (options: { multiple?: boolean; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle[]>;
+    }).showOpenFilePicker;
+    if (!window.isSecureContext || !picker) { setError(t.projectSharedUnsupported); return; }
+    void run('inbox-connect', async () => {
+      const [handle] = await picker.call(window, { multiple: false, types: [{ description: 'ThreadPack update inbox', accept: { 'application/x-ndjson': ['.jsonl'] } }] });
+      if (!handle) return;
+      const result = await connectSharedProjectInbox(selectedProject.id, handle as SharedProjectFileHandle);
+      setSharedStatus(current => ({ ...current, inboxConnected: true, inboxFilename: handle.name, pendingUpdates: result.pending }));
+      setProposals(await listProjectUpdateProposals(selectedProject.id));
+      setTaskClaims(await listProjectTaskClaims(selectedProject.id));
+      await refreshProjectMetadata(selectedProject.id);
+    });
+  }
+
+  function reviewProposal(proposal: ProjectUpdateProposal, decision: 'accepted' | 'rejected') {
+    if (!selectedProject) return;
+    void run('proposal-review', async () => {
+      const factStatus = await reviewProjectUpdateProposal(selectedProject.id, proposal.id, decision);
+      setProposals(await listProjectUpdateProposals(selectedProject.id));
+      setTaskClaims(await listProjectTaskClaims(selectedProject.id));
+      await refreshProjectMetadata(selectedProject.id);
+      notify(decision === 'accepted'
+        ? factStatus === 'confirmed' ? t.projectUpdateAccepted : t.projectUpdateAcceptedConflict
+        : t.projectUpdateRejected);
+    });
+  }
+
+  function beginProposalEdit(proposal: ProjectUpdateProposal) {
+    setEditingProposalId(proposal.id);
+    setEditingProposalTopic(proposal.topic);
+    setEditingProposalStatement(proposal.statement);
+    setEditingProposalCategory(proposal.category);
+    setEditingProposalTaskState(proposal.taskState ?? 'unclear');
+    setEditingProposalEvidence(proposal.evidenceReference);
+    setEditingProposalQuote(proposal.evidenceQuote);
+  }
+
+  function saveProposalEdit(proposal: ProjectUpdateProposal) {
+    if (!selectedProject) return;
+    void run('proposal-edit', async () => {
+      await editProjectUpdateProposal(selectedProject.id, proposal.id, {
+        category: editingProposalCategory, topic: editingProposalTopic, statement: editingProposalStatement,
+        ...(editingProposalCategory === 'task' ? { taskState: editingProposalTaskState } : {}),
+        evidenceReference: editingProposalEvidence, evidenceQuote: editingProposalQuote,
+      });
+      setEditingProposalId('');
+      setProposals(await listProjectUpdateProposals(selectedProject.id));
+    });
+  }
+
+  function revokeProposal(proposal: ProjectUpdateProposal) {
+    if (!selectedProject) return;
+    void run('proposal-revoke', async () => {
+      await revokeAcceptedProjectUpdate(selectedProject.id, proposal.id);
+      setProposals(await listProjectUpdateProposals(selectedProject.id));
+      setTaskClaims(await listProjectTaskClaims(selectedProject.id));
+      await refreshProjectMetadata(selectedProject.id);
+      notify(t.projectUpdateRevoked);
+    });
+  }
+
+  function checkUpdateInbox() {
+    if (!selectedProject) return;
+    void run('inbox-check', async () => {
+      const result = await importSharedProjectUpdates(selectedProject.id);
+      setProposals(await listProjectUpdateProposals(selectedProject.id));
+      setTaskClaims(await listProjectTaskClaims(selectedProject.id));
+      await refreshProjectMetadata(selectedProject.id);
+      if (!result.imported) notify(t.projectUpdateNoNewUpdates);
     });
   }
 
@@ -192,6 +367,66 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
       </section>
       {selectedProject && <section className="project-detail">
         <div className="project-detail-heading"><div><h3>{selectedProject.name}</h3><small>{t.projectUpdated} · {formatDate(selectedProject.updatedAt)}</small></div><button className="icon-button muted" aria-label={t.projectBackupExport} title={t.projectBackupExport} disabled={!!busy} onClick={downloadBackup}><ArrowDownToLine size={16} /></button><button className="icon-button muted" aria-label={t.projectDelete} title={t.projectDelete} disabled={!!busy} onClick={removeSelectedProject}><Trash2 size={16} /></button></div>
+        <div className="project-shared-state" aria-label={t.projectSharedConnect}>
+          <div><strong><Link2 size={13} />{t.projectSharedConnect}</strong><small>{sharedStatus.connected
+            ? sharedStatus.state === 'current' ? t.projectSharedCurrent : sharedStatus.state === 'out-of-date' ? t.projectSharedOutOfDate : sharedStatus.state === 'permission-required' ? t.projectSharedPermission : t.projectSharedFailed
+            : sharedFileAvailable ? t.projectSharedHint : t.projectSharedUnsupported}</small>{sharedStatus.filename && <small>{sharedStatus.filename}</small>}</div>
+          {sharedStatus.connected
+            ? <><button className="button secondary small" disabled={!!busy || sharedStatus.state === 'current'} onClick={reconnectSharedFile}><RefreshCw size={13} />{t.projectSharedReconnect}</button><button className="icon-button muted" aria-label={t.projectSharedDisconnect} title={t.projectSharedDisconnect} disabled={!!busy} onClick={disconnectSharedFile}><Unlink size={14} /></button></>
+            : <button className="button secondary small" disabled={!!busy || !sharedFileAvailable} onClick={connectSharedFile}><Link2 size={13} />{t.projectSharedConnect}</button>}
+        </div>
+        <div className="project-shared-state project-update-inbox" aria-label={t.projectUpdateInbox}>
+          <div><strong><Inbox size={13} />{t.projectUpdateInbox}</strong><small>{sharedStatus.inboxConnected ? `${sharedStatus.inboxFilename ?? ''} · ${proposals.filter(proposal => proposal.status === 'pending').length} ${t.projectUpdatePending}` : t.projectUpdateInboxHint}</small></div>
+          {sharedStatus.inboxConnected && <button className="button secondary small" disabled={!!busy} onClick={checkUpdateInbox}><RefreshCw size={13} />{t.projectUpdateCheck}</button>}<button className="button secondary small" disabled={!!busy || !sharedStatus.connected || !sharedFileAvailable} onClick={connectUpdateInbox}><Inbox size={13} />{t.projectUpdateConnect}</button>
+        </div>
+        {!!taskClaims.length && <section className="project-update-list" aria-label={t.projectTaskCoordination}>
+          <h4>{t.projectTaskCoordination}</h4>
+          {taskClaims.map((claim, index) => <article className="project-update-item" key={`${claim.claimId}-${claim.action}-${claim.claimedAt}-${index}`}>
+            <div><strong>{claim.taskTopic ?? claim.taskId}</strong><p>{claim.taskStatement ?? claim.taskId}</p>
+              <small>{claim.active ? t.projectTaskClaimActive : claim.action === 'released' ? t.projectTaskClaimReleased : t.projectTaskClaimExpired}
+                {' · '}{t.projectUpdateClientClaim} · {claim.client} · {formatDate(claim.claimedAt)}
+                {claim.expiresAt ? ` · ${t.projectTaskClaimExpires} ${formatDate(claim.expiresAt)}` : ''}</small>
+            </div>
+          </article>)}
+        </section>}
+        {proposals.some(proposal => proposal.status === 'pending') && <section className="project-update-list" aria-label={t.projectUpdateInbox}>
+          <h4>{t.projectUpdateReview}</h4>
+          {proposals.filter(proposal => proposal.status === 'pending').map(proposal => <article className="project-update-item" key={proposal.id}>
+            <div>
+              {editingProposalId === proposal.id ? <div className="project-update-edit">
+                <label><span>{t.memoryCategory}</span><select value={editingProposalCategory} onChange={event => setEditingProposalCategory(event.target.value as ProjectUpdateProposal['category'])}>{['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'].map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+                <label><span>{t.projectUpdateTopic}</span><input maxLength={160} value={editingProposalTopic} onChange={event => setEditingProposalTopic(event.target.value)} /></label>
+                <label><span>{t.projectUpdateStatement}</span><textarea maxLength={4000} value={editingProposalStatement} onChange={event => setEditingProposalStatement(event.target.value)} /></label>
+                {editingProposalCategory === 'task' && <label><span>{t.memoryTaskProgress}</span><select value={editingProposalTaskState} onChange={event => setEditingProposalTaskState(event.target.value as NonNullable<ProjectUpdateProposal['taskState']>)}>{[['not-started', t.memoryTaskNotStarted], ['in-progress', t.memoryTaskInProgress], ['done', t.memoryTaskDone], ['blocked', t.memoryTaskBlocked], ['unclear', t.memoryTaskUnclear]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                <small>{t.memorySession}: {sessions.find(session => session.id === proposal.sessionId)?.title ?? proposal.sessionId} · v{proposal.sessionVersion} · {proposal.messageId}</small>
+                <label><span>{t.projectUpdateEvidence}</span><input maxLength={1000} value={editingProposalEvidence} onChange={event => setEditingProposalEvidence(event.target.value)} /></label>
+                <label><span>{t.projectUpdateEvidence}</span><textarea maxLength={1000} value={editingProposalQuote} onChange={event => setEditingProposalQuote(event.target.value)} /></label>
+                <button className="button secondary small" disabled={!!busy} onClick={() => saveProposalEdit(proposal)}>{t.projectUpdateSaveEdit}</button>
+              </div> : <>
+                <strong>{proposal.topic}</strong>
+                <small>{t.projectUpdateClientClaim} · {proposal.client} · {formatDate(proposal.createdAt)}</small>
+                {proposal.taskId && proposal.claimId && <small>{t.projectTaskClaimLink} · {proposal.taskId} · {proposal.claimId}</small>}
+                <p>{proposal.statement}</p>
+                <small>{proposal.evidenceReference || t.projectUpdateNoEvidence}</small>
+                {proposal.evidenceQuote && <blockquote>{proposal.evidenceQuote}</blockquote>}
+              </>}
+            </div>
+            <div>
+              <button className="text-button" disabled={!!busy} onClick={() => reviewProposal(proposal, 'accepted')}><Check size={12} />{t.projectUpdateAccept}</button>
+              <button className="text-button" disabled={!!busy} onClick={() => beginProposalEdit(proposal)}>{t.projectUpdateEdit}</button>
+              <button className="text-button danger-text" disabled={!!busy} onClick={() => reviewProposal(proposal, 'rejected')}><X size={12} />{t.projectUpdateReject}</button>
+            </div>
+          </article>)}
+        </section>}
+        {proposals.some(proposal => proposal.status !== 'pending' && proposal.status !== 'reviewing') && <section className="project-update-list" aria-label={t.projectUpdateHistory}>
+          <h4>{t.projectUpdateHistory}</h4>
+          {proposals.filter(proposal => proposal.status !== 'pending' && proposal.status !== 'reviewing').map(proposal => <article className="project-update-item" key={proposal.id}>
+            <div><strong>{proposal.topic} · {proposal.status}</strong><small>{t.projectUpdateClientClaim} · {proposal.client} · {formatDate(proposal.createdAt)}</small>
+              {proposal.taskId && proposal.claimId && <small>{t.projectTaskClaimLink} · {proposal.taskId} · {proposal.claimId}</small>}<p>{proposal.statement}</p>
+              <ol className="project-update-audit">{proposal.auditHistory.map((entry, index) => <li key={`${proposal.id}-${index}`}><small>{entry.action === 'submitted' ? t.projectUpdateSubmitted : entry.action === 'review-started' ? t.projectUpdateReviewStarted : entry.action === 'edited' ? t.projectUpdateEdited : entry.action === 'accepted' ? t.projectUpdateAccept : entry.action === 'rejected' ? t.projectUpdateReject : entry.action === 'revoked' ? t.projectUpdateRevocation : t.projectUpdateReopened} · {entry.actor === 'user' ? t.projectUpdateActorUser : `${t.projectUpdateActorClient}: ${entry.clientClaim ?? proposal.client}`} · {formatDate(entry.changedAt)}</small><p>{entry.snapshot.topic}: {entry.snapshot.statement}</p></li>)}</ol>
+            </div>{proposal.status === 'accepted' && <button className="text-button danger-text" disabled={!!busy} onClick={() => revokeProposal(proposal)}>{t.projectUpdateRevoke}</button>}
+          </article>)}
+        </section>}
         {confirmDelete && <div className="project-confirm"><span>{t.projectDeleteConfirm}</span><button className="button danger small" disabled={!!busy} onClick={removeSelectedProject}>{t.projectDelete}</button><button className="button secondary small" onClick={() => setConfirmDelete(false)}>{t.cancel}</button></div>}
         <div className="project-fields"><label><span>{t.projectName}</span><input value={projectName} maxLength={100} onChange={event => setProjectName(event.target.value)} /></label><label><span>{t.projectStatus}</span><textarea value={summary} maxLength={10000} rows={2} onChange={event => setSummary(event.target.value)} /></label><label><span>{t.projectImportantNotes}</span><textarea value={importantNotes} maxLength={20000} rows={3} onChange={event => setImportantNotes(event.target.value)} /></label><button className="button secondary small" disabled={!!busy} onClick={saveDetails}>{t.projectSaveDetails}</button></div>
         <ProjectMemoryPanel key={selectedProject.id} project={selectedProject} reloadKey={projectReload} sessions={sessions} t={t} notify={notify} onChanged={() => refreshProjectMetadata(selectedProject.id)} />

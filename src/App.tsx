@@ -28,7 +28,7 @@ import { startPwa, applyUpdate } from './pwa';
 import type { ParseInfo, CleanSummary, QueryResult, ExportResult, ExportSourceSessionResult, ContextBundleResult, ExcerptExportResult, HandoffResult, ImportProgress, CopyMessageResult, CompareMessageResult, PinIdsResult, PinNumbersResult } from './worker/types';
 import ProjectLibrary from './projects/ProjectLibrary';
 import type { ProjectSessionInput } from './projects/store';
-import { MAX_PROJECT_SESSION_BYTES } from './projects/limits';
+import { MAX_PROJECT_SESSION_BYTES, utf8ByteLength } from './projects/limits';
 
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
@@ -41,7 +41,7 @@ const NO_PIN_FILTER: string[] = [];
 const PROJECT_URL = 'https://hajimi1214.github.io/ThreadPack/';
 const reviewChangeLabels = { image: 'imagesRemoved', tool: 'outputsTrimmed', duplicate: 'duplicatesRemoved', secret: 'secretsRedacted', email: 'emailsRedacted', custom: 'customRedacted' } as const;
 const bytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 ** 2 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 ** 2).toFixed(2)} MiB`;
-const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
+const byteLength = utf8ByteLength;
 function handoffSummaryTimeRange(range: HandoffResult['summary']['timeRange'] | undefined, lang: Lang, fallback: string) {
   if (!range) return fallback;
   const format = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' });

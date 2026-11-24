@@ -23,7 +23,7 @@ class CliError extends Error {}
 const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
 Usage: threadpack <input.jsonl|json|md|txt|-> --out <file> [options]
-       threadpack mcp --backup <project-backup.jsonl>
+       threadpack mcp --backup <project-state.jsonl> [--inbox <updates.jsonl>] [--read-only]
 
 Options:
   --format <markdown|jsonl|handoff|report>  Output format (default: markdown)
@@ -47,7 +47,9 @@ Options:
   --version                              Show the installed version
 
 MCP bridge:
-  threadpack mcp --backup <file>         Serve the latest authorized backup over MCP stdio
+  --inbox <file>                         Shared candidate and task-claim inbox
+  --read-only                            Expose context and task-list tools only
+  Task claims are temporary coordination leases; result candidates need user review.
 
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.
 Browser ZIP imports allow up to 256 entries and 100 MiB expanded content.

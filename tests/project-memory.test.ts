@@ -4,6 +4,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from '../src/projects/memory-ai';
 import { generateProjectContext } from '../src/projects/memory-context';
 import { buildProjectContextPackage } from '../src/projects/memory-export';
+import { utf8ByteLength } from '../src/projects/limits';
 import type { ProjectMemoryFact } from '../src/projects/memory-types';
 
 function fact(overrides: Partial<ProjectMemoryFact> & Pick<ProjectMemoryFact, 'id' | 'topic' | 'statement'>): ProjectMemoryFact {
@@ -17,6 +18,14 @@ function fact(overrides: Partial<ProjectMemoryFact> & Pick<ProjectMemoryFact, 'i
   };
   return Object.assign(defaults, overrides);
 }
+
+test('chunked UTF-8 byte counting matches encoding across surrogate boundaries', () => {
+  const values = [
+    '', 'ASCII text', '中文和😀字符', '\ud800', 'a'.repeat(16_383) + '😀' + 'z'.repeat(20),
+    '🙂'.repeat(20_000),
+  ];
+  for (const value of values) assert.equal(utf8ByteLength(value), new TextEncoder().encode(value).byteLength);
+});
 
 test('project context search ranks exact facts, reports stale evidence and omits whole records over budget', () => {
   const old = fact({ id: 'old', topic: 'Storage', statement: 'Keep project data in IndexedDB.', conflictsWith: ['current'], status: 'needs-review' });
