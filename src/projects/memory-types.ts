@@ -68,7 +68,34 @@ export interface MemoryStatusChange {
   changedAt: number;
 }
 
-export interface MemoryEvidence {
+export type EvidenceBindingStatus = 'source_matched' | 'unverified' | 'invalid';
+export type EvidenceRelation = 'supports' | 'contradicts' | 'context_only' | 'insufficient' | 'unverified';
+export type EvidenceRelationBasis = 'user_attestation' | 'independent_verification' | 'none';
+export type EvidenceBindingIssue = 'project_mismatch' | 'missing_binding' | 'missing_revision' | 'revision_mismatch'
+  | 'missing_project_scope' | 'source_mismatch' | 'missing_message' | 'message_fingerprint_mismatch'
+  | 'revision_integrity' | 'revision_structure' | 'revision_content_invalid'
+  | 'quote_mismatch' | 'quote_fingerprint_mismatch' | 'quote_range_mismatch' | 'relation_mismatch';
+
+export interface EvidenceAssessment {
+  bindingStatus: EvidenceBindingStatus;
+  relation: EvidenceRelation;
+  relationBasis: EvidenceRelationBasis;
+  bindingIssue?: EvidenceBindingIssue;
+}
+
+export interface EvidenceRelationEvent {
+  id: string;
+  operationId: string;
+  actor: 'user';
+  relation: EvidenceRelation;
+  relationBasis: 'user_attestation' | 'none';
+  changedAt: number;
+  claimFingerprint: string;
+  evidenceFingerprint: string;
+}
+
+/** One citation on one claim. Optional assessment fields keep legacy rows readable. */
+export interface MemoryEvidence extends Partial<EvidenceAssessment> {
   id: string;
   kind: EvidenceKind;
   reference: string;
@@ -77,6 +104,15 @@ export interface MemoryEvidence {
   version?: number;
   messageId?: string;
   messageFingerprint?: string;
+  messageFingerprintVersion?: 2;
+  projectId?: string;
+  revisionFingerprint?: string;
+  sourceIdentity?: { platform?: string; sourceName?: string; sourceId?: string };
+  quoteFingerprint?: string;
+  quoteByteRange?: { start: number; end: number };
+  relationHistory?: EvidenceRelationEvent[];
+  legacyRelationHistory?: EvidenceRelationEvent[];
+  sourceProjectId?: string;
   proposalId?: string;
   commit?: string;
   command?: string;
@@ -135,8 +171,15 @@ export interface ProjectUpdateProposal {
   client: string;
   idempotencyKey: string;
   sessionId?: string;
+  sourceProjectId?: string;
   sessionVersion?: number;
   messageId?: string;
+  messageFingerprint?: string;
+  messageFingerprintVersion?: 2;
+  revisionFingerprint?: string;
+  quoteFingerprint?: string;
+  quoteByteRange?: { start: number; end: number };
+  sourceIdentity?: { platform?: string; sourceName?: string; sourceId?: string };
   taskId?: string;
   claimId?: string;
   category: MemoryCategory;

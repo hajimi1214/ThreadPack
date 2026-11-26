@@ -38,7 +38,10 @@ test('project changes update one authorized shared file and survive a reload', a
       setInboxAuditFile?: (text: string) => Promise<void>;
     };
     const storage = navigator.storage as StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> };
-    if (typeof testWindow.showSaveFilePicker !== 'function' || typeof storage.getDirectory !== 'function') return;
+    const handlePrototype = typeof FileSystemFileHandle === 'undefined' ? undefined : FileSystemFileHandle.prototype as unknown as Record<string, unknown>;
+    if (typeof testWindow.showSaveFilePicker !== 'function' || typeof storage.getDirectory !== 'function'
+      || typeof handlePrototype?.getFile !== 'function' || typeof handlePrototype.createWritable !== 'function'
+      || typeof handlePrototype.queryPermission !== 'function' || typeof handlePrototype.requestPermission !== 'function') return;
     testWindow.showSaveFilePicker = async () => {
       const root = await storage.getDirectory();
       return await root.getFileHandle('threadpack-live-project.jsonl', { create: true });
@@ -62,15 +65,20 @@ test('project changes update one authorized shared file and survive a reload', a
   });
 
   await page.goto('/');
-  const fileSharingSupported = await page.evaluate(() => window.isSecureContext
-    && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function');
+  const fileSharingSupported = await page.evaluate(() => {
+    const handlePrototype = typeof FileSystemFileHandle === 'undefined' ? undefined : FileSystemFileHandle.prototype as unknown as Record<string, unknown>;
+    return window.isSecureContext && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function'
+      && typeof (navigator.storage as StorageManager & { getDirectory?: unknown }).getDirectory === 'function'
+      && typeof handlePrototype?.getFile === 'function' && typeof handlePrototype.createWritable === 'function'
+      && typeof handlePrototype.queryPermission === 'function' && typeof handlePrototype.requestPermission === 'function';
+  });
   if (!fileSharingSupported) {
     await importConversation(page);
     await page.getByRole('button', { name: 'Projects', exact: true }).click();
     const library = page.getByRole('dialog', { name: 'Local project library', exact: true });
     await library.getByLabel('Project name', { exact: true }).fill('Local fallback project');
     await library.getByRole('button', { name: 'Create project', exact: true }).click();
-    await expect(library.locator('.project-shared-state')).toContainText('Live sharing needs a secure Chromium-based browser');
+    await expect(library.getByLabel('Connect live local state')).toContainText('Live sharing needs a secure Chromium-based browser');
     await expect(library.getByRole('button', { name: 'Connect live local state', exact: true })).toBeDisabled();
     return;
   }

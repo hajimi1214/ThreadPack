@@ -1,7 +1,13 @@
 import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
-import type { EvidenceKind, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, ProjectTaskClaim, ProjectTaskClaimAction, ProjectTaskClaimEvent, ProjectUpdateAction, ProjectUpdateAuditEntry, ProjectUpdateProposal, ProjectUpdateStatus, ProjectUpdateStatusChange, TaskState } from './memory-types';
+import type { EvidenceKind, EvidenceRelation, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, ProjectTaskClaim, ProjectTaskClaimAction, ProjectTaskClaimEvent, ProjectUpdateAction, ProjectUpdateAuditEntry, ProjectUpdateProposal, ProjectUpdateStatus, ProjectUpdateStatusChange, TaskState } from './memory-types';
+import {
+  assessEvidenceBinding, bindNewConversationEvidence, canAttestEvidenceRelation, createEvidenceRelationEvent, invalidEvidenceBinding,
+  indexEvidenceMessages, validateEvidenceRelation,
+} from './evidence-binding';
+import type { EvidenceScope, IndexedEvidenceRevision } from './evidence-binding';
+import type { EvidenceBindingIssue } from './memory-types';
 import { MAX_PROJECT_SESSION_BYTES, MAX_SHARED_PROJECT_BACKUP_BYTES, utf8ByteLength } from './limits';
 
 const DATABASE_NAME = 'threadpack-project-library';
@@ -629,22 +635,65 @@ function normalizeMemoryTopic(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function findSnapshotMessage(content: string, messageId: string): { id: string; role: string; timestamp?: string; content: string } | null {
-  let offset = 0;
-  while (offset < content.length) {
-    const end = content.indexOf('\n', offset);
-    const line = content.slice(offset, end < 0 ? content.length : end).replace(/\r$/, '');
-    offset = end < 0 ? content.length : end + 1;
-    if (!line) continue;
-    let record: unknown;
-    try { record = JSON.parse(line); } catch { throw new Error('The cited project history contains invalid JSON.'); }
-    if (!isRecord(record)) continue;
-    const message = record.type === 'threadpack_message' && isRecord(record.message) ? record.message : record;
-    if (message.id !== messageId || typeof message.content !== 'string' || typeof message.role !== 'string') continue;
-    return { id: messageId, role: message.role, content: message.content,
-      ...(typeof message.timestamp === 'string' ? { timestamp: message.timestamp } : {}) };
+class InvalidEvidenceRevisionError extends Error {
+  constructor(readonly bindingIssue: Extract<EvidenceBindingIssue, 'revision_integrity' | 'revision_structure' | 'revision_content_invalid'>) {
+    super('The saved evidence revision is invalid.');
+    this.name = 'InvalidEvidenceRevisionError';
   }
-  return null;
+}
+
+async function readEvidenceRevision(projectId: string, sessionId: string, version: number) {
+  const { session, revision } = await withTransaction(['sessions', 'revisions'], 'readonly', async transaction => {
+    const [session, revision] = await Promise.all([
+      idbRequest<ProjectSessionRecord | undefined>(transaction.objectStore('sessions').get(`${projectId}\0${sessionId}`)),
+      idbRequest<RevisionRecord | undefined>(transaction.objectStore('revisions').get([projectId, sessionId, version])),
+    ]);
+    return { session, revision };
+  });
+  if (!session || session.projectId !== projectId || !revision) return undefined;
+  if (typeof revision.content !== 'string' || !/^[a-f0-9]{64}$/.test(revision.fingerprint)
+    || revision.fingerprint !== await sha256Fingerprint(revision.content)) {
+    throw new InvalidEvidenceRevisionError('revision_integrity');
+  }
+  let snapshot: ReturnType<typeof inspectSnapshot>;
+  try { snapshot = inspectSnapshot(revision.content); }
+  catch { throw new InvalidEvidenceRevisionError('revision_content_invalid'); }
+  if (snapshot.messageCount !== (revision.messageCount ?? session.messageCount)
+    || version === session.currentVersion && (revision.fingerprint !== session.fingerprint
+      || revision.title !== undefined && revision.title !== session.title
+      || revision.platform !== undefined && revision.platform !== session.platform
+      || revision.messageCount !== undefined && revision.messageCount !== session.messageCount
+      || revision.sourceName !== undefined && revision.sourceName !== session.sourceName)) {
+    throw new InvalidEvidenceRevisionError('revision_structure');
+  }
+  try {
+    return { projectId, sessionId, version, fingerprint: revision.fingerprint, content: revision.content,
+      sourceIdentity: { platform: revision.platform, sourceName: revision.sourceName, sourceId: revision.sourceId },
+      messages: indexEvidenceMessages(revision.content) };
+  } catch {
+    throw new InvalidEvidenceRevisionError('revision_content_invalid');
+  }
+}
+
+function evidenceReader(scope: EvidenceScope, allowLocalAttestation = true) {
+  // Keep one revision index while reading adjacent citations without retaining every session's history.
+  let cached: { key: string; revision?: IndexedEvidenceRevision } | undefined;
+  return async (evidence: MemoryEvidence, fact: ProjectMemoryFact) => {
+    let revision: IndexedEvidenceRevision | undefined;
+    if (evidence.kind === 'conversation' && evidence.sessionId && Number.isSafeInteger(evidence.version)) {
+      const key = JSON.stringify([evidence.sessionId, evidence.version]);
+      if (cached?.key !== key) {
+        try { cached = { key, revision: await readEvidenceRevision(scope.projectId, evidence.sessionId, evidence.version!) }; }
+        catch (error) {
+          if (error instanceof InvalidEvidenceRevisionError) return invalidEvidenceBinding(evidence, error.bindingIssue);
+          throw error;
+        }
+      }
+      revision = cached.revision;
+    }
+    const binding = await assessEvidenceBinding(evidence, scope, revision);
+    return validateEvidenceRelation(fact, evidence, binding, allowLocalAttestation);
+  };
 }
 
 async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInput): Promise<MemoryEvidence> {
@@ -657,23 +706,22 @@ async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInp
   if (input.kind === 'conversation') {
     if (typeof input.sessionId !== 'string' || typeof input.messageId !== 'string'
       || !Number.isSafeInteger(input.version) || (input.version as number) < 1) throw new Error('Select a saved conversation message as evidence.');
-    const saved = await getProjectSession(projectId, input.sessionId, input.version);
-    const message = findSnapshotMessage(saved.content, input.messageId);
-    if (!message) throw new Error('The selected evidence message is unavailable in that saved version.');
-    const quote = input.quote?.trim() || message.content.slice(0, 600);
-    if (!quote || quote.length > 1000 || !message.content.includes(quote)) throw new Error('The evidence excerpt does not match the selected message.');
-    return {
+    const revision = await readEvidenceRevision(projectId, input.sessionId, input.version!);
+    if (!revision) throw new Error('The selected evidence message is unavailable in that saved version.');
+    const session = await withTransaction(['sessions'], 'readonly', transaction =>
+      idbRequest<ProjectSessionRecord | undefined>(transaction.objectStore('sessions').get(`${projectId}\0${input.sessionId}`)));
+    if (!session) throw new Error('This saved conversation is unavailable.');
+    return bindNewConversationEvidence({
       id: makeId(), kind: input.kind,
-      reference: `${saved.summary.title} · v${saved.version} · ${message.id}`,
-      quote, sessionId: input.sessionId, version: input.version, messageId: input.messageId,
+      reference: `${session.title} · v${input.version} · ${input.messageId}`,
+      quote: input.quote?.trim() ?? '', projectId, sourceProjectId: projectId, sessionId: input.sessionId, version: input.version, messageId: input.messageId,
       ...(input.proposalId ? { proposalId: input.proposalId } : {}),
-      messageFingerprint: await sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`),
       recordedAt, verification: 'source-matched',
-    };
+    }, revision);
   }
   if (input.kind === 'user') return {
     id: makeId(), kind: input.kind, reference: input.reference || 'No source attached', quote: '', recordedAt,
-    verification: 'unattached',
+    verification: 'unattached', bindingStatus: 'unverified', relation: 'unverified', relationBasis: 'none',
   };
   const commit = input.commit?.trim();
   if (!input.reference.trim() || !commit || !/^[a-f0-9]{7,64}$/i.test(commit) || !input.quote?.trim()) {
@@ -683,15 +731,72 @@ async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInp
   return {
     id: makeId(), kind: input.kind, reference: input.reference, quote: input.quote.trim(), commit,
     ...(input.command ? { command: input.command.trim().slice(0, 500) } : {}), recordedAt,
-    verification: 'user-recorded',
+    verification: 'user-recorded', bindingStatus: 'unverified', relation: 'unverified', relationBasis: 'none',
   };
 }
 
 export async function listProjectMemory(projectId: string): Promise<ProjectMemoryFact[]> {
   if (typeof projectId !== 'string' || projectId.length > 200) throw new Error('This project is unavailable.');
-  return withTransaction(['memory'], 'readonly', async transaction =>
-    (await idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))))
-      .sort((a, b) => b.updatedAt - a.updatedAt));
+  const facts = await withTransaction(['memory'], 'readonly', transaction =>
+    idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))));
+  const assess = evidenceReader({ projectId, sourceProjectId: projectId });
+  for (const fact of facts) {
+    const evidence: MemoryEvidence[] = [];
+    for (const citation of fact.evidence) evidence.push(await assess(citation, fact));
+    fact.evidence = evidence;
+  }
+  return facts.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function updateProjectMemoryEvidenceRelation(
+  projectId: string, factId: string, evidenceId: string, relation: EvidenceRelation,
+): Promise<ProjectMemoryFact> {
+  if (!['supports', 'contradicts', 'context_only', 'insufficient', 'unverified'].includes(relation)) {
+    throw new Error('Choose a valid evidence relationship.');
+  }
+  const before = await withTransaction(['projects', 'memory'], 'readonly', async transaction => {
+    const project = await idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId));
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(`${projectId}\0${factId}`));
+    if (!project || project.restoringSince || !fact || fact.status === 'rejected' || fact.status === 'superseded') {
+      throw new Error('This project memory entry is unavailable for evidence review.');
+    }
+    const evidence = fact.evidence.find(item => item.id === evidenceId);
+    if (!evidence) throw new Error('This evidence entry is unavailable.');
+    return { project, fact, evidence: { ...evidence } };
+  });
+  const assessed = await evidenceReader({ projectId, sourceProjectId: projectId })(before.evidence, before.fact);
+  if (relation !== 'unverified' && !canAttestEvidenceRelation(assessed)) {
+    throw new Error('This evidence source is unavailable for a user relationship review.');
+  }
+  const changedAt = Date.now();
+  const resetInvalidHistory = assessed.bindingIssue === 'relation_mismatch';
+  const event = await createEvidenceRelationEvent(before.fact, assessed, relation, makeId(), changedAt);
+  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${factId}`));
+    if (!project || project.restoringSince || !fact || fact.updatedAt !== before.fact.updatedAt
+      || fact.status === 'rejected' || fact.status === 'superseded') {
+      throw new Error('This project memory entry changed during evidence review. Reopen it and try again.');
+    }
+    const evidence = fact.evidence.find(item => item.id === evidenceId);
+    if (!evidence || JSON.stringify(evidence) !== JSON.stringify(before.evidence)) {
+      throw new Error('This evidence entry changed during review. Reopen it and try again.');
+    }
+    Object.assign(evidence, assessed, {
+      relation: event.relation, relationBasis: event.relationBasis,
+      relationHistory: [...(resetInvalidHistory ? [] : evidence.relationHistory ?? []), event],
+      ...(resetInvalidHistory || evidence.legacyRelationHistory?.length
+        ? { legacyRelationHistory: [...(evidence.legacyRelationHistory ?? []), ...(resetInvalidHistory ? evidence.relationHistory ?? [] : [])] }
+        : {}),
+    });
+    fact.updatedAt = changedAt;
+    memory.put(fact);
+    touchProject(project, changedAt);
+    projects.put(project);
+    return fact;
+  });
 }
 
 async function createProjectMemoryFactInternal(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
@@ -713,7 +818,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
   const normalizedTopic = normalizeMemoryTopic(topic);
   const evidenceInputs = input.evidence.length ? input.evidence : [{ kind: 'user' as const, reference: 'No source attached' }];
   const evidence = await Promise.all(evidenceInputs.map(item => prepareMemoryEvidence(projectId, item)));
-  if (input.origin === 'ai' && evidence.some(item => item.verification !== 'source-matched')) {
+  if (input.origin === 'ai' && evidence.some(item => item.bindingStatus !== 'source_matched')) {
     throw new Error('Every AI suggestion must cite selected conversation evidence.');
   }
   const id = makeId();
@@ -974,6 +1079,14 @@ function validUpdateProposal(value: unknown, projectId: string): ProjectUpdatePr
     || typeof value.sessionId !== 'string' || !value.sessionId || value.sessionId.length > 200
     || !Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 1
     || typeof value.messageId !== 'string' || !value.messageId || value.messageId.length > 500
+    || value.sourceProjectId !== undefined && (typeof value.sourceProjectId !== 'string' || !value.sourceProjectId || value.sourceProjectId.length > 200)
+    || value.messageFingerprint !== undefined && (typeof value.messageFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.messageFingerprint))
+    || value.messageFingerprintVersion !== undefined && value.messageFingerprintVersion !== 2
+    || value.revisionFingerprint !== undefined && (typeof value.revisionFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.revisionFingerprint))
+    || value.quoteFingerprint !== undefined && (typeof value.quoteFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.quoteFingerprint))
+    || value.quoteByteRange !== undefined && (!isRecord(value.quoteByteRange) || !Number.isSafeInteger(value.quoteByteRange.start)
+      || !Number.isSafeInteger(value.quoteByteRange.end) || (value.quoteByteRange.start as number) < 0
+      || (value.quoteByteRange.end as number) <= (value.quoteByteRange.start as number))
     || value.taskId !== undefined && (typeof value.taskId !== 'string' || !value.taskId || value.taskId.length > 200 || typeof value.claimId !== 'string' || !value.claimId || value.category !== 'task')
     || value.claimId !== undefined && (typeof value.claimId !== 'string' || !value.claimId || value.claimId.length > 200 || typeof value.taskId !== 'string')
     || !Number.isSafeInteger(value.createdAt)) return null;
@@ -981,6 +1094,17 @@ function validUpdateProposal(value: unknown, projectId: string): ProjectUpdatePr
     key: `${projectId}\0${value.id}`, id: value.id, projectId, client: value.client.trim(),
     idempotencyKey: value.idempotencyKey,
     sessionId: value.sessionId, sessionVersion: value.sessionVersion as number, messageId: value.messageId,
+    ...(typeof value.sourceProjectId === 'string' ? { sourceProjectId: value.sourceProjectId } : {}),
+    ...(typeof value.messageFingerprint === 'string' ? { messageFingerprint: value.messageFingerprint } : {}),
+    ...(value.messageFingerprintVersion === 2 ? { messageFingerprintVersion: 2 as const } : {}),
+    ...(typeof value.revisionFingerprint === 'string' ? { revisionFingerprint: value.revisionFingerprint } : {}),
+    ...(typeof value.quoteFingerprint === 'string' ? { quoteFingerprint: value.quoteFingerprint } : {}),
+    ...(isRecord(value.quoteByteRange) ? { quoteByteRange: { start: value.quoteByteRange.start as number, end: value.quoteByteRange.end as number } } : {}),
+    ...(isRecord(value.sourceIdentity) ? { sourceIdentity: {
+      ...(typeof value.sourceIdentity.platform === 'string' ? { platform: value.sourceIdentity.platform } : {}),
+      ...(typeof value.sourceIdentity.sourceName === 'string' ? { sourceName: value.sourceIdentity.sourceName } : {}),
+      ...(typeof value.sourceIdentity.sourceId === 'string' ? { sourceId: value.sourceIdentity.sourceId } : {}),
+    } } : {}),
     ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}),
     ...(typeof value.claimId === 'string' ? { claimId: value.claimId } : {}),
     category: value.category as MemoryCategory, topic: value.topic.trim(), statement: value.statement.trim(),
@@ -1095,6 +1219,11 @@ function sameUpdateSubmission(existing: ProjectUpdateProposal, candidate: Projec
   const submitted = existing.auditHistory[0]?.snapshot;
   return existing.id === candidate.id && existing.projectId === candidate.projectId
     && existing.client === candidate.client && existing.idempotencyKey === candidate.idempotencyKey
+    && existing.sourceProjectId === candidate.sourceProjectId && existing.messageFingerprint === candidate.messageFingerprint
+    && existing.messageFingerprintVersion === candidate.messageFingerprintVersion
+    && existing.revisionFingerprint === candidate.revisionFingerprint && existing.quoteFingerprint === candidate.quoteFingerprint
+    && JSON.stringify(existing.quoteByteRange) === JSON.stringify(candidate.quoteByteRange)
+    && JSON.stringify(existing.sourceIdentity) === JSON.stringify(candidate.sourceIdentity)
     && !!submitted && submitted.category === candidate.category && submitted.topic === candidate.topic
     && submitted.statement === candidate.statement && submitted.taskState === candidate.taskState
     && submitted.evidenceReference === candidate.evidenceReference && submitted.evidenceQuote === candidate.evidenceQuote
@@ -1165,11 +1294,28 @@ export async function importSharedProjectUpdates(projectId: string): Promise<Pro
       }
       const expectedId = `mcp-${(await sha256Fingerprint(JSON.stringify([projectId, proposal.client, proposal.idempotencyKey]))).slice(0, 40)}`;
       if (proposal.id !== expectedId) throw new Error('The update inbox candidate identity is invalid.');
-      const saved = await getProjectSession(projectId, proposal.sessionId!, proposal.sessionVersion!);
-      const message = findSnapshotMessage(saved.content, proposal.messageId!);
-      if (!message || !message.content.includes(proposal.evidenceQuote)) {
-        throw new Error('The update inbox candidate evidence does not match its saved session.');
-      }
+      const revision = await readEvidenceRevision(projectId, proposal.sessionId!, proposal.sessionVersion!);
+      if (!revision) throw new Error('The update inbox candidate revision is unavailable.');
+      const sourceProjectId = proposal.sourceProjectId ?? projectId;
+      const binding = proposal.messageFingerprint
+        ? await assessEvidenceBinding({ id: proposal.id, kind: 'conversation', reference: proposal.evidenceReference,
+          quote: proposal.evidenceQuote, projectId, sourceProjectId, sessionId: proposal.sessionId,
+          version: proposal.sessionVersion, messageId: proposal.messageId, messageFingerprint: proposal.messageFingerprint,
+          messageFingerprintVersion: proposal.messageFingerprintVersion, revisionFingerprint: proposal.revisionFingerprint,
+          quoteFingerprint: proposal.quoteFingerprint, quoteByteRange: proposal.quoteByteRange,
+          sourceIdentity: proposal.sourceIdentity,
+          recordedAt: proposal.createdAt, verification: 'source-matched' },
+        { projectId, sourceProjectId }, revision)
+        : await bindNewConversationEvidence({ id: proposal.id, kind: 'conversation', reference: proposal.evidenceReference,
+          quote: proposal.evidenceQuote, projectId, sourceProjectId, sessionId: proposal.sessionId,
+          version: proposal.sessionVersion, messageId: proposal.messageId,
+          recordedAt: proposal.createdAt, verification: 'source-matched' }, revision, sourceProjectId);
+      if (binding.bindingStatus !== 'source_matched') throw new Error('The update inbox candidate failed strict evidence binding.');
+      Object.assign(proposal, {
+        projectId, sourceProjectId, messageFingerprint: binding.messageFingerprint, messageFingerprintVersion: binding.messageFingerprintVersion,
+        revisionFingerprint: binding.revisionFingerprint, quoteFingerprint: binding.quoteFingerprint,
+        quoteByteRange: binding.quoteByteRange, sourceIdentity: binding.sourceIdentity,
+      });
       candidates.push(proposal);
     } else if (value.type === 'threadpack_task_claim') {
       const event = validateTaskClaimEvent(value.event, projectId);
@@ -1341,7 +1487,7 @@ export async function editProjectUpdateProposal(projectId: string, proposalId: s
   const beforeEdit = await withTransaction(['updates'], 'readonly', async transaction =>
     idbRequest<ProjectUpdateProposal | undefined>(transaction.objectStore('updates').get(`${projectId}\0${proposalId}`)));
   if (!beforeEdit || beforeEdit.status !== 'pending') throw new Error('Only a pending project update can be edited.');
-  await prepareMemoryEvidence(projectId, { kind: 'conversation', reference: input.evidenceReference,
+  const evidenceBinding = await prepareMemoryEvidence(projectId, { kind: 'conversation', reference: input.evidenceReference,
     sessionId: beforeEdit.sessionId, version: beforeEdit.sessionVersion, messageId: beforeEdit.messageId, quote: input.evidenceQuote });
   await withTransaction(['updates', 'projects'], 'readwrite', async transaction => {
     const updates = transaction.objectStore('updates');
@@ -1351,6 +1497,10 @@ export async function editProjectUpdateProposal(projectId: string, proposalId: s
     Object.assign(proposal, {
       category: input.category, topic: input.topic.trim(), statement: input.statement.trim(),
       taskState: input.taskState, evidenceReference: input.evidenceReference.trim(), evidenceQuote: input.evidenceQuote.trim(),
+      sourceProjectId: evidenceBinding.sourceProjectId, messageFingerprint: evidenceBinding.messageFingerprint,
+      messageFingerprintVersion: evidenceBinding.messageFingerprintVersion, revisionFingerprint: evidenceBinding.revisionFingerprint,
+      quoteFingerprint: evidenceBinding.quoteFingerprint, quoteByteRange: evidenceBinding.quoteByteRange,
+      sourceIdentity: evidenceBinding.sourceIdentity,
     });
     if (input.taskState === undefined) delete proposal.taskState;
     if (input.category !== 'task') { delete proposal.taskId; delete proposal.claimId; }
@@ -1597,7 +1747,7 @@ async function memoryBackupFingerprint(data: Omit<ProjectMemoryFact, 'key' | 'pr
   return sha256Fingerprint(JSON.stringify(data));
 }
 
-async function validateBackupMemory(value: unknown, projectId: string, factIds: Set<string>): Promise<ProjectMemoryFact> {
+async function validateBackupMemory(value: unknown, projectId: string, factIds: Set<string>, assess: ReturnType<typeof evidenceReader>): Promise<ProjectMemoryFact> {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id || value.id.length > 200
     || !MEMORY_CATEGORIES.includes(value.category as MemoryCategory)
     || !['user', 'ai'].includes(value.origin as string) || !MEMORY_STATUSES.includes(value.status as MemoryStatus)
@@ -1619,6 +1769,8 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
   if (factIds.has(id)) throw new Error('The project backup contains duplicate memory IDs.');
   factIds.add(id);
   const evidence: MemoryEvidence[] = [];
+  const claim = { id, projectId, category: value.category as MemoryCategory, topic: value.topic as string,
+    statement: value.statement as string, ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}) };
   for (const candidate of value.evidence) {
     if (!isRecord(candidate) || typeof candidate.id !== 'string' || !candidate.id || candidate.id.length > 200
       || !EVIDENCE_KINDS.includes(candidate.kind as EvidenceKind)
@@ -1629,37 +1781,15 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
       || !['source-matched', 'user-recorded', 'unattached'].includes(candidate.verification as string)) {
       throw new Error('The project backup contains invalid memory evidence.');
     }
-    if (candidate.kind === 'conversation') {
-      if (candidate.verification !== 'source-matched' || typeof candidate.sessionId !== 'string'
-        || !Number.isSafeInteger(candidate.version) || (candidate.version as number) < 1
-        || typeof candidate.messageId !== 'string' || typeof candidate.messageFingerprint !== 'string'
-        || !candidate.quote.trim()
-        || !/^[a-f0-9]{64}$/.test(candidate.messageFingerprint)) throw new Error('The project backup contains invalid conversation evidence.');
-      const saved = await getProjectSession(projectId, candidate.sessionId, candidate.version as number);
-      const message = findSnapshotMessage(saved.content, candidate.messageId);
-      if (!message || !message.content.includes(candidate.quote)
-        || await sha256Fingerprint(`${message.role}\0${message.timestamp ?? ''}\0${message.content}`) !== candidate.messageFingerprint) {
-        throw new Error('A memory citation does not match its saved conversation.');
-      }
-    } else if (candidate.kind === 'user') {
-      if (candidate.verification !== 'unattached') throw new Error('The project backup contains invalid user evidence.');
-    } else if (candidate.verification !== 'user-recorded' || typeof candidate.commit !== 'string'
-      || !/^[a-f0-9]{7,64}$/i.test(candidate.commit) || !candidate.quote.trim()
-      || candidate.kind === 'test' && (typeof candidate.command !== 'string' || !candidate.command.trim())) {
+    if (candidate.kind === 'user' && candidate.verification !== 'unattached') {
+      throw new Error('The project backup contains invalid user evidence.');
+    }
+    if ((candidate.kind === 'repository' || candidate.kind === 'test') && (candidate.verification !== 'user-recorded'
+      || typeof candidate.commit !== 'string' || !/^[a-f0-9]{7,64}$/i.test(candidate.commit) || !candidate.quote.trim()
+      || candidate.kind === 'test' && (typeof candidate.command !== 'string' || !candidate.command.trim()))) {
       throw new Error('The project backup contains invalid repository or test evidence.');
     }
-    evidence.push({
-      id: candidate.id, kind: candidate.kind as EvidenceKind, reference: candidate.reference,
-      quote: candidate.quote, recordedAt: candidate.recordedAt as number,
-      verification: candidate.verification as MemoryEvidence['verification'],
-      ...(typeof candidate.sessionId === 'string' ? { sessionId: candidate.sessionId } : {}),
-      ...(typeof candidate.version === 'number' ? { version: candidate.version } : {}),
-      ...(typeof candidate.messageId === 'string' ? { messageId: candidate.messageId } : {}),
-      ...(typeof candidate.messageFingerprint === 'string' ? { messageFingerprint: candidate.messageFingerprint } : {}),
-      ...(typeof candidate.proposalId === 'string' ? { proposalId: candidate.proposalId } : {}),
-      ...(typeof candidate.commit === 'string' ? { commit: candidate.commit } : {}),
-      ...(typeof candidate.command === 'string' ? { command: candidate.command } : {}),
-    });
+    evidence.push(await assess(candidate as unknown as MemoryEvidence, claim as ProjectMemoryFact));
   }
   const normalizedTopic = normalizeMemoryTopic(value.topic);
   const statusHistory = readStatusHistory(value.statusHistory, value.status as MemoryStatus, value.createdAt as number);
@@ -1686,6 +1816,14 @@ function validateBackupUpdate(value: unknown, projectId: string, sourceProjectId
     || typeof value.sessionId !== 'string' || !value.sessionId || value.sessionId.length > 200
     || !Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 1
     || typeof value.messageId !== 'string' || !value.messageId || value.messageId.length > 500
+    || value.sourceProjectId !== undefined && (typeof value.sourceProjectId !== 'string' || !value.sourceProjectId || value.sourceProjectId.length > 200)
+    || value.messageFingerprint !== undefined && (typeof value.messageFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.messageFingerprint))
+    || value.messageFingerprintVersion !== undefined && value.messageFingerprintVersion !== 2
+    || value.revisionFingerprint !== undefined && (typeof value.revisionFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.revisionFingerprint))
+    || value.quoteFingerprint !== undefined && (typeof value.quoteFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.quoteFingerprint))
+    || value.quoteByteRange !== undefined && (!isRecord(value.quoteByteRange) || !Number.isSafeInteger(value.quoteByteRange.start)
+      || !Number.isSafeInteger(value.quoteByteRange.end) || (value.quoteByteRange.start as number) < 0
+      || (value.quoteByteRange.end as number) <= (value.quoteByteRange.start as number))
     || !['pending', 'reviewing', 'accepted', 'rejected', 'revoked'].includes(value.status as string)
     || typeof value.idempotencyKey !== 'string' || !value.idempotencyKey || value.idempotencyKey.length > 200
     || !Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 100
@@ -1738,6 +1876,17 @@ function validateBackupUpdate(value: unknown, projectId: string, sourceProjectId
   return {
     key: `${projectId}\0${id}`, id, projectId, client: value.client, category: value.category as MemoryCategory,
     sessionId: value.sessionId as string, sessionVersion: value.sessionVersion as number, messageId: value.messageId as string,
+    ...(typeof value.sourceProjectId === 'string' ? { sourceProjectId: value.sourceProjectId } : {}),
+    ...(typeof value.messageFingerprint === 'string' ? { messageFingerprint: value.messageFingerprint } : {}),
+    ...(value.messageFingerprintVersion === 2 ? { messageFingerprintVersion: 2 as const } : {}),
+    ...(typeof value.revisionFingerprint === 'string' ? { revisionFingerprint: value.revisionFingerprint } : {}),
+    ...(typeof value.quoteFingerprint === 'string' ? { quoteFingerprint: value.quoteFingerprint } : {}),
+    ...(isRecord(value.quoteByteRange) ? { quoteByteRange: { start: value.quoteByteRange.start as number, end: value.quoteByteRange.end as number } } : {}),
+    ...(isRecord(value.sourceIdentity) ? { sourceIdentity: {
+      ...(typeof value.sourceIdentity.platform === 'string' ? { platform: value.sourceIdentity.platform } : {}),
+      ...(typeof value.sourceIdentity.sourceName === 'string' ? { sourceName: value.sourceIdentity.sourceName } : {}),
+      ...(typeof value.sourceIdentity.sourceId === 'string' ? { sourceId: value.sourceIdentity.sourceId } : {}),
+    } } : {}),
     ...(typeof value.taskId === 'string' ? { taskId: value.taskId } : {}),
     ...(typeof value.claimId === 'string' ? { claimId: value.claimId } : {}),
     topic: value.topic, statement: value.statement, evidenceReference: value.evidenceReference, evidenceQuote: value.evidenceQuote,
@@ -1822,11 +1971,13 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   const updateIds = new Set<string>();
   const claims: ProjectTaskClaimEvent[] = [];
   const claimIds = new Set<string>();
+  let assess: ReturnType<typeof evidenceReader> | undefined;
   try {
     const first = await iterator.next();
     if (first.done) throw new Error('The project backup is empty.');
     header = validateBackupHeader(parseBackupLine(first.value));
     project = { id: makeId(), ...header.project, updatedAt: Date.now(), restoringSince: Date.now() };
+    assess = evidenceReader({ projectId: project.id, sourceProjectId: header.projectId }, false);
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').add(project!); });
     for (;;) {
       const next = await iterator.next();
@@ -1862,7 +2013,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         seenMemory = true;
         const fingerprint = await memoryBackupFingerprint(record.data as Omit<ProjectMemoryFact, 'key' | 'projectId'>);
         if (fingerprint !== record.fingerprint) throw new Error('A project memory record failed its integrity check.');
-        facts.push(await validateBackupMemory(record.data, project.id, factIds));
+        facts.push(await validateBackupMemory(record.data, project.id, factIds, assess));
       } else if (record.type === 'update') {
         if (header.version < 6 || seenClaims || !isRecord(record.data) || typeof record.fingerprint !== 'string'
           || !/^[a-f0-9]{64}$/.test(record.fingerprint) || updates.length >= header.updateCount) {
@@ -1873,9 +2024,26 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         seenUpdates = true;
         if (await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint) throw new Error('A candidate update failed its integrity check.');
         const proposal = validateBackupUpdate(record.data, project.id, header.projectId ?? project.id, updateIds);
-        const saved = await getProjectSession(project.id, proposal.sessionId!, proposal.sessionVersion);
-        const citedMessage = findSnapshotMessage(saved.content, proposal.messageId!);
-        if (!citedMessage || !citedMessage.content.includes(proposal.evidenceQuote)) throw new Error('A candidate update citation does not match its saved session.');
+        const revision = await readEvidenceRevision(project.id, proposal.sessionId!, proposal.sessionVersion!);
+        if (!revision) throw new Error('A candidate update cites a missing revision.');
+        const sourceProjectId = proposal.sourceProjectId ?? header.projectId ?? project.id;
+        const binding = proposal.messageFingerprint
+          ? await assessEvidenceBinding({ id: proposal.id, kind: 'conversation', reference: proposal.evidenceReference,
+            quote: proposal.evidenceQuote, projectId: project.id, sourceProjectId, sessionId: proposal.sessionId,
+            version: proposal.sessionVersion, messageId: proposal.messageId, messageFingerprint: proposal.messageFingerprint,
+            messageFingerprintVersion: proposal.messageFingerprintVersion, revisionFingerprint: proposal.revisionFingerprint,
+            quoteFingerprint: proposal.quoteFingerprint, quoteByteRange: proposal.quoteByteRange,
+            sourceIdentity: proposal.sourceIdentity, recordedAt: proposal.createdAt, verification: 'source-matched' },
+          { projectId: project.id, sourceProjectId }, revision)
+          : await bindNewConversationEvidence({ id: proposal.id, kind: 'conversation', reference: proposal.evidenceReference,
+            quote: proposal.evidenceQuote, projectId: project.id, sourceProjectId, sessionId: proposal.sessionId,
+            version: proposal.sessionVersion, messageId: proposal.messageId, recordedAt: proposal.createdAt,
+            verification: 'source-matched' }, revision, sourceProjectId);
+        if (binding.bindingStatus !== 'source_matched') throw new Error('A candidate update failed strict evidence binding.');
+        Object.assign(proposal, { projectId: project.id, sourceProjectId,
+          messageFingerprint: binding.messageFingerprint, messageFingerprintVersion: binding.messageFingerprintVersion,
+          revisionFingerprint: binding.revisionFingerprint, quoteFingerprint: binding.quoteFingerprint,
+          quoteByteRange: binding.quoteByteRange, sourceIdentity: binding.sourceIdentity });
         updates.push(proposal);
       } else if (record.type === 'claim') {
         if (header.version !== 7 || !isRecord(record.data) || typeof record.fingerprint !== 'string'

@@ -5,7 +5,7 @@ const categoryPriority: Record<MemoryCategory, number> = {
 };
 
 const statusLabel: Record<MemoryStatus, string> = {
-  confirmed: 'CONFIRMED', proposed: 'AI PROPOSAL · NOT CONFIRMED',
+  confirmed: 'CONFIRMED STATUS · LEGACY CONFIRMATION EVENT NOT AVAILABLE IN THIS RELEASE', proposed: 'AI PROPOSAL · NOT CONFIRMED',
   'needs-review': 'NEEDS REVIEW', rejected: 'REJECTED', superseded: 'SUPERSEDED',
 };
 
@@ -50,8 +50,8 @@ function scoreFact(fact: ProjectMemoryFact, queryTerms: string[]): number {
   const text = `${fact.category} ${fact.topic} ${fact.statement}`.toLocaleLowerCase();
   const matches = queryTerms.filter(term => text.includes(term)).length;
   const status = fact.status === 'confirmed' ? 80 : fact.status === 'needs-review' ? 45 : 25;
-  const evidence = fact.evidence.some(item => item.verification === 'source-matched') ? 20
-    : fact.evidence.length ? 8 : -15;
+  const evidence = fact.evidence.some(item => item.bindingStatus === 'source_matched'
+    && item.relation === 'supports' && item.relationBasis === 'user_attestation') ? 8 : 0;
   const queryScore = queryTerms.length ? matches * 30 - (queryTerms.length - matches) * 4 : 0;
   return status + categoryPriority[fact.category] * 5 + evidence + queryScore;
 }
@@ -65,12 +65,15 @@ function evidenceText(fact: ProjectMemoryFact, sessions: Map<string, MemorySessi
     const reference = evidence.kind === 'conversation'
       ? `${session?.title ?? 'Saved conversation'} v${evidence.version} / ${evidence.messageId}`
       : evidence.reference;
+    const binding = evidence.bindingStatus === 'source_matched' ? 'source_matched'
+      : evidence.bindingStatus === 'invalid' ? `invalid${evidence.bindingIssue ? ` · ${evidence.bindingIssue}` : ''}` : 'unverified';
+    const relation = evidence.relation ?? 'unverified';
     const verification = evidence.verification === 'source-matched' ? 'source-matched'
       : evidence.verification === 'user-recorded' ? 'user-recorded, not independently verified' : 'unattached';
     const metadata = [evidence.commit ? `commit ${evidence.commit}` : '', evidence.command ? `command ${evidence.command}` : '']
       .filter(Boolean).join('; ');
     const source = `${reference}${metadata ? ` · ${metadata}` : ''}${freshness ? ` · ${freshness}` : ''}${evidence.quote ? `\n${evidence.quote.replace(/\s+/g, ' ').slice(0, 240)}` : ''}`;
-    return `Evidence (${verification}) · UNTRUSTED:\n${quotedData(source)}`;
+    return `Evidence (${verification}; binding=${binding}; relation=${relation}; relationBasis=${evidence.relationBasis ?? 'none'}) · UNTRUSTED:\n${quotedData(source)}`;
   })].join('\n');
 }
 
@@ -102,6 +105,7 @@ export function generateProjectContext(input: {
   const relatedIds = new Set(directMatches.flatMap(fact => fact.conflictsWith).filter(id => !directIds.has(id)));
   const relatedMatches = facts.filter(fact => relatedIds.has(fact.id));
   const matching = [...directMatches, ...relatedMatches].map(fact => ({ fact, score: scoreFact(fact, queryTerms) }));
+  matching.sort((first, second) => second.score - first.score);
   const relevantIds = new Set(matching.map(item => item.fact.id));
   const omissions: ContextOmission[] = facts
     .filter(fact => !relevantIds.has(fact.id))
@@ -139,7 +143,8 @@ export function generateProjectContext(input: {
   })).length;
   const uncitedCount = includedFacts.filter(fact => fact.evidence.length === 0
     || fact.evidence.every(evidence => evidence.verification === 'unattached')).length;
-  const unverifiedEvidenceCount = includedFacts.filter(fact => fact.evidence.some(evidence => evidence.verification !== 'source-matched')).length;
+  const unverifiedEvidenceCount = includedFacts.filter(fact => fact.evidence.some(evidence =>
+    evidence.bindingStatus !== 'source_matched' || evidence.relation !== 'supports' || evidence.relationBasis !== 'user_attestation')).length;
   return {
     text: included.join('\n\n'), factStateKey: memoryFactsStateKey(input.facts), projectStateKey: memoryProjectStateKey(input.project), budget: input.budget, usedCharacters, includedFactIds, omissions, omittedSections,
     conflictCount, proposedCount, staleEvidenceCount, uncitedCount, unverifiedEvidenceCount,

@@ -53,7 +53,20 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   const backupInput = useRef<HTMLInputElement>(null);
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null;
   const dateFormatter = useMemo(() => new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }), [lang]);
-  const sharedFileAvailable = window.isSecureContext && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
+  function supportsLocalFilePicker(pickerName: 'showSaveFilePicker' | 'showOpenFilePicker') {
+    const pickerWindow = window as Window & { showSaveFilePicker?: unknown; showOpenFilePicker?: unknown };
+    const handleConstructor = (globalThis as typeof globalThis & {
+      FileSystemFileHandle?: { prototype?: Record<string, unknown> };
+    }).FileSystemFileHandle;
+    const handlePrototype = handleConstructor?.prototype;
+    return window.isSecureContext && typeof pickerWindow[pickerName] === 'function'
+      && typeof handlePrototype?.getFile === 'function'
+      && typeof handlePrototype.createWritable === 'function'
+      && typeof handlePrototype.queryPermission === 'function'
+      && typeof handlePrototype.requestPermission === 'function';
+  }
+  const sharedFileAvailable = supportsLocalFilePicker('showSaveFilePicker');
+  const inboxFileAvailable = supportsLocalFilePicker('showOpenFilePicker');
 
   async function refreshProjects(preferredId = selectedProjectId) {
     const next = await listProjects();
@@ -181,7 +194,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     const picker = (window as Window & {
       showSaveFilePicker?: (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>;
     }).showSaveFilePicker;
-    if (!window.isSecureContext || !picker) {
+    if (!supportsLocalFilePicker('showSaveFilePicker') || !picker) {
       setError(t.projectSharedUnsupported);
       return;
     }
@@ -220,7 +233,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     const picker = (window as Window & {
       showOpenFilePicker?: (options: { multiple?: boolean; types?: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle[]>;
     }).showOpenFilePicker;
-    if (!window.isSecureContext || !picker) { setError(t.projectSharedUnsupported); return; }
+    if (!supportsLocalFilePicker('showOpenFilePicker') || !picker) { setError(t.projectSharedUnsupported); return; }
     void run('inbox-connect', async () => {
       const [handle] = await picker.call(window, { multiple: false, types: [{ description: 'ThreadPack update inbox', accept: { 'application/x-ndjson': ['.jsonl'] } }] });
       if (!handle) return;
@@ -377,7 +390,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
         </div>
         <div className="project-shared-state project-update-inbox" aria-label={t.projectUpdateInbox}>
           <div><strong><Inbox size={13} />{t.projectUpdateInbox}</strong><small>{sharedStatus.inboxConnected ? `${sharedStatus.inboxFilename ?? ''} · ${proposals.filter(proposal => proposal.status === 'pending').length} ${t.projectUpdatePending}` : t.projectUpdateInboxHint}</small></div>
-          {sharedStatus.inboxConnected && <button className="button secondary small" disabled={!!busy} onClick={checkUpdateInbox}><RefreshCw size={13} />{t.projectUpdateCheck}</button>}<button className="button secondary small" disabled={!!busy || !sharedStatus.connected || !sharedFileAvailable} onClick={connectUpdateInbox}><Inbox size={13} />{t.projectUpdateConnect}</button>
+          {sharedStatus.inboxConnected && <button className="button secondary small" disabled={!!busy} onClick={checkUpdateInbox}><RefreshCw size={13} />{t.projectUpdateCheck}</button>}<button className="button secondary small" disabled={!!busy || !sharedStatus.connected || !sharedFileAvailable || !inboxFileAvailable} onClick={connectUpdateInbox}><Inbox size={13} />{t.projectUpdateConnect}</button>
         </div>
         {!!taskClaims.length && <section className="project-update-list" aria-label={t.projectTaskCoordination}>
           <h4>{t.projectTaskCoordination}</h4>

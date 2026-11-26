@@ -15,7 +15,10 @@ test('MCP task claims and results flow through shared project review', async ({ 
       setInboxFile?: (text: string) => Promise<void>;
     };
     const storage = navigator.storage as StorageManager & { getDirectory?: () => Promise<FileSystemDirectoryHandle> };
-    if (typeof storage.getDirectory !== 'function') return;
+    const handlePrototype = typeof FileSystemFileHandle === 'undefined' ? undefined : FileSystemFileHandle.prototype as unknown as Record<string, unknown>;
+    if (typeof testWindow.showSaveFilePicker !== 'function' || typeof storage.getDirectory !== 'function'
+      || typeof handlePrototype?.getFile !== 'function' || typeof handlePrototype.createWritable !== 'function'
+      || typeof handlePrototype.queryPermission !== 'function' || typeof handlePrototype.requestPermission !== 'function') return;
     testWindow.showSaveFilePicker = async () => (await storage.getDirectory!()).getFileHandle('coordination-project.jsonl', { create: true });
     testWindow.showOpenFilePicker = async () => [await (await storage.getDirectory!()).getFileHandle('coordination-inbox.jsonl', { create: true })];
     testWindow.readProjectFile = async () => (await (await storage.getDirectory!()).getFileHandle('coordination-project.jsonl')).getFile().then(file => file.text());
@@ -28,7 +31,13 @@ test('MCP task claims and results flow through shared project review', async ({ 
   });
 
   await page.goto('/');
-  const supported = await page.evaluate(() => window.isSecureContext && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function');
+  const supported = await page.evaluate(() => {
+    const handlePrototype = typeof FileSystemFileHandle === 'undefined' ? undefined : FileSystemFileHandle.prototype as unknown as Record<string, unknown>;
+    return window.isSecureContext && typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function'
+      && typeof (navigator.storage as StorageManager & { getDirectory?: unknown }).getDirectory === 'function'
+      && typeof handlePrototype?.getFile === 'function' && typeof handlePrototype.createWritable === 'function'
+      && typeof handlePrototype.queryPermission === 'function' && typeof handlePrototype.requestPermission === 'function';
+  });
   if (!supported) test.skip(true, 'This environment does not expose secure local file sharing.');
 
   const source = JSON.stringify({ id: 'coordination-session', title: 'Backup recovery work', messages: [

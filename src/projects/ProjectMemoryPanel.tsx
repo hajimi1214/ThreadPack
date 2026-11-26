@@ -6,9 +6,10 @@ import type { TranslationKey } from '../i18n';
 import type { ProjectRecord, ProjectSessionSummary } from './store';
 import {
   createProjectMemoryFact, getProjectSession, listProjectMemory, listProjectRevisions,
-  listProjectSessionStates, updateProjectMemoryStatus,
+  listProjectSessionStates, updateProjectMemoryEvidenceRelation, updateProjectMemoryStatus,
 } from './store';
-import type { MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
+import type { EvidenceRelation, MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
+import { canAttestEvidenceRelation } from './evidence-binding';
 import { generateProjectContext, memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from './memory-ai';
 import type { AIEvidenceMessage } from './memory-ai';
@@ -235,6 +236,19 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     finally { setWorking(''); }
   }
 
+  async function reviewEvidenceRelation(fact: ProjectMemoryFact, evidenceId: string, relation: EvidenceRelation) {
+    if (working) return;
+    setWorking(evidenceId); setError('');
+    try {
+      await updateProjectMemoryEvidenceRelation(project.id, fact.id, evidenceId, relation);
+      setGenerated(null);
+      await refreshMemory();
+      await onChanged();
+      notify(t.memoryRelationSaved);
+    } catch (value) { setError(value instanceof Error ? value.message : t.memorySaveFailed); }
+    finally { setWorking(''); }
+  }
+
   async function startCorrection(fact: ProjectMemoryFact) {
     setCategory(fact.category); setTopic(fact.topic); setStatement(fact.statement);
     setTaskState(fact.taskState ?? 'unclear');
@@ -405,7 +419,18 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
       <strong>{fact.topic}</strong><p>{fact.statement}</p>
       {fact.conflictsWith.length > 0 && <small className="memory-conflict-note">{t.memoryPotentialConflict} · {fact.conflictsWith.length}</small>}
       {fact.supersedes && <small>{t.memorySupersedes} · {fact.supersedes}</small>}
-      <div className="memory-evidence-list">{fact.evidence.map(evidence => <div key={evidence.id}><small>{evidence.kind === 'conversation' ? `${evidence.reference}${evidence.version && staleCount(fact) ? ` · ${t.memoryStaleEvidence}` : ''}` : evidence.reference}</small>{evidence.quote && <blockquote>{evidence.quote}</blockquote>}<small>{evidence.verification === 'source-matched' ? t.memoryEvidenceMatched : evidence.verification === 'user-recorded' ? t.memoryEvidenceUserRecorded : t.memoryEvidenceUnattached}</small></div>)}</div>
+      <div className="memory-evidence-list">{fact.evidence.map(evidence => <div key={evidence.id}>
+        <small>{evidence.kind === 'conversation' ? `${evidence.reference}${evidence.version && staleCount(fact) ? ` · ${t.memoryStaleEvidence}` : ''}` : evidence.reference}</small>
+        {evidence.quote && <blockquote>{evidence.quote}</blockquote>}
+        <small>{evidence.verification === 'source-matched' ? t.memoryEvidenceMatched : evidence.verification === 'user-recorded' ? t.memoryEvidenceUserRecorded : t.memoryEvidenceUnattached}</small>
+        <small>{t.memoryEvidenceBinding}: {evidence.bindingStatus === 'source_matched' ? t.memoryBindingMatched : evidence.bindingStatus === 'invalid' ? `${t.memoryBindingInvalid}${evidence.bindingIssue ? ` · ${evidence.bindingIssue}` : ''}` : t.memoryBindingUnverified}</small>
+        <label className="memory-evidence-relation"><span>{t.memoryEvidenceRelation}</span><select aria-label={`${t.memoryEvidenceRelation}: ${evidence.reference}`} value={evidence.relation ?? 'unverified'} disabled={!!working || !canAttestEvidenceRelation(evidence)} onChange={event => void reviewEvidenceRelation(fact, evidence.id, event.target.value as EvidenceRelation)}>
+          <option value="unverified">{t.memoryRelationUnverified}</option><option value="supports">{t.memoryRelationSupports}</option><option value="contradicts">{t.memoryRelationContradicts}</option><option value="context_only">{t.memoryRelationContext}</option><option value="insufficient">{t.memoryRelationInsufficient}</option>
+        </select></label>
+        <small>{evidence.relationBasis === 'user_attestation' ? t.memoryRelationSaved : t.memoryEvidenceRelationHint}</small>
+        {!!evidence.legacyRelationHistory?.length && <small>{t.memoryRelationHistoryUntrusted}</small>}
+        {!!evidence.relationHistory?.length && evidence.relationBasis !== 'user_attestation' && <small>{t.memoryRelationHistoryUntrusted}</small>}
+      </div>)}</div>
       {fact.status !== 'rejected' && fact.status !== 'superseded' && <div className="memory-fact-actions">
         {fact.status !== 'confirmed' && <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'confirmed')}>{t.memoryConfirmFact}</button>}
         <button className="text-button" disabled={!!working} onClick={() => void startCorrection(fact)}>{t.memoryCorrectFact}</button>
