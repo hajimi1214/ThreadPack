@@ -1,0 +1,17 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 --grep local fact confirmations are signed|deleting an imported trust copy
+
+[WebServer] (node:48936) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:37316) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 1 worker
+
+(node:52684) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [chromium] › tests\browser\project-memory.spec.ts:314:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (11.5s)
+  ok 2 [chromium] › tests\browser\project-memory.spec.ts:502:1 › deleting an imported trust copy leaves the source project anchor intact (3.6s)
+
+  2 passed (43.2s)
