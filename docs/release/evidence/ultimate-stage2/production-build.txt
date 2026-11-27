@@ -1,0 +1,19 @@
+
+> threadpack@1.7.1 build
+> tsc --noEmit && vite build && npm run build:cli
+
+vite v6.4.6 building for production...
+transforming...
+✓ 2086 modules transformed.
+rendering chunks...
+[plugin vite:singlefile]
+
+[plugin vite:singlefile] Inlining: index-B_y0P483.js
+[plugin vite:singlefile] Inlining: style-CxVjUJXZ.css
+computing gzip size...
+dist/sw.js           2.84 kB
+dist/index.html  1,242.47 kB │ gzip: 378.19 kB
+✓ built in 7.77s
+
+> threadpack@1.7.1 build:cli
+> node scripts/build-cli.mjs

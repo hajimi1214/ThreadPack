@@ -122,3 +122,9 @@
 阶段 1 源码提交为 `f0023381a1b5901fd0a8feeb276b191f6972a23c`。完整实施与验收报告见 [ultimate-stage1-trust-authentication.md](ultimate-stage1-trust-authentication.md)，可复核的类型检查、单测、构建和浏览器日志保存在 `docs/release/evidence/ultimate-stage1/`。
 
 最新 Windows 验证结果为 TypeScript 检查通过、237/237 Node 单测通过、生产构建通过、Chromium 96/96 通过、Firefox 94 通过且 2 项能力跳过、WebKit 94 通过且 2 项能力跳过。WebKit 使用单 worker 完成全量测试。Linux、真实物理设备间密钥恢复和完整产品验收仍未验证。后续阶段尚未开始。
+
+## 阶段 2 验收结果（2026-11-28）
+
+阶段 2 可信记忆生命周期结论为 **CONDITIONAL PASS**。事实终态、状态历史、拒绝去重、用户显式重新考虑、有效期、用户偏好类别、签名生命周期事件以及 Context、JSON、MCP 和备份中的终态投影已有实际实现和测试。阶段源码提交为 `59ecf052f508e7425af2f53bd797a44d724ad0b5`。详细报告见 [ultimate-stage2-memory-lifecycle-report.md](ultimate-stage2-memory-lifecycle-report.md)。
+
+最终质量门禁：类型检查通过，npm test 245/245 通过，Web/CLI 生产构建通过。Chromium 项目组 26/26 通过；Firefox 项目组 23 通过、2 项平台能力跳过；WebKit 项目组 23 通过、2 项平台能力跳过。Firefox 与 WebKit 的超大项目持久化另有隔离运行通过。Linux 未验证。阶段 3 完整历史迁移尚未开始。

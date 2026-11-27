@@ -1,0 +1,16 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 --output D:\Github项目\ThreadPack-阶段资料\ultimate-stage2-progress\webkit-large-latest-artifacts --grep large saved snapshots above the external import limit
+
+[WebServer] (node:8828) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:17592) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:15560) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [webkit] › tests\browser\project-large-persistence.spec.ts:6:1 › large saved snapshots above the external import limit survive reload and search (16.2s)
+
+  1 passed (39.7s)

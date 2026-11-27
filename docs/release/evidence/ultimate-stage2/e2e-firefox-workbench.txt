@@ -1,0 +1,54 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 tests/browser/pwa-offline.spec.ts tests/browser/review-tools.spec.ts tests/browser/screen-fit.spec.ts tests/browser/usability.spec.ts tests/browser/workbench.spec.ts
+
+[WebServer] (node:41404) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:25404) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 39 tests using 1 worker
+
+(node:52640) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [firefox] › tests\browser\pwa-offline.spec.ts:4:1 › HTTP app installs only its shell cache and reloads offline without storing an imported conversation (7.0s)
+  ok  2 [firefox] › tests\browser\review-tools.spec.ts:47:1 › cleanup presets change the real recipe without dropping custom redactions (2.6s)
+  ok  3 [firefox] › tests\browser\review-tools.spec.ts:82:1 › message review shows bounded original and cleaned excerpts without rendering imported markup (1.4s)
+  ok  4 [firefox] › tests\browser\review-tools.spec.ts:104:1 › replacing a file from message review shows one note-protection dialog and releases the scroll lock (2.1s)
+  ok  5 [firefox] › tests\browser\review-tools.spec.ts:138:1 › custom rules redact transcript and handoff notes with built-in detection off, without leaking through reports (3.9s)
+  ok  6 [firefox] › tests\browser\review-tools.spec.ts:191:1 › invalid custom drafts preserve applied rules, while explicit clearing and new imports discard them (3.4s)
+  ok  7 [firefox] › tests\browser\review-tools.spec.ts:226:1 › changed-only review combines with role and search filters and uses the same message references in original mode (2.4s)
+  ok  8 [firefox] › tests\browser\review-tools.spec.ts:268:1 › pinned-only review composes with role filters and copies the complete message in the active mode (1.8s)
+  ok  9 [firefox] › tests\browser\review-tools.spec.ts:301:1 › search reveals a match beyond the normal expansion limit and clearing it restores the initial preview (1.3s)
+  ok 10 [firefox] › tests\browser\review-tools.spec.ts:323:1 › rapid recipe changes settle on the current cleanup result without a stale-preview error (3.5s)
+  ok 11 [firefox] › tests\browser\review-tools.spec.ts:357:1 › URL credentials stay redacted with email mode and overlapping custom rules show both counts (2.6s)
+  ok 12 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › small phone: transcript stays readable and export controls remain reachable (1.7s)
+  ok 13 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › compact tablet: transcript stays readable and export controls remain reachable (1.8s)
+  ok 14 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › tablet: transcript stays readable and export controls remain reachable (1.6s)
+  ok 15 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › phone landscape: transcript stays readable and export controls remain reachable (1.5s)
+  ok 16 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › short laptop: transcript stays readable and export controls remain reachable (1.5s)
+  ok 17 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › desktop: transcript stays readable and export controls remain reachable (1.6s)
+  ok 18 [firefox] › tests\browser\screen-fit.spec.ts:14:3 › ultrawide: transcript stays readable and export controls remain reachable (1.6s)
+  ok 19 [firefox] › tests\browser\screen-fit.spec.ts:38:1 › orientation changes preserve the selected filters and pinned messages (1.5s)
+  ok 20 [firefox] › tests\browser\usability.spec.ts:42:1 › 1366×768 workbench keeps controls in its layout without export actions covering them (2.9s)
+  ok 21 [firefox] › tests\browser\usability.spec.ts:63:1 › mobile cleanup sheet returns directly to the results and restores useful keyboard focus (2.3s)
+  ok 22 [firefox] › tests\browser\usability.spec.ts:89:1 › unapplied custom redactions block export until the visible apply action commits them (2.0s)
+  ok 23 [firefox] › tests\browser\usability.spec.ts:105:1 › invalid custom edits block handoff copy and download until rules are corrected (2.3s)
+  ok 24 [firefox] › tests\browser\usability.spec.ts:127:1 › clearing handwritten notes requires an explicit discard and can be cancelled (2.5s)
+  ok 25 [firefox] › tests\browser\usability.spec.ts:146:1 › replacement protects notes from another conversation before importing the new file (2.7s)
+  ok 26 [firefox] › tests\browser\usability.spec.ts:173:1 › switching conversations resets old filters and exposes system-message filtering (4.4s)
+  ok 27 [firefox] › tests\browser\usability.spec.ts:194:1 › view navigation gives keyboard users a useful focus target without tabbing through the hidden file input (3.7s)
+  ok 28 [firefox] › tests\browser\workbench.spec.ts:32:1 › import status and cleanup report expose content-free source integrity issues (1.6s)
+  ok 29 [firefox] › tests\browser\workbench.spec.ts:51:1 › imports a supported conversation directly from a ZIP export (1.4s)
+  ok 30 [firefox] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export (3.2s)
+  ok 31 [firefox] › tests\browser\workbench.spec.ts:96:1 › mobile handoff shows its preview and actions without opening the keyboard (1.7s)
+  ok 32 [firefox] › tests\browser\workbench.spec.ts:116:1 › Markdown reading mode renders GFM while text mode and copy retain source text (1.8s)
+  ok 33 [firefox] › tests\browser\workbench.spec.ts:177:1 › demo cleanup controls update real results, reset defaults, and compare the original (6.3s)
+  ok 34 [firefox] › tests\browser\workbench.spec.ts:246:1 › ChatGPT archive switches conversations, filters, pins, and downloads actual portable exports (4.6s)
+  ok 35 [firefox] › tests\browser\workbench.spec.ts:310:1 › handoff notes are redacted, pinning is preserved, and the text budget explains overflow (3.5s)
+  ok 36 [firefox] › tests\browser\workbench.spec.ts:357:1 › handoff timestamp mode reports its range and keeps selected messages in source order (1.8s)
+  ok 37 [firefox] › tests\browser\workbench.spec.ts:390:1 › paste, malformed JSON, clearing, language, and help keyboard focus all work (4.9s)
+  ok 38 [firefox] › tests\browser\workbench.spec.ts:435:1 › 390px viewport keeps the workbench and handoff controls within the page (1.8s)
+  ok 39 [firefox] › tests\browser\workbench.spec.ts:453:1 › self-contained HTML runs offline from file:// and exports without network requests or page errors (3.8s)
+
+  39 passed (2.2m)

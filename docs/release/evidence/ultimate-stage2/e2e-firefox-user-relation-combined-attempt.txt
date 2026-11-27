@@ -1,0 +1,75 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 tests/browser/project-coordination.spec.ts tests/browser/project-library.spec.ts tests/browser/project-memory.spec.ts tests/browser/project-shared-state.spec.ts
+
+[WebServer] (node:32456) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:26072) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 23 tests using 1 worker
+
+(node:50364) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  -   1 [firefox] › tests\browser\project-coordination.spec.ts:9:1 › MCP task claims and results flow through shared project review
+  ok  2 [firefox] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (9.6s)
+  ok  3 [firefox] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (3.4s)
+  ok  4 [firefox] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (3.1s)
+  ok  5 [firefox] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (3.6s)
+  ok  6 [firefox] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (2.5s)
+  ok  7 [firefox] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (21.4s)
+  ok  8 [firefox] › tests\browser\project-memory.spec.ts:71:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (15.1s)
+  ok  9 [firefox] › tests\browser\project-memory.spec.ts:122:1 › rejecting a fact invalidates generated Markdown and JSON context together (5.7s)
+  ok 10 [firefox] › tests\browser\project-memory.spec.ts:163:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (6.7s)
+  ok 11 [firefox] › tests\browser\project-memory.spec.ts:229:1 › rejected claims stay terminal until the user creates a linked review candidate (6.2s)
+  ok 12 [firefox] › tests\browser\project-memory.spec.ts:282:1 › expired facts leave current context while preserving signed history after reload (6.9s)
+  ok 13 [firefox] › tests\browser\project-memory.spec.ts:336:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (6.8s)
+  ok 14 [firefox] › tests\browser\project-memory.spec.ts:385:1 › version-one project backups restore after the IndexedDB schema migration (4.3s)
+  ok 15 [firefox] › tests\browser\project-memory.spec.ts:405:1 › indexed database version one projects survive the schema upgrade and accept memory facts (5.7s)
+  ok 16 [firefox] › tests\browser\project-memory.spec.ts:471:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (17.3s)
+  ok 17 [firefox] › tests\browser\project-memory.spec.ts:659:1 › deleting an imported trust copy leaves the source project anchor intact (5.8s)
+  -  18 [firefox] › tests\browser\project-memory.spec.ts:730:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 19 [firefox] › tests\browser\project-memory.spec.ts:805:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (9.4s)
+  ok 20 [firefox] › tests\browser\project-memory.spec.ts:928:1 › changing evidence relationships revokes the prior signed fact confirmation (5.7s)
+  x  21 [firefox] › tests\browser\project-memory.spec.ts:957:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (30.8s)
+(node:50280) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 22 [firefox] › tests\browser\project-memory.spec.ts:1046:1 › missing source revisions remain visible as unverified without breaking project memory reads (11.7s)
+  ok 23 [firefox] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload (1.7s)
+
+
+  1) [firefox] › tests\browser\project-memory.spec.ts:957:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).getByRole('button', { name: 'Add fact', exact: true })
+        - locator resolved to <button class="button secondary small">…</button>
+      - attempting click action
+        - waiting for element to be visible, enabled and stable
+
+
+      961 |   await saveCurrentSession(dialog);
+      962 |   await setupLocalProjectTrust(page, dialog);
+    > 963 |   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+          |                                                                       ^
+      964 |   const form = dialog.locator('.memory-form');
+      965 |   await form.locator('select').nth(0).selectOption('constraint');
+      966 |   await form.locator('input').nth(0).fill('Network binding');
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:963:71
+
+    Error Context: test-results\project-memory-a-user-atte-c1081-firmation-and-backup-import-firefox\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-memory-a-user-atte-c1081-firmation-and-backup-import-firefox\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-memory-a-user-atte-c1081-firmation-and-backup-import-firefox\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [firefox] › tests\browser\project-memory.spec.ts:957:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import
+  2 skipped
+  20 passed (3.8m)

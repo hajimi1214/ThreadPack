@@ -1,0 +1,149 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 --output D:\Github项目\ThreadPack-阶段资料\ultimate-stage2-progress\webkit-e2e-artifacts-final
+
+[WebServer] (node:24912) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:39832) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 99 tests using 1 worker
+
+(node:42948) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\archive-isolation.spec.ts:35:1 › a cancelled parse cannot replace the accepted archive when the next import is rejected (6.4s)
+  ok  2 [webkit] › tests\browser\archive-isolation.spec.ts:89:1 › a failed replacement import leaves the accepted archive available for cleaning and export (2.4s)
+  ok  3 [webkit] › tests\browser\code-snippets.spec.ts:7:1 › snippet copy and download contain full cleaned code beyond the displayed preview (6.5s)
+  ok  4 [webkit] › tests\browser\code-snippets.spec.ts:45:1 › code search, language filter, and ZIP export include all matching cleaned blocks (7.2s)
+  ok  5 [webkit] › tests\browser\code-snippets.spec.ts:78:1 › snippet pages cover the conversation and imported markup stays text (6.5s)
+  ok  6 [webkit] › tests\browser\code-snippets.spec.ts:98:1 › the bundled demo includes code and plain conversations explain the empty state (2.1s)
+  ok  7 [webkit] › tests\browser\code-snippets.spec.ts:112:1 › sharing copies only the project link and the import guide works without JavaScript (22.7s)
+  ok  8 [webkit] › tests\browser\code-snippets.spec.ts:130:1 › bundled license notices are available offline in the application help (7.9s)
+  ok  9 [webkit] › tests\browser\code-snippets.spec.ts:142:1 › portable context bundle exports cleaned files from the main export dialog (1.7s)
+  ok 10 [webkit] › tests\browser\conversation-drafts.spec.ts:4:1 › conversation drafts survive switching and are discarded with the archive (9.5s)
+  ok 11 [webkit] › tests\browser\conversation-drafts.spec.ts:51:1 › handoff drafts export and import independently with a source-bound pin check (8.2s)
+  x  12 [webkit] › tests\browser\import-race.spec.ts:5:1 › clearing during a file import cancels it, and the last selected file wins (30.6s)
+(node:8000) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 13 [webkit] › tests\browser\import-race.spec.ts:45:1 › a report cannot leak a secret from custom source metadata (10.1s)
+  ok 14 [webkit] › tests\browser\interaction-feedback.spec.ts:13:1 › copy reports pending, success and failure at the clicked button without duplicate writes (2.0s)
+  ok 15 [webkit] › tests\browser\interaction-feedback.spec.ts:44:1 › filtered export covers other pages and keeps original-mode matches cleaned (6.8s)
+  ok 16 [webkit] › tests\browser\interaction-feedback.spec.ts:92:1 › quick actions support keyboard search and execute with focus and scroll restored (9.3s)
+  ok 17 [webkit] › tests\browser\interaction-feedback.spec.ts:119:1 › a replacement archive remains usable after an older export response arrives (6.8s)
+  ok 18 [webkit] › tests\browser\interaction-feedback.spec.ts:155:1 › a small mobile screen keeps a readable transcript and reachable export controls (5.9s)
+  ok 19 [webkit] › tests\browser\interaction-feedback.spec.ts:169:1 › handoff copy feedback stays with the conversation that was copied (16.7s)
+  ok 20 [webkit] › tests\browser\languages.spec.ts:42:3 › English: localized demo, cleanup, help, mobile layout, and saved preference (9.0s)
+  ok 21 [webkit] › tests\browser\languages.spec.ts:42:3 › 简体中文: localized demo, cleanup, help, mobile layout, and saved preference (9.1s)
+  ok 22 [webkit] › tests\browser\languages.spec.ts:42:3 › 日本語: localized demo, cleanup, help, mobile layout, and saved preference (5.1s)
+  ok 23 [webkit] › tests\browser\languages.spec.ts:42:3 › Français: localized demo, cleanup, help, mobile layout, and saved preference (9.0s)
+  ok 24 [webkit] › tests\browser\languages.spec.ts:42:3 › Español: localized demo, cleanup, help, mobile layout, and saved preference (9.0s)
+  ok 25 [webkit] › tests\browser\languages.spec.ts:127:1 › diagnostics follow the selected interface language after an error (1.7s)
+  ok 26 [webkit] › tests\browser\languages.spec.ts:151:5 › invalid stored preference › supported browser locale › falls back to the supported browser language without restoring conversation data (1.1s)
+  ok 27 [webkit] › tests\browser\languages.spec.ts:166:5 › invalid stored preference › unsupported browser locale › uses English when neither stored nor browser language is supported (977ms)
+  ok 28 [webkit] › tests\browser\modern-workspace.spec.ts:77:1 › desktop opens directly onto useful message content (6.2s)
+  ok 29 [webkit] › tests\browser\modern-workspace.spec.ts:91:1 › shows a startup status while the application module is loading (2.1s)
+  ok 30 [webkit] › tests\browser\modern-workspace.spec.ts:113:1 › mobile keeps settings collapsed until requested and shows the first message promptly (9.7s)
+  ok 31 [webkit] › tests\browser\modern-workspace.spec.ts:134:1 › pagination resets the transcript scroll and sends at most thirty preview items (6.6s)
+  ok 32 [webkit] › tests\browser\modern-workspace.spec.ts:157:1 › switching conversations restores each conversation’s reading position (2.0s)
+  ok 33 [webkit] › tests\browser\modern-workspace.spec.ts:183:1 › original-mode search finds text forty thousand characters into worker-owned content (6.0s)
+  ok 34 [webkit] › tests\browser\modern-workspace.spec.ts:196:1 › exports include all one hundred and one messages rather than the thirty-message preview (2.1s)
+  ok 35 [webkit] › tests\browser\modern-workspace.spec.ts:214:1 › large File streaming reports progress and can be cancelled without retaining the archive (2.2s)
+  ok 36 [webkit] › tests\browser\modern-workspace.spec.ts:241:1 › failed handoff regeneration disables stale output and recovers after a successful edit (12.1s)
+  -  37 [webkit] › tests\browser\project-coordination.spec.ts:9:1 › MCP task claims and results flow through shared project review
+  ok 38 [webkit] › tests\browser\project-large-persistence.spec.ts:6:1 › large saved snapshots above the external import limit survive reload and search (17.4s)
+  ok 39 [webkit] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (15.6s)
+  ok 40 [webkit] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (27.9s)
+  ok 41 [webkit] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (11.9s)
+  ok 42 [webkit] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (9.0s)
+  ok 43 [webkit] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (7.2s)
+  ok 44 [webkit] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (5.9s)
+  ok 45 [webkit] › tests\browser\project-memory.spec.ts:71:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (15.4s)
+  ok 46 [webkit] › tests\browser\project-memory.spec.ts:122:1 › rejecting a fact invalidates generated Markdown and JSON context together (16.1s)
+  ok 47 [webkit] › tests\browser\project-memory.spec.ts:163:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (16.4s)
+  ok 48 [webkit] › tests\browser\project-memory.spec.ts:229:1 › rejected claims stay terminal until the user creates a linked review candidate (18.5s)
+  ok 49 [webkit] › tests\browser\project-memory.spec.ts:282:1 › expired facts leave current context while preserving signed history after reload (16.6s)
+  ok 50 [webkit] › tests\browser\project-memory.spec.ts:336:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (23.4s)
+  ok 51 [webkit] › tests\browser\project-memory.spec.ts:385:1 › version-one project backups restore after the IndexedDB schema migration (11.0s)
+  ok 52 [webkit] › tests\browser\project-memory.spec.ts:405:1 › indexed database version one projects survive the schema upgrade and accept memory facts (13.1s)
+  ok 53 [webkit] › tests\browser\project-memory.spec.ts:471:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (46.3s)
+  ok 54 [webkit] › tests\browser\project-memory.spec.ts:659:1 › deleting an imported trust copy leaves the source project anchor intact (14.9s)
+  -  55 [webkit] › tests\browser\project-memory.spec.ts:730:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 56 [webkit] › tests\browser\project-memory.spec.ts:805:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (19.0s)
+  ok 57 [webkit] › tests\browser\project-memory.spec.ts:928:1 › changing evidence relationships revokes the prior signed fact confirmation (20.3s)
+  ok 58 [webkit] › tests\browser\project-memory.spec.ts:957:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (23.6s)
+  ok 59 [webkit] › tests\browser\project-memory.spec.ts:1046:1 › missing source revisions remain visible as unverified without breaking project memory reads (18.9s)
+  ok 60 [webkit] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload (8.7s)
+  ok 61 [webkit] › tests\browser\pwa-offline.spec.ts:4:1 › HTTP app installs only its shell cache and reloads offline without storing an imported conversation (7.8s)
+  ok 62 [webkit] › tests\browser\review-tools.spec.ts:47:1 › cleanup presets change the real recipe without dropping custom redactions (3.4s)
+  ok 63 [webkit] › tests\browser\review-tools.spec.ts:82:1 › message review shows bounded original and cleaned excerpts without rendering imported markup (2.1s)
+  ok 64 [webkit] › tests\browser\review-tools.spec.ts:104:1 › replacing a file from message review shows one note-protection dialog and releases the scroll lock (2.7s)
+  ok 65 [webkit] › tests\browser\review-tools.spec.ts:138:1 › custom rules redact transcript and handoff notes with built-in detection off, without leaking through reports (6.7s)
+  ok 66 [webkit] › tests\browser\review-tools.spec.ts:191:1 › invalid custom drafts preserve applied rules, while explicit clearing and new imports discard them (4.6s)
+  ok 67 [webkit] › tests\browser\review-tools.spec.ts:226:1 › changed-only review combines with role and search filters and uses the same message references in original mode (3.5s)
+  ok 68 [webkit] › tests\browser\review-tools.spec.ts:268:1 › pinned-only review composes with role filters and copies the complete message in the active mode (2.7s)
+  ok 69 [webkit] › tests\browser\review-tools.spec.ts:301:1 › search reveals a match beyond the normal expansion limit and clearing it restores the initial preview (2.3s)
+  ok 70 [webkit] › tests\browser\review-tools.spec.ts:323:1 › rapid recipe changes settle on the current cleanup result without a stale-preview error (4.2s)
+  ok 71 [webkit] › tests\browser\review-tools.spec.ts:357:1 › URL credentials stay redacted with email mode and overlapping custom rules show both counts (3.2s)
+  ok 72 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › small phone: transcript stays readable and export controls remain reachable (2.0s)
+  ok 73 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › compact tablet: transcript stays readable and export controls remain reachable (2.1s)
+  ok 74 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › tablet: transcript stays readable and export controls remain reachable (2.0s)
+  ok 75 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › phone landscape: transcript stays readable and export controls remain reachable (2.1s)
+  ok 76 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › short laptop: transcript stays readable and export controls remain reachable (2.1s)
+  ok 77 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › desktop: transcript stays readable and export controls remain reachable (2.3s)
+  ok 78 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › ultrawide: transcript stays readable and export controls remain reachable (2.6s)
+  ok 79 [webkit] › tests\browser\screen-fit.spec.ts:38:1 › orientation changes preserve the selected filters and pinned messages (2.0s)
+  ok 80 [webkit] › tests\browser\usability.spec.ts:42:1 › 1366×768 workbench keeps controls in its layout without export actions covering them (1.6s)
+  ok 81 [webkit] › tests\browser\usability.spec.ts:63:1 › mobile cleanup sheet returns directly to the results and restores useful keyboard focus (2.4s)
+  ok 82 [webkit] › tests\browser\usability.spec.ts:89:1 › unapplied custom redactions block export until the visible apply action commits them (2.1s)
+  ok 83 [webkit] › tests\browser\usability.spec.ts:105:1 › invalid custom edits block handoff copy and download until rules are corrected (3.1s)
+  ok 84 [webkit] › tests\browser\usability.spec.ts:127:1 › clearing handwritten notes requires an explicit discard and can be cancelled (2.5s)
+  ok 85 [webkit] › tests\browser\usability.spec.ts:146:1 › replacement protects notes from another conversation before importing the new file (2.8s)
+  ok 86 [webkit] › tests\browser\usability.spec.ts:173:1 › switching conversations resets old filters and exposes system-message filtering (2.3s)
+  ok 87 [webkit] › tests\browser\usability.spec.ts:194:1 › view navigation gives keyboard users a useful focus target without tabbing through the hidden file input (2.2s)
+  ok 88 [webkit] › tests\browser\workbench.spec.ts:32:1 › import status and cleanup report expose content-free source integrity issues (3.4s)
+  ok 89 [webkit] › tests\browser\workbench.spec.ts:51:1 › imports a supported conversation directly from a ZIP export (1.4s)
+  ok 90 [webkit] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export (2.4s)
+  ok 91 [webkit] › tests\browser\workbench.spec.ts:96:1 › mobile handoff shows its preview and actions without opening the keyboard (2.1s)
+  ok 92 [webkit] › tests\browser\workbench.spec.ts:116:1 › Markdown reading mode renders GFM while text mode and copy retain source text (2.0s)
+  ok 93 [webkit] › tests\browser\workbench.spec.ts:177:1 › demo cleanup controls update real results, reset defaults, and compare the original (6.0s)
+  ok 94 [webkit] › tests\browser\workbench.spec.ts:246:1 › ChatGPT archive switches conversations, filters, pins, and downloads actual portable exports (4.6s)
+  ok 95 [webkit] › tests\browser\workbench.spec.ts:310:1 › handoff notes are redacted, pinning is preserved, and the text budget explains overflow (4.2s)
+  ok 96 [webkit] › tests\browser\workbench.spec.ts:357:1 › handoff timestamp mode reports its range and keeps selected messages in source order (2.4s)
+  ok 97 [webkit] › tests\browser\workbench.spec.ts:390:1 › paste, malformed JSON, clearing, language, and help keyboard focus all work (5.3s)
+  ok 98 [webkit] › tests\browser\workbench.spec.ts:435:1 › 390px viewport keeps the workbench and handoff controls within the page (2.2s)
+  ok 99 [webkit] › tests\browser\workbench.spec.ts:453:1 › self-contained HTML runs offline from file:// and exports without network requests or page errors (3.3s)
+
+
+  1) [webkit] › tests\browser\import-race.spec.ts:5:1 › clearing during a file import cancels it, and the last selected file wins
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.setInputFiles: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByLabel('Import file', { exact: true })
+        - locator resolved to <input type="file" tabindex="-1" class="file-input" aria-label="Import file" accept=".zip,.jsonl,.ndjson,.json,.md,.txt,.log"/>
+
+
+      35 |   await expect(page.getByRole('alert')).not.toBeVisible();
+      36 |
+    > 37 |   await input.setInputFiles({ name: 'slow-first.txt', mimeType: 'text/plain', buffer: Buffer.from('FIRST_SLOW_CONVERSATION') });
+         |   ^
+      38 |   await input.setInputFiles({ name: 'last-selected.txt', mimeType: 'text/plain', buffer: Buffer.from('LAST_SELECTED_CONVERSATION') });
+      39 |   await expect(page.locator('.messages-list')).toContainText('LAST_SELECTED_CONVERSATION');
+      40 |   await page.waitForFunction(() => (window as unknown as { threadpackDispatchCompleted: number }).threadpackDispatchCompleted === 2);
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\import-race.spec.ts:37:3
+
+    Error Context: ..\..\ultimate-stage2-progress\webkit-e2e-artifacts-final\import-race-clearing-durin-61183-the-last-selected-file-wins-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ..\..\ultimate-stage2-progress\webkit-e2e-artifacts-final\import-race-clearing-durin-61183-the-last-selected-file-wins-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace ..\..\ultimate-stage2-progress\webkit-e2e-artifacts-final\import-race-clearing-durin-61183-the-last-selected-file-wins-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [webkit] › tests\browser\import-race.spec.ts:5:1 › clearing during a file import cancels it, and the last selected file wins
+  2 skipped
+  96 passed (13.2m)

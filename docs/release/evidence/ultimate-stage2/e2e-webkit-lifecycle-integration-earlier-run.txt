@@ -1,0 +1,24 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 --output D:\Github项目\ThreadPack-阶段资料\ultimate-stage2-progress\webkit-lifecycle-acceptance-artifacts --grep project facts cite saved messages|rejecting a fact invalidates|rejected claims stay terminal|expired facts leave current context|superseded facts retain signed history|local fact confirmations are signed|changing evidence relationships revoke|a user-attested evidence relation stays distinct|project changes update one authorized shared file
+
+[WebServer] (node:17612) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:41760) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 9 tests using 1 worker
+
+(node:27284) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [webkit] › tests\browser\project-memory.spec.ts:71:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (21.1s)
+  ok 2 [webkit] › tests\browser\project-memory.spec.ts:122:1 › rejecting a fact invalidates generated Markdown and JSON context together (18.3s)
+  ok 3 [webkit] › tests\browser\project-memory.spec.ts:229:1 › rejected claims stay terminal until the user creates a linked review candidate (30.3s)
+  ok 4 [webkit] › tests\browser\project-memory.spec.ts:313:1 › expired facts leave current context while preserving signed history after reload (16.4s)
+  ok 5 [webkit] › tests\browser\project-memory.spec.ts:367:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (23.5s)
+  ok 6 [webkit] › tests\browser\project-memory.spec.ts:502:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (40.3s)
+  ok 7 [webkit] › tests\browser\project-memory.spec.ts:959:1 › changing evidence relationships revokes the prior signed fact confirmation (18.0s)
+  ok 8 [webkit] › tests\browser\project-memory.spec.ts:988:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (20.6s)
+  ok 9 [webkit] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload (6.1s)
+
+  9 passed (3.6m)

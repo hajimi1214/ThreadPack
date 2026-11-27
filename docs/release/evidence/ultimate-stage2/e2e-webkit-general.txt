@@ -1,0 +1,51 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 tests/browser/archive-isolation.spec.ts tests/browser/code-snippets.spec.ts tests/browser/conversation-drafts.spec.ts tests/browser/import-race.spec.ts tests/browser/interaction-feedback.spec.ts tests/browser/languages.spec.ts tests/browser/modern-workspace.spec.ts
+
+[WebServer] (node:26876) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:45928) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 36 tests using 1 worker
+
+(node:47508) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\archive-isolation.spec.ts:35:1 › a cancelled parse cannot replace the accepted archive when the next import is rejected (6.9s)
+  ok  2 [webkit] › tests\browser\archive-isolation.spec.ts:89:1 › a failed replacement import leaves the accepted archive available for cleaning and export (2.2s)
+  ok  3 [webkit] › tests\browser\code-snippets.spec.ts:7:1 › snippet copy and download contain full cleaned code beyond the displayed preview (6.4s)
+  ok  4 [webkit] › tests\browser\code-snippets.spec.ts:45:1 › code search, language filter, and ZIP export include all matching cleaned blocks (7.2s)
+  ok  5 [webkit] › tests\browser\code-snippets.spec.ts:78:1 › snippet pages cover the conversation and imported markup stays text (6.4s)
+  ok  6 [webkit] › tests\browser\code-snippets.spec.ts:98:1 › the bundled demo includes code and plain conversations explain the empty state (7.6s)
+  ok  7 [webkit] › tests\browser\code-snippets.spec.ts:112:1 › sharing copies only the project link and the import guide works without JavaScript (6.7s)
+  ok  8 [webkit] › tests\browser\code-snippets.spec.ts:130:1 › bundled license notices are available offline in the application help (6.9s)
+  ok  9 [webkit] › tests\browser\code-snippets.spec.ts:142:1 › portable context bundle exports cleaned files from the main export dialog (5.9s)
+  ok 10 [webkit] › tests\browser\conversation-drafts.spec.ts:4:1 › conversation drafts survive switching and are discarded with the archive (4.3s)
+  ok 11 [webkit] › tests\browser\conversation-drafts.spec.ts:51:1 › handoff drafts export and import independently with a source-bound pin check (7.6s)
+  ok 12 [webkit] › tests\browser\import-race.spec.ts:5:1 › clearing during a file import cancels it, and the last selected file wins (7.9s)
+  ok 13 [webkit] › tests\browser\import-race.spec.ts:45:1 › a report cannot leak a secret from custom source metadata (5.8s)
+  ok 14 [webkit] › tests\browser\interaction-feedback.spec.ts:13:1 › copy reports pending, success and failure at the clicked button without duplicate writes (1.7s)
+  ok 15 [webkit] › tests\browser\interaction-feedback.spec.ts:44:1 › filtered export covers other pages and keeps original-mode matches cleaned (6.6s)
+  ok 16 [webkit] › tests\browser\interaction-feedback.spec.ts:92:1 › quick actions support keyboard search and execute with focus and scroll restored (7.1s)
+  ok 17 [webkit] › tests\browser\interaction-feedback.spec.ts:119:1 › a replacement archive remains usable after an older export response arrives (6.5s)
+  ok 18 [webkit] › tests\browser\interaction-feedback.spec.ts:155:1 › a small mobile screen keeps a readable transcript and reachable export controls (5.7s)
+  ok 19 [webkit] › tests\browser\interaction-feedback.spec.ts:169:1 › handoff copy feedback stays with the conversation that was copied (2.5s)
+  ok 20 [webkit] › tests\browser\languages.spec.ts:42:3 › English: localized demo, cleanup, help, mobile layout, and saved preference (9.0s)
+  ok 21 [webkit] › tests\browser\languages.spec.ts:42:3 › 简体中文: localized demo, cleanup, help, mobile layout, and saved preference (9.1s)
+  ok 22 [webkit] › tests\browser\languages.spec.ts:42:3 › 日本語: localized demo, cleanup, help, mobile layout, and saved preference (9.1s)
+  ok 23 [webkit] › tests\browser\languages.spec.ts:42:3 › Français: localized demo, cleanup, help, mobile layout, and saved preference (9.1s)
+  ok 24 [webkit] › tests\browser\languages.spec.ts:42:3 › Español: localized demo, cleanup, help, mobile layout, and saved preference (9.0s)
+  ok 25 [webkit] › tests\browser\languages.spec.ts:127:1 › diagnostics follow the selected interface language after an error (1.8s)
+  ok 26 [webkit] › tests\browser\languages.spec.ts:151:5 › invalid stored preference › supported browser locale › falls back to the supported browser language without restoring conversation data (971ms)
+  ok 27 [webkit] › tests\browser\languages.spec.ts:166:5 › invalid stored preference › unsupported browser locale › uses English when neither stored nor browser language is supported (959ms)
+  ok 28 [webkit] › tests\browser\modern-workspace.spec.ts:77:1 › desktop opens directly onto useful message content (4.8s)
+  ok 29 [webkit] › tests\browser\modern-workspace.spec.ts:91:1 › shows a startup status while the application module is loading (2.2s)
+  ok 30 [webkit] › tests\browser\modern-workspace.spec.ts:113:1 › mobile keeps settings collapsed until requested and shows the first message promptly (5.7s)
+  ok 31 [webkit] › tests\browser\modern-workspace.spec.ts:134:1 › pagination resets the transcript scroll and sends at most thirty preview items (6.4s)
+  ok 32 [webkit] › tests\browser\modern-workspace.spec.ts:157:1 › switching conversations restores each conversation’s reading position (2.0s)
+  ok 33 [webkit] › tests\browser\modern-workspace.spec.ts:183:1 › original-mode search finds text forty thousand characters into worker-owned content (6.0s)
+  ok 34 [webkit] › tests\browser\modern-workspace.spec.ts:196:1 › exports include all one hundred and one messages rather than the thirty-message preview (1.9s)
+  ok 35 [webkit] › tests\browser\modern-workspace.spec.ts:214:1 › large File streaming reports progress and can be cancelled without retaining the archive (2.0s)
+  ok 36 [webkit] › tests\browser\modern-workspace.spec.ts:241:1 › failed handoff regeneration disables stale output and recovers after a successful edit (12.0s)
+
+  36 passed (3.8m)

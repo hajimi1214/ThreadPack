@@ -1,0 +1,73 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 tests/browser/pwa-offline.spec.ts tests/browser/review-tools.spec.ts tests/browser/screen-fit.spec.ts tests/browser/usability.spec.ts tests/browser/workbench.spec.ts
+
+[WebServer] (node:23476) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:18752) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 39 tests using 1 worker
+
+(node:26684) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\pwa-offline.spec.ts:4:1 › HTTP app installs only its shell cache and reloads offline without storing an imported conversation (8.6s)
+  ok  2 [webkit] › tests\browser\review-tools.spec.ts:47:1 › cleanup presets change the real recipe without dropping custom redactions (3.1s)
+  ok  3 [webkit] › tests\browser\review-tools.spec.ts:82:1 › message review shows bounded original and cleaned excerpts without rendering imported markup (1.8s)
+  ok  4 [webkit] › tests\browser\review-tools.spec.ts:104:1 › replacing a file from message review shows one note-protection dialog and releases the scroll lock (2.6s)
+  ok  5 [webkit] › tests\browser\review-tools.spec.ts:138:1 › custom rules redact transcript and handoff notes with built-in detection off, without leaking through reports (5.2s)
+  ok  6 [webkit] › tests\browser\review-tools.spec.ts:191:1 › invalid custom drafts preserve applied rules, while explicit clearing and new imports discard them (5.5s)
+  ok  7 [webkit] › tests\browser\review-tools.spec.ts:226:1 › changed-only review combines with role and search filters and uses the same message references in original mode (4.0s)
+  ok  8 [webkit] › tests\browser\review-tools.spec.ts:268:1 › pinned-only review composes with role filters and copies the complete message in the active mode (2.7s)
+  ok  9 [webkit] › tests\browser\review-tools.spec.ts:301:1 › search reveals a match beyond the normal expansion limit and clearing it restores the initial preview (1.9s)
+  ok 10 [webkit] › tests\browser\review-tools.spec.ts:323:1 › rapid recipe changes settle on the current cleanup result without a stale-preview error (3.4s)
+  ok 11 [webkit] › tests\browser\review-tools.spec.ts:357:1 › URL credentials stay redacted with email mode and overlapping custom rules show both counts (4.5s)
+  ok 12 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › small phone: transcript stays readable and export controls remain reachable (2.2s)
+  ok 13 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › compact tablet: transcript stays readable and export controls remain reachable (1.8s)
+  ok 14 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › tablet: transcript stays readable and export controls remain reachable (1.9s)
+  ok 15 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › phone landscape: transcript stays readable and export controls remain reachable (2.0s)
+  ok 16 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › short laptop: transcript stays readable and export controls remain reachable (2.0s)
+  ok 17 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › desktop: transcript stays readable and export controls remain reachable (2.5s)
+  ok 18 [webkit] › tests\browser\screen-fit.spec.ts:14:3 › ultrawide: transcript stays readable and export controls remain reachable (2.8s)
+  ok 19 [webkit] › tests\browser\screen-fit.spec.ts:38:1 › orientation changes preserve the selected filters and pinned messages (1.6s)
+  ok 20 [webkit] › tests\browser\usability.spec.ts:42:1 › 1366×768 workbench keeps controls in its layout without export actions covering them (1.6s)
+  ok 21 [webkit] › tests\browser\usability.spec.ts:63:1 › mobile cleanup sheet returns directly to the results and restores useful keyboard focus (2.4s)
+  ok 22 [webkit] › tests\browser\usability.spec.ts:89:1 › unapplied custom redactions block export until the visible apply action commits them (2.5s)
+  ok 23 [webkit] › tests\browser\usability.spec.ts:105:1 › invalid custom edits block handoff copy and download until rules are corrected (3.5s)
+  ok 24 [webkit] › tests\browser\usability.spec.ts:127:1 › clearing handwritten notes requires an explicit discard and can be cancelled (3.0s)
+  ok 25 [webkit] › tests\browser\usability.spec.ts:146:1 › replacement protects notes from another conversation before importing the new file (3.1s)
+  ok 26 [webkit] › tests\browser\usability.spec.ts:173:1 › switching conversations resets old filters and exposes system-message filtering (2.3s)
+  ok 27 [webkit] › tests\browser\usability.spec.ts:194:1 › view navigation gives keyboard users a useful focus target without tabbing through the hidden file input (2.2s)
+  ok 28 [webkit] › tests\browser\workbench.spec.ts:32:1 › import status and cleanup report expose content-free source integrity issues (2.5s)
+  ok 29 [webkit] › tests\browser\workbench.spec.ts:51:1 › imports a supported conversation directly from a ZIP export (1.8s)
+  x  30 [webkit] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export (1.1s)
+(node:2832) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 31 [webkit] › tests\browser\workbench.spec.ts:96:1 › mobile handoff shows its preview and actions without opening the keyboard (2.4s)
+  ok 32 [webkit] › tests\browser\workbench.spec.ts:116:1 › Markdown reading mode renders GFM while text mode and copy retain source text (2.2s)
+  ok 33 [webkit] › tests\browser\workbench.spec.ts:177:1 › demo cleanup controls update real results, reset defaults, and compare the original (5.9s)
+  ok 34 [webkit] › tests\browser\workbench.spec.ts:246:1 › ChatGPT archive switches conversations, filters, pins, and downloads actual portable exports (5.6s)
+  ok 35 [webkit] › tests\browser\workbench.spec.ts:310:1 › handoff notes are redacted, pinning is preserved, and the text budget explains overflow (4.8s)
+  ok 36 [webkit] › tests\browser\workbench.spec.ts:357:1 › handoff timestamp mode reports its range and keeps selected messages in source order (2.2s)
+  ok 37 [webkit] › tests\browser\workbench.spec.ts:390:1 › paste, malformed JSON, clearing, language, and help keyboard focus all work (4.9s)
+  ok 38 [webkit] › tests\browser\workbench.spec.ts:435:1 › 390px viewport keeps the workbench and handoff controls within the page (2.0s)
+  ok 39 [webkit] › tests\browser\workbench.spec.ts:453:1 › self-contained HTML runs offline from file:// and exports without network requests or page errors (2.8s)
+
+
+  1) [webkit] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export
+
+    Error: browserContext.newPage: Target page, context or browser has been closed
+
+    Error Context: test-results\workbench-browser-download-e8613-ely-from-the-cleaned-export-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\workbench-browser-download-e8613-ely-from-the-cleaned-export-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\workbench-browser-download-e8613-ely-from-the-cleaned-export-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [webkit] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export
+  38 passed (2.5m)

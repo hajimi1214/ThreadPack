@@ -1,0 +1,16 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test --workers=1 --output D:\Github项目\ThreadPack-阶段资料\ultimate-stage2-progress\webkit-isolated-download-artifacts --grep browser downloads the original imported bytes
+
+[WebServer] (node:51608) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:51600) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:25840) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [webkit] › tests\browser\workbench.spec.ts:64:1 › browser downloads the original imported bytes separately from the cleaned export (2.8s)
+
+  1 passed (27.3s)
