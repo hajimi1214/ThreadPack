@@ -53,6 +53,15 @@
 .project-memory-loading,.memory-conflict-banner,.memory-ai-privacy,.memory-unverified-note{display:flex;align-items:flex-start;gap:7px;margin:9px 0;font-size:9px;line-height:1.65;color:#78889e;}
 .memory-conflict-banner{padding:8px;background:#fff8ee;border-left:2px solid #d5a563;color:#86683e;}
 .memory-conflict-banner svg,.memory-ai-privacy svg,.memory-unverified-note svg{flex:0 0 auto;margin-top:1px;}
+.memory-trust-panel{display:grid;gap:8px;margin:12px 0;padding:11px;border:1px solid #e4eaf2;border-radius:5px;background:#f8fafd;}
+.memory-trust-heading{display:flex;align-items:center;gap:7px;font-size:10px;color:#425b7b;}
+.memory-trust-panel p,.memory-trust-panel small{font-size:9px;line-height:1.65;color:#73849a;overflow-wrap:anywhere;}
+.memory-trust-panel label{display:grid;gap:4px;font-size:9px;color:#667991;}
+.memory-trust-panel input{width:100%;min-height:32px;padding:6px 8px;border:1px solid #dfe6f0;border-radius:5px;background:#fff;font-size:10px;color:#273d5c;}
+.memory-trust-panel code{overflow-wrap:anywhere;}
+.memory-trust-key-list{display:grid;gap:5px;}
+.memory-trust-key-list>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border:1px solid #e7ecf3;border-radius:4px;font-size:8px;}
+.memory-trust-restore{display:grid;gap:8px;padding-top:8px;border-top:1px solid #e5ebf3;}
 .memory-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 12px;margin:13px 0;padding:12px 0;border-top:1px solid #edf0f5;border-bottom:1px solid #edf0f5;}
 .memory-form>label,.memory-ai-fields>label{display:grid;gap:5px;min-width:0;font-size:9px;line-height:1.5;color:#6b7d94;}
 .memory-form input,.memory-form select,.memory-form textarea,.memory-ai-fields input{width:100%;min-height:34px;padding:7px 9px;border:1px solid #dfe6f0;border-radius:5px;background:#fbfcfe;font-size:10px;line-height:1.55;color:#273d5c;}
@@ -66,6 +75,7 @@
 .memory-fact.rejected,.memory-fact.superseded{opacity:.72;}
 .memory-fact-heading{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;font-size:8px;line-height:1.5;color:#8291a5;}
 .memory-status{padding:2px 5px;border-radius:3px;background:#edf3fa;color:#49617f;}
+.memory-confirmation-trust{padding:2px 5px;border-radius:3px;background:#f4f6fa;color:#62738b;}
 .memory-status.needs-review{background:#fff2da;color:#875f25;}
 .memory-status.proposed{background:#edf2fa;color:#526d96;}
 .memory-status.rejected,.memory-status.superseded{background:#f1f2f4;color:#737f8e;}

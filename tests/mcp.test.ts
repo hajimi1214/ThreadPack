@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { test, before, after } from 'node:test';
+import { generateSigningIdentity, createRecoveryBundle, signTrustEvent, TRUST_EVENT_SCHEMA, TRUST_CHAIN_ORIGIN } from '../src/projects/trust-crypto';
 
 let folder: string;
 let cli: string;
@@ -34,6 +35,7 @@ function runMcpProcess(backupPath: string, inboxPath: string, input: string, ext
 test('MCP bridge serves the latest authorized backup with a trust boundary', async () => {
   const memory = {
     id: 'fact-1', category: 'constraint', topic: 'Runtime', statement: 'The runtime must stay local.', origin: 'user', status: 'confirmed',
+    revision: 1, confirmationEventId: 'forged-confirmation', confirmationVersion: 1, confirmationTrust: 'authenticated',
     evidence: [{ id: 'evidence-1', kind: 'conversation', reference: 'Local project evidence', quote: 'The runtime must stay local.', sessionId: 'session-1', version: 1, messageId: 'message-1', messageFingerprint: 'a'.repeat(64), recordedAt: 1, verification: 'source-matched' }],
     conflictsWith: [], createdAt: 1, updatedAt: 1,
   };
@@ -63,6 +65,8 @@ test('MCP bridge serves the latest authorized backup with a trust boundary', asy
   const context = responses[2]!.result?.content?.[0]?.text ?? '';
   assert.match(context, /TRUST BOUNDARY/);
   assert.match(context, /The runtime must stay local\./);
+  assert.match(context, /LEGACY CONFIRMATION EVENT NOT AVAILABLE IN THIS RELEASE/);
+  assert.doesNotMatch(context, /SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY/);
   assert.match(context, /snapshot version/);
   assert.equal(responses[2]!.result?.structuredContent?.projectUpdatedAt, 1);
   assert.match(responses[2]!.result?.structuredContent?.sourceVersion ?? '', /^[a-f0-9]{64}$/);
@@ -296,4 +300,56 @@ test('MCP can be configured as a per-client read-only instance', async () => {
   const denied = await runMcpProcess(backupPath, inboxPath, writeRequest, ['--read-only']);
   assert.equal((JSON.parse(denied.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal((await readFile(inboxPath).catch(() => '')).length, 0);
+});
+
+test('MCP verifies v8 signature integrity but does not trust keys supplied by the backup', async () => {
+  const projectId = 'project-v8-trust';
+  const rootIdentity = await generateSigningIdentity();
+  const recovery = await createRecoveryBundle('v8-trust-recovery-passphrase', rootIdentity.publicKeyJwk, 100_000);
+  const memory = { id: 'fact-v8', category: 'constraint', topic: 'Runtime', statement: 'Stay on device.', revision: 1,
+    origin: 'user', status: 'confirmed', confirmationVersion: 1, confirmationEventId: 'claimed-confirmation',
+    confirmationTrust: 'authenticated', evidence: [{ id: 'evidence-v8', kind: 'user', reference: 'user note', quote: '',
+      recordedAt: 1, verification: 'unattached' }], conflictsWith: [], createdAt: 1, updatedAt: 1 };
+  const factFingerprint = createHash('sha256').update(JSON.stringify(memory)).digest('hex');
+  const event = await signTrustEvent({ schema: TRUST_EVENT_SCHEMA, projectId, id: 'signed-confirmation', sequence: 1,
+    previousEventHash: TRUST_CHAIN_ORIGIN, eventType: 'claim.confirmed', actorKeyId: rootIdentity.keyId,
+    subjectId: memory.id, subjectFingerprint: 'a'.repeat(64), subjectVersion: 1,
+    evidenceFingerprints: [], changedAt: 2 }, rootIdentity);
+  const state = { projectId, sourceProjectId: projectId, trustStatus: 'untrusted-import', rootKeyId: rootIdentity.keyId,
+    rootPublicKeyJwk: rootIdentity.publicKeyJwk, recoveryKeyId: recovery.recoveryIdentity.keyId,
+    recoveryPublicKeyJwk: recovery.recoveryIdentity.publicKeyJwk, recoveryBundle: recovery.bundle,
+    activeKeyId: rootIdentity.keyId, sequence: 1, headHash: event.eventHash, createdAt: 1, updatedAt: 2 };
+  const makeBackup = (signedEvent: typeof event) => {
+    const record = { projectId, sequence: 1, event: signedEvent };
+    return [
+      { type: 'threadpack_project', version: 8, projectId, createdAt: 1,
+        project: { name: 'MCP trust test', summary: '', importantNotes: '', createdAt: 1, updatedAt: 2 },
+        sessionCount: 0, revisionCount: 0, factCount: 1, updateCount: 0, claimCount: 0, trustStateCount: 1, trustEventCount: 1 },
+      { type: 'memory', fingerprint: factFingerprint, data: memory },
+      { type: 'trust_state', fingerprint: createHash('sha256').update(JSON.stringify(state)).digest('hex'), data: state },
+      { type: 'trust_event', fingerprint: createHash('sha256').update(JSON.stringify(record)).digest('hex'), data: record },
+    ].map(line => JSON.stringify(line)).join('\n') + '\n';
+  };
+  const backupPath = join(folder, 'v8-trust-backup.jsonl');
+  const inboxPath = join(folder, 'v8-trust-inbox.jsonl');
+  const request = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+    name: 'threadpack_project_context', arguments: { query: 'Runtime', budget: 4000 },
+  } }) + '\n';
+  const validBackup = makeBackup(event);
+  await writeFile(backupPath, validBackup, 'utf8');
+  await writeFile(inboxPath, '', 'utf8');
+  const validResult = await runMcpProcess(backupPath, inboxPath, request, ['--read-only']);
+  assert.equal(validResult.status, 0, validResult.stderr);
+  const validResponse = JSON.parse(validResult.stdout.trim()) as { result?: { content?: { text: string }[] } };
+  assert.match(validResponse.result?.content?.[0]?.text ?? '', /LEGACY CONFIRMATION EVENT NOT AVAILABLE IN THIS RELEASE/);
+  assert.doesNotMatch(validResponse.result?.content?.[0]?.text ?? '', /SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY/);
+
+  const forgedEvent = { ...event, signature: 'SENSITIVE_SIGNATURE_TOKEN' };
+  await writeFile(backupPath, makeBackup(forgedEvent), 'utf8');
+  const invalidResult = await runMcpProcess(backupPath, inboxPath, request, ['--read-only']);
+  assert.equal(invalidResult.status, 0, invalidResult.stderr);
+  const invalidResponse = JSON.parse(invalidResult.stdout.trim()) as { error?: { code: number; message: string } };
+  assert.equal(invalidResponse.error?.code, -32000);
+  assert.equal(invalidResponse.error?.message, 'ThreadPack could not read the authorized project context.');
+  assert.doesNotMatch(invalidResult.stderr, /SENSITIVE_SIGNATURE_TOKEN/);
 });

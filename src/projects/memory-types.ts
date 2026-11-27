@@ -1,3 +1,54 @@
+import type { RecoveryBundle, SignedTrustEvent } from './trust-crypto';
+
+export type ConfirmationTrustStatus = 'authenticated' | 'legacy-unverified' | 'invalid' | 'revoked' | 'inactive';
+
+export interface ProjectTrustState {
+  projectId: string;
+  sourceProjectId?: string;
+  trustStatus: 'trusted-local' | 'untrusted-import';
+  rootKeyId: string;
+  rootPublicKeyJwk: JsonWebKey;
+  recoveryKeyId: string;
+  recoveryPublicKeyJwk: JsonWebKey;
+  recoveryBundle: RecoveryBundle;
+  recoveryAcknowledgedAt?: number;
+  activeKeyId: string;
+  sequence: number;
+  headHash: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TrustedProjectAnchor {
+  key: [string, string];
+  projectId: string;
+  sourceProjectId: string;
+  rootKeyId: string;
+  rootPublicKeyFingerprint: string;
+  recoveryKeyId: string;
+  recoveryPublicKeyFingerprint: string;
+  sequence: number;
+  headHash: string;
+  updatedAt: number;
+  deletedAt?: number;
+}
+
+export interface LocalProjectSigningKey {
+  key: [string, string];
+  projectId: string;
+  keyId: string;
+  publicKeyJwk: JsonWebKey;
+  privateKey: CryptoKey;
+  createdAt: number;
+}
+
+export interface StoredProjectTrustEvent {
+  key: [string, number];
+  projectId: string;
+  sequence: number;
+  event: SignedTrustEvent;
+}
+
 export type MemoryCategory = 'goal' | 'decision' | 'constraint' | 'task' | 'risk' | 'open-question';
 export type MemoryStatus = 'proposed' | 'confirmed' | 'needs-review' | 'rejected' | 'superseded';
 export type MemoryOrigin = 'user' | 'ai';
@@ -92,6 +143,9 @@ export interface EvidenceRelationEvent {
   changedAt: number;
   claimFingerprint: string;
   evidenceFingerprint: string;
+  trustEventId?: string;
+  trustEventHash?: string;
+  trustKeyId?: string;
 }
 
 /** One citation on one claim. Optional assessment fields keep legacy rows readable. */
@@ -128,10 +182,16 @@ export interface ProjectMemoryFact {
   category: MemoryCategory;
   topic: string;
   statement: string;
+  revision?: number;
   taskState?: TaskState;
   origin: MemoryOrigin;
   status: MemoryStatus;
   statusHistory?: MemoryStatusChange[];
+  confirmationEventId?: string;
+  confirmationProjectId?: string;
+  confirmationVersion?: number;
+  confirmationRevocationEventId?: string;
+  confirmationTrust?: ConfirmationTrustStatus;
   reviewStateBeforeConflict?: 'confirmed' | 'proposed';
   evidence: MemoryEvidence[];
   conflictsWith: string[];

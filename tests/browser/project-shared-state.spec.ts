@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { setupLocalProjectTrust } from './helpers/project-trust';
 
 interface BackupRecord {
   type: string;
@@ -96,6 +97,7 @@ test('project changes update one authorized shared file and survive a reload', a
 
   await dialog.getByRole('button', { name: 'Connect live local state', exact: true }).click();
   await expect(dialog.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
+  await setupLocalProjectTrust(page, dialog);
   let sharedText = await page.evaluate(async () => await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile());
   expect(sharedText).toContain('Shared project evidence');
   expect(sharedText).not.toContain('Isolated project');
@@ -131,8 +133,10 @@ test('project changes update one authorized shared file and survive a reload', a
   await memoryForm.locator('textarea').nth(0).fill('The latest confirmed facts are shared automatically.');
   await memoryForm.locator('select').nth(2).selectOption({ label: 'Shared project evidence' });
   await memoryForm.getByRole('button', { name: 'Confirm and save', exact: true }).click();
-  await expect(dialog.locator('.memory-fact')).toContainText('Confirmed by user');
-  await expect(dialog.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
+  await expect(dialog.locator('.memory-fact')).toContainText('Signed by this project’s local trusted key');
+  await expect.poll(async () => page.evaluate(async () =>
+    (await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile()).includes('The latest confirmed facts are shared automatically.')),
+  { timeout: 30_000 }).toBe(true);
   sharedText = await page.evaluate(async () => await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile());
   expect(sharedText).toContain('The latest confirmed facts are shared automatically.');
   const sharedMemory = () => sharedText.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as {

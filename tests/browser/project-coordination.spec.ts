@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { setupLocalProjectTrust } from './helpers/project-trust';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -52,6 +53,7 @@ test('MCP task claims and results flow through shared project review', async ({ 
   await library.getByRole('button', { name: 'Create project', exact: true }).click();
   await library.getByRole('button', { name: /Save current conversation/ }).click();
   await expect(library.locator('.project-session-item')).toContainText('Backup recovery work');
+  await setupLocalProjectTrust(page, library);
   await library.getByRole('button', { name: 'Connect live local state', exact: true }).click();
   await expect(library.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
   await library.getByRole('button', { name: 'Connect inbox', exact: true }).click();
@@ -64,8 +66,10 @@ test('MCP task claims and results flow through shared project review', async ({ 
   await memoryForm.locator('input').nth(0).fill('Backup recovery');
   await memoryForm.locator('textarea').nth(0).fill('Verify project backup restoration.');
   await memoryForm.getByRole('button', { name: 'Confirm and save', exact: true }).click();
-  await expect(library.locator('.memory-fact').filter({ hasText: 'Verify project backup restoration.' })).toContainText('Confirmed by user');
-  await expect(library.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
+  await expect(library.locator('.memory-fact').filter({ hasText: 'Verify project backup restoration.' })).toContainText('Signed by this project’s local trusted key');
+  await expect.poll(async () => page.evaluate(async () =>
+    (await (window as unknown as { readProjectFile: () => Promise<string> }).readProjectFile()).includes('Verify project backup restoration.')),
+  { timeout: 30_000 }).toBe(true);
 
   const statePath = testInfo.outputPath('coordination-project.jsonl');
   const inboxPath = testInfo.outputPath('coordination-inbox.jsonl');

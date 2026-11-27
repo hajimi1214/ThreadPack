@@ -1,17 +1,19 @@
 import type { SourcePlatform } from '../core';
 import { searchPattern } from '../preview';
 import { sha256Fingerprint } from '../handoff-draft';
-import type { EvidenceKind, EvidenceRelation, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, ProjectTaskClaim, ProjectTaskClaimAction, ProjectTaskClaimEvent, ProjectUpdateAction, ProjectUpdateAuditEntry, ProjectUpdateProposal, ProjectUpdateStatus, ProjectUpdateStatusChange, TaskState } from './memory-types';
+import type { EvidenceAssessment, EvidenceKind, EvidenceRelation, MemoryCategory, MemoryEvidence, MemoryEvidenceInput, MemoryOrigin, MemoryStatus, MemoryStatusChange, ProjectMemoryFact, ProjectMemoryInput, ProjectTaskClaim, ProjectTaskClaimAction, ProjectTaskClaimEvent, ProjectUpdateAction, ProjectUpdateAuditEntry, ProjectUpdateProposal, ProjectUpdateStatus, ProjectUpdateStatusChange, TaskState } from './memory-types';
 import {
   assessEvidenceBinding, bindNewConversationEvidence, canAttestEvidenceRelation, createEvidenceRelationEvent, invalidEvidenceBinding,
   indexEvidenceMessages, validateEvidenceRelation,
 } from './evidence-binding';
 import type { EvidenceScope, IndexedEvidenceRevision } from './evidence-binding';
-import type { EvidenceBindingIssue } from './memory-types';
+import type { EvidenceBindingIssue, LocalProjectSigningKey, ProjectTrustState, StoredProjectTrustEvent, TrustedProjectAnchor } from './memory-types';
+import { assertTrustChainContainsHead, createRecoveryBundle, generateSigningIdentity, isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, signTrustEvent, unlockRecoveryBundle, verifyTrustEventChain, TRUST_CHAIN_ORIGIN, TRUST_EVENT_SCHEMA } from './trust-crypto';
+import type { LocalSigningIdentity, RecoveryBundle, SignedTrustEvent, TrustEventPayload, TrustChainVerification } from './trust-crypto';
 import { MAX_PROJECT_SESSION_BYTES, MAX_SHARED_PROJECT_BACKUP_BYTES, utf8ByteLength } from './limits';
 
 const DATABASE_NAME = 'threadpack-project-library';
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 7;
 const RESTORE_STALE_AFTER = 24 * 60 * 60 * 1000;
 const UPDATE_REVIEW_STALE_AFTER = 5 * 60 * 1000;
 const encoder = new TextEncoder();
@@ -256,6 +258,22 @@ function database(): Promise<IDBDatabase> {
           claims.createIndex('projectClaim', ['projectId', 'claimId']);
           claims.createIndex('projectTask', ['projectId', 'taskId']);
         }
+        if (!db.objectStoreNames.contains('projectTrust')) {
+          const projectTrust = db.createObjectStore('projectTrust', { keyPath: 'projectId' });
+          projectTrust.createIndex('sourceProjectId', 'sourceProjectId');
+        }
+        if (!db.objectStoreNames.contains('deviceKeys')) {
+          const deviceKeys = db.createObjectStore('deviceKeys', { keyPath: 'key' });
+          deviceKeys.createIndex('projectId', 'projectId');
+        }
+        if (!db.objectStoreNames.contains('trustEvents')) {
+          const trustEvents = db.createObjectStore('trustEvents', { keyPath: 'key' });
+          trustEvents.createIndex('projectId', 'projectId');
+        }
+        if (!db.objectStoreNames.contains('trustAnchors')) {
+          const anchors = db.createObjectStore('trustAnchors', { keyPath: 'key' });
+          anchors.createIndex('sourceProjectId', 'sourceProjectId');
+        }
       };
       request.onsuccess = () => {
         if (blocked) { request.result.close(); return; }
@@ -299,14 +317,30 @@ async function removeProjectRows(transaction: IDBTransaction, projectId: string)
   const shared = transaction.objectStore('shared');
   const updates = transaction.objectStore('updates');
   const claims = transaction.objectStore('claims');
-  const [sessionKeys, revisionKeys, memoryKeys] = await Promise.all([
+  const projectTrust = transaction.objectStore('projectTrust');
+  const deviceKeys = transaction.objectStore('deviceKeys');
+  const trustEvents = transaction.objectStore('trustEvents');
+  const trustAnchors = transaction.objectStore('trustAnchors');
+  const [sessionKeys, revisionKeys, memoryKeys, deviceKeyKeys, trustEventKeys] = await Promise.all([
     idbRequest(sessions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
     idbRequest(revisions.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
     idbRequest(memory.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
+    idbRequest(deviceKeys.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
+    idbRequest(trustEvents.index('projectId').getAllKeys(IDBKeyRange.only(projectId))),
   ]);
   for (const key of sessionKeys) sessions.delete(key);
   for (const key of revisionKeys) revisions.delete(key);
   for (const key of memoryKeys) memory.delete(key);
+  for (const key of deviceKeyKeys) deviceKeys.delete(key);
+  for (const key of trustEventKeys) trustEvents.delete(key);
+  const trustState = await idbRequest<ProjectTrustState | undefined>(projectTrust.get(projectId));
+  if (trustState) {
+    const trustSourceProjectId = trustState.sourceProjectId ?? projectId;
+    const anchorKey: [string, string] = [trustSourceProjectId, trustSourceProjectId];
+    const anchor = await idbRequest<TrustedProjectAnchor | undefined>(trustAnchors.get(anchorKey));
+    if (anchor?.projectId === projectId) { anchor.deletedAt = Date.now(); trustAnchors.put(anchor); }
+  }
+  projectTrust.delete(projectId); // Retain a minimal deleted-project anchor to reject stale backup replays.
   shared.delete(projectId);
   const updateKeys = await idbRequest(updates.index('projectId').getAllKeys(IDBKeyRange.only(projectId)));
   for (const key of updateKeys) updates.delete(key);
@@ -317,12 +351,328 @@ async function removeProjectRows(transaction: IDBTransaction, projectId: string)
 
 async function cleanAbandonedRestores(): Promise<void> {
   const cutoff = Date.now() - RESTORE_STALE_AFTER;
-  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', async transaction => {
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'], 'readwrite', async transaction => {
     const projects = await idbRequest<ProjectRecord[]>(transaction.objectStore('projects').getAll());
     for (const project of projects) {
       if (project.restoringSince && project.restoringSince < cutoff) await removeProjectRows(transaction, project.id);
     }
   });
+}
+
+export interface ProjectTrustSummary {
+  state?: ProjectTrustState;
+  events: SignedTrustEvent[];
+  verification?: TrustChainVerification;
+  trusted: boolean;
+  deviceKeyAvailable: boolean;
+  readyForConfirmations: boolean;
+  issue?: string;
+  anchor?: TrustedProjectAnchor;
+}
+
+type TrustEventDraft = Omit<TrustEventPayload, 'schema' | 'projectId' | 'id' | 'sequence' | 'previousEventHash' | 'actorKeyId'>;
+interface TrustFactMutation {
+  factId: string;
+  expectedUpdatedAt: number;
+  expectedRevision: number;
+  apply: (fact: ProjectMemoryFact, event: SignedTrustEvent, changedAt: number) => void;
+}
+
+function isUsableLocalSigningKey(value: LocalProjectSigningKey | undefined, expectedKeyId: string): value is LocalProjectSigningKey {
+  return !!value && value.keyId === expectedKeyId && typeof CryptoKey !== 'undefined'
+    && value.privateKey instanceof CryptoKey && value.privateKey.type === 'private' && value.privateKey.algorithm.name === 'ECDSA'
+    && (value.privateKey.algorithm as EcKeyAlgorithm).namedCurve === 'P-256'
+    && value.privateKey.extractable === false && value.privateKey.usages.includes('sign');
+}
+
+function trustedPublicKeySet(state: ProjectTrustState): Record<string, JsonWebKey> {
+  return { [state.rootKeyId]: state.rootPublicKeyJwk, [state.recoveryKeyId]: state.recoveryPublicKeyJwk };
+}
+
+export async function getProjectTrustSummary(projectId: string): Promise<ProjectTrustSummary> {
+  const snapshot = await withTransaction(['projectTrust', 'trustEvents', 'trustAnchors', 'deviceKeys'], 'readonly', async transaction => {
+    const state = await idbRequest<ProjectTrustState | undefined>(transaction.objectStore('projectTrust').get(projectId));
+    const events = state ? await idbRequest<StoredProjectTrustEvent[]>(transaction.objectStore('trustEvents').index('projectId').getAll(IDBKeyRange.only(projectId))) : [];
+    const sourceProjectId = state?.sourceProjectId ?? projectId;
+    const anchors = state ? await idbRequest<TrustedProjectAnchor[]>(transaction.objectStore('trustAnchors').index('sourceProjectId')
+      .getAll(IDBKeyRange.only(sourceProjectId))) : [];
+    const deviceKey = state ? await idbRequest<LocalProjectSigningKey | undefined>(transaction.objectStore('deviceKeys').get([projectId, state.activeKeyId])) : undefined;
+    return { state, events: events.map(record => record.event).sort((first, second) => first.sequence - second.sequence), anchors, deviceKey };
+  });
+  if (!snapshot.state) return { events: [], trusted: false, deviceKeyAvailable: false, readyForConfirmations: false };
+  if (snapshot.events.some(event => event.projectId !== snapshot.state!.sourceProjectId)) {
+    return { state: snapshot.state, events: snapshot.events, trusted: false, deviceKeyAvailable: !!snapshot.deviceKey, readyForConfirmations: false,
+      issue: 'Project trust history contains a cross-project event.' };
+  }
+  let verification: TrustChainVerification;
+  try { verification = await verifyTrustEventChain(snapshot.events, trustedPublicKeySet(snapshot.state)); }
+  catch (error) {
+    return { state: snapshot.state, events: snapshot.events, trusted: false, deviceKeyAvailable: !!snapshot.deviceKey, readyForConfirmations: false,
+      issue: error instanceof Error ? error.message : 'Project trust history could not be verified.' };
+  }
+  if (verification.head.sequence !== snapshot.state.sequence || verification.head.eventHash !== snapshot.state.headHash
+    || snapshot.state.sequence !== snapshot.events.length || !verification.activeKeyIds.includes(snapshot.state.activeKeyId)) {
+    return { state: snapshot.state, events: snapshot.events, trusted: false, deviceKeyAvailable: !!snapshot.deviceKey, readyForConfirmations: false,
+      issue: 'Project trust state does not match its signed event chain.' };
+  }
+  const anchor = snapshot.anchors.find(item => item.sourceProjectId === (snapshot.state!.sourceProjectId ?? projectId));
+  if (anchor && snapshot.state.trustStatus === 'trusted-local' && anchor.deletedAt === undefined) {
+    if (anchor.rootKeyId !== snapshot.state.rootKeyId || anchor.recoveryKeyId !== snapshot.state.recoveryKeyId
+      || anchor.rootPublicKeyFingerprint !== await publicKeyFingerprint(snapshot.state.rootPublicKeyJwk)
+      || anchor.recoveryPublicKeyFingerprint !== await publicKeyFingerprint(snapshot.state.recoveryPublicKeyJwk)) {
+      return { state: snapshot.state, events: snapshot.events, trusted: false, deviceKeyAvailable: !!snapshot.deviceKey, readyForConfirmations: false,
+        issue: 'Project trust root differs from the locally pinned identity.' };
+    }
+    try { assertTrustChainContainsHead({ sequence: anchor.sequence, eventHash: anchor.headHash }, snapshot.events); }
+    catch (error) {
+      return { state: snapshot.state, events: snapshot.events, trusted: false, deviceKeyAvailable: !!snapshot.deviceKey, readyForConfirmations: false,
+        issue: error instanceof Error ? error.message : 'Project trust history rollback detected.' };
+    }
+  }
+  const anchorOwnedByThisProject = anchor?.projectId === projectId;
+  const trusted = snapshot.state.trustStatus === 'trusted-local' && anchorOwnedByThisProject;
+  const anchorIssue = snapshot.state.trustStatus === 'trusted-local' && anchor && !anchorOwnedByThisProject
+    ? 'active-trust-anchor-owned-by-another-local-project' : undefined;
+  const deviceKeyAvailable = isUsableLocalSigningKey(snapshot.deviceKey, snapshot.state.activeKeyId);
+  const issue = anchorIssue ?? (trusted && !deviceKeyAvailable ? 'active-local-signing-key-missing' : undefined);
+  return { state: snapshot.state, events: snapshot.events, verification, trusted, deviceKeyAvailable, issue, ...(anchor ? { anchor } : {}),
+    readyForConfirmations: trusted && deviceKeyAvailable && !!snapshot.state.recoveryAcknowledgedAt };
+}
+
+export async function createProjectTrustIdentity(projectId: string, recoveryPassphrase: string): Promise<{ state: ProjectTrustState; recoveryBundle: RecoveryBundle }> {
+  const deviceIdentity = await generateSigningIdentity();
+  const recovery = await createRecoveryBundle(recoveryPassphrase, deviceIdentity.publicKeyJwk);
+  const rootPublicKeyFingerprint = await publicKeyFingerprint(deviceIdentity.publicKeyJwk);
+  const recoveryPublicKeyFingerprint = await publicKeyFingerprint(recovery.recoveryIdentity.publicKeyJwk);
+  const now = Date.now();
+  const state: ProjectTrustState = {
+    projectId, sourceProjectId: projectId, trustStatus: 'trusted-local', rootKeyId: deviceIdentity.keyId, rootPublicKeyJwk: deviceIdentity.publicKeyJwk,
+    recoveryKeyId: recovery.recoveryIdentity.keyId, recoveryPublicKeyJwk: recovery.recoveryIdentity.publicKeyJwk,
+    recoveryBundle: recovery.bundle, activeKeyId: deviceIdentity.keyId, sequence: 0, headHash: TRUST_CHAIN_ORIGIN, createdAt: now, updatedAt: now,
+  };
+  await withTransaction(['projects', 'projectTrust', 'deviceKeys', 'trustAnchors'], 'readwrite', async transaction => {
+    const project = await idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId));
+    const existing = await idbRequest<ProjectTrustState | undefined>(transaction.objectStore('projectTrust').get(projectId));
+    if (!project || project.restoringSince) throw new Error('This project is unavailable.');
+    if (existing) throw new Error('This project already has a trust identity. Use key recovery or rotation instead.');
+    transaction.objectStore('projectTrust').add(state);
+    const existingAnchor = await idbRequest<TrustedProjectAnchor | undefined>(transaction.objectStore('trustAnchors').get([projectId, projectId]));
+    if (existingAnchor) throw new Error('A trust anchor already exists for this project identity. Use its recovery kit instead of creating a new identity.');
+    transaction.objectStore('trustAnchors').add({
+      key: [projectId, projectId], projectId, sourceProjectId: projectId, rootKeyId: state.rootKeyId,
+      rootPublicKeyFingerprint,
+      recoveryKeyId: state.recoveryKeyId, recoveryPublicKeyFingerprint,
+      sequence: 0, headHash: TRUST_CHAIN_ORIGIN, updatedAt: now,
+    } satisfies TrustedProjectAnchor);
+    transaction.objectStore('deviceKeys').add({ key: [projectId, deviceIdentity.keyId], projectId,
+      keyId: deviceIdentity.keyId, publicKeyJwk: deviceIdentity.publicKeyJwk, privateKey: deviceIdentity.privateKey,
+      createdAt: now } satisfies LocalProjectSigningKey);
+    touchProject(project, now);
+    transaction.objectStore('projects').put(project);
+  });
+  return { state, recoveryBundle: recovery.bundle };
+}
+
+export async function acknowledgeProjectRecoveryBundle(projectId: string, expectedFingerprint: string): Promise<ProjectTrustState> {
+  const before = await withTransaction(['projects', 'projectTrust'], 'readonly', async transaction => {
+    const project = await idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId));
+    const state = await idbRequest<ProjectTrustState | undefined>(transaction.objectStore('projectTrust').get(projectId));
+    if (!project || project.restoringSince || !state) throw new Error('This project has no local trust identity.');
+    return { project, state };
+  });
+  const fingerprint = await publicKeyFingerprint(before.state.recoveryPublicKeyJwk);
+  if (fingerprint !== expectedFingerprint) throw new Error('Recovery key fingerprint changed. Re-open the recovery kit and try again.');
+  return withTransaction(['projects', 'projectTrust'], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const trust = transaction.objectStore('projectTrust');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    const state = await idbRequest<ProjectTrustState | undefined>(trust.get(projectId));
+    if (!project || project.restoringSince || !state || state.updatedAt !== before.state.updatedAt) {
+      throw new Error('Project trust state changed during recovery-kit review. Reopen it and try again.');
+    }
+    state.recoveryAcknowledgedAt = Date.now();
+    state.updatedAt = state.recoveryAcknowledgedAt;
+    trust.put(state);
+    touchProject(project, state.updatedAt);
+    projects.put(project);
+    return state;
+  });
+}
+
+async function appendProjectTrustEvent(
+  projectId: string,
+  draft: TrustEventDraft,
+  options: { signer?: LocalSigningIdentity; replacementIdentity?: LocalSigningIdentity; discardReplacedPrivateKey?: boolean; trustAfterRecovery?: boolean;
+    factMutation?: TrustFactMutation } = {},
+): Promise<SignedTrustEvent> {
+  const before = await getProjectTrustSummary(projectId);
+  const state = before.state;
+  if (!state) throw new Error('Set up this project trust identity before confirming memory.');
+  const signer = options.signer ?? await withTransaction(['deviceKeys'], 'readonly', async transaction => {
+    const record = await idbRequest<LocalProjectSigningKey | undefined>(transaction.objectStore('deviceKeys').get([projectId, state.activeKeyId]));
+    if (!isUsableLocalSigningKey(record, state.activeKeyId)) throw new Error('This device signing key is unavailable. Use the recovery bundle to re-trust this device.');
+    return { keyId: record.keyId, publicKeyJwk: record.publicKeyJwk, privateKey: record.privateKey };
+  });
+  const recoveryAuthorized = options.trustAfterRecovery && signer.keyId === state.recoveryKeyId
+    && (state.trustStatus === 'untrusted-import' || state.trustStatus === 'trusted-local' && !before.deviceKeyAvailable);
+  if (options.trustAfterRecovery && !recoveryAuthorized) {
+    throw new Error('Recovery authorization is valid only for restoring a missing device key or re-trusting an imported project.');
+  }
+  if (!options.trustAfterRecovery && (state.trustStatus !== 'trusted-local' || !state.recoveryAcknowledgedAt || !before.deviceKeyAvailable)) {
+    throw new Error('The active local signing key or recovery acknowledgement is unavailable. Restore device trust before signing.');
+  }
+  if (!before.verification?.activeKeyIds.includes(signer.keyId)) {
+    throw new Error('The signing key is not authorized for this project trust operation.');
+  }
+  if (signer.keyId === state.recoveryKeyId
+    && await publicKeyFingerprint(signer.publicKeyJwk) !== await publicKeyFingerprint(state.recoveryPublicKeyJwk)) {
+    throw new Error('The recovery signing key does not match this project recovery identity.');
+  }
+  const rootPublicKeyFingerprint = await publicKeyFingerprint(state.rootPublicKeyJwk);
+  const recoveryPublicKeyFingerprint = await publicKeyFingerprint(state.recoveryPublicKeyJwk);
+  const previousTimestamp = before.events.at(-1)?.changedAt ?? 0;
+  const event = await signTrustEvent({ ...draft, changedAt: Math.max(draft.changedAt, previousTimestamp),
+    schema: TRUST_EVENT_SCHEMA, projectId: state.sourceProjectId ?? projectId, id: makeId(),
+    sequence: state.sequence + 1, previousEventHash: state.headHash, actorKeyId: signer.keyId }, signer);
+  const changedAt = Date.now();
+  await withTransaction(['projects', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors', ...(options.factMutation ? ['memory'] : [])], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const trustStore = transaction.objectStore('projectTrust');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    const current = await idbRequest<ProjectTrustState | undefined>(trustStore.get(projectId));
+    if (!project || project.restoringSince || !current) throw new Error('This project trust state is unavailable.');
+    if (current.trustStatus !== state.trustStatus) throw new Error('Project trust state changed during signing. Reload and retry the operation.');
+    if (current.sequence !== state.sequence || current.headHash !== state.headHash
+      || current.activeKeyId !== state.activeKeyId || current.trustStatus !== state.trustStatus || current.sourceProjectId !== state.sourceProjectId) {
+      throw new Error('Project trust history changed during signing. Reload and retry the confirmation.');
+    }
+    transaction.objectStore('trustEvents').add({ key: [projectId, event.sequence], projectId, sequence: event.sequence, event } satisfies StoredProjectTrustEvent);
+    const localKeys = transaction.objectStore('deviceKeys');
+    if (options.replacementIdentity) {
+      const identity = options.replacementIdentity;
+      localKeys.add({ key: [projectId, identity.keyId], projectId, keyId: identity.keyId,
+        publicKeyJwk: identity.publicKeyJwk, privateKey: identity.privateKey, createdAt: changedAt } satisfies LocalProjectSigningKey);
+      if (options.discardReplacedPrivateKey) localKeys.delete([projectId, current.activeKeyId]);
+      current.activeKeyId = identity.keyId;
+    }
+    const revokedKeyId = event.eventType === 'identity.key-revoked' ? event.details?.keyId
+      : event.eventType === 'identity.device-retrusted' ? event.details?.revokeKeyId : undefined;
+    if (typeof revokedKeyId === 'string') localKeys.delete([projectId, revokedKeyId]);
+    current.sequence = event.sequence;
+    current.headHash = event.eventHash;
+    current.updatedAt = changedAt;
+    if (options.trustAfterRecovery) { current.trustStatus = 'trusted-local'; current.recoveryAcknowledgedAt = changedAt; }
+    trustStore.put(current);
+    const anchors = transaction.objectStore('trustAnchors');
+    const trustSourceProjectId = current.sourceProjectId ?? projectId;
+    const anchorKey: [string, string] = [trustSourceProjectId, trustSourceProjectId];
+    const localAnchor = await idbRequest<TrustedProjectAnchor | undefined>(anchors.get(anchorKey));
+    if (localAnchor && localAnchor.projectId !== projectId && current.trustStatus !== 'untrusted-import'
+      && !(options.trustAfterRecovery && localAnchor.deletedAt !== undefined)) {
+      throw new Error('This trust event does not belong to the locally anchored project identity. Anchor project=' + localAnchor.projectId + ', target=' + projectId + ', status=' + current.trustStatus + ', deleted=' + String(localAnchor.deletedAt) + ', recovery=' + String(options.trustAfterRecovery));
+    }
+    if (!localAnchor) {
+      if (!options.trustAfterRecovery) throw new Error('This project has no local trust anchor. Use the recovery kit to establish one.');
+      anchors.add({ key: anchorKey, projectId,
+        sourceProjectId: current.sourceProjectId ?? projectId,
+        rootKeyId: current.rootKeyId, rootPublicKeyFingerprint,
+        recoveryKeyId: current.recoveryKeyId, recoveryPublicKeyFingerprint,
+        sequence: event.sequence, headHash: event.eventHash, updatedAt: changedAt } satisfies TrustedProjectAnchor);
+    } else {
+      if (localAnchor.sequence !== (before.anchor?.sequence ?? 0) || localAnchor.headHash !== (before.anchor?.headHash ?? TRUST_CHAIN_ORIGIN)
+        || localAnchor.rootKeyId !== current.rootKeyId || localAnchor.recoveryKeyId !== current.recoveryKeyId) {
+        throw new Error('Locally pinned trust state changed during the trust event.');
+      }
+      assertTrustChainContainsHead({ sequence: localAnchor.sequence, eventHash: localAnchor.headHash }, before.events);
+      localAnchor.projectId = projectId;
+      localAnchor.sequence = event.sequence;
+      localAnchor.headHash = event.eventHash;
+      localAnchor.updatedAt = changedAt;
+      delete localAnchor.deletedAt;
+      anchors.put(localAnchor);
+    }
+    if (options.factMutation) {
+      const memory = transaction.objectStore('memory');
+      const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + options.factMutation.factId));
+      if (!fact || fact.updatedAt !== options.factMutation.expectedUpdatedAt
+        || (fact.revision ?? 1) !== options.factMutation.expectedRevision) {
+        throw new Error('Project fact changed before its signed trust event could be committed. Reopen the fact and try again.');
+      }
+      options.factMutation.apply(fact, event, changedAt);
+      memory.put(fact);
+    }
+    touchProject(project, changedAt);
+    projects.put(project);
+  });
+  return event;
+}
+
+export async function rotateProjectTrustKey(projectId: string): Promise<{ event: SignedTrustEvent; keyId: string }> {
+  const current = await getProjectTrustSummary(projectId);
+  if (!current.state || !current.readyForConfirmations) throw new Error('The local trust identity is not ready for key rotation.');
+  const identity = await generateSigningIdentity();
+  const event = await appendProjectTrustEvent(projectId, {
+    eventType: 'identity.key-rotated', subjectId: identity.keyId,
+    subjectFingerprint: await publicKeyFingerprint(identity.publicKeyJwk), subjectVersion: 1,
+    evidenceFingerprints: [], changedAt: Date.now(),
+    details: { keyId: identity.keyId, publicKeyJwk: identity.publicKeyJwk },
+  }, { replacementIdentity: identity, discardReplacedPrivateKey: true });
+  return { event, keyId: identity.keyId };
+}
+
+export async function revokeProjectTrustKey(projectId: string, keyId: string): Promise<SignedTrustEvent> {
+  const summary = await getProjectTrustSummary(projectId);
+  if (!summary.state || !summary.verification?.activeKeyIds.includes(keyId)
+    || keyId === summary.state.activeKeyId || keyId === summary.state.recoveryKeyId) {
+    throw new Error('Select a trusted inactive device key to revoke. The recovery key must remain available for device recovery.');
+  }
+  return appendProjectTrustEvent(projectId, {
+    eventType: 'identity.key-revoked', subjectId: keyId, subjectFingerprint: await sha256Fingerprint(keyId),
+    subjectVersion: summary.state.sequence + 1, evidenceFingerprints: [], changedAt: Date.now(), details: { keyId },
+  });
+}
+
+export async function retrustProjectDevice(
+  projectId: string, bundle: RecoveryBundle, passphrase: string, expectedRecoveryFingerprint: string,
+): Promise<{ event: SignedTrustEvent; keyId: string }> {
+  const summary = await getProjectTrustSummary(projectId);
+  const canRestoreMissingDeviceKey = summary.state?.trustStatus === 'trusted-local' && !summary.deviceKeyAvailable;
+  if (!summary.state || summary.state.trustStatus !== 'untrusted-import' && !canRestoreMissingDeviceKey
+    || expectedRecoveryFingerprint !== await publicKeyFingerprint(summary.state.recoveryPublicKeyJwk)) {
+    throw new Error('Confirm the recovery-key fingerprint shown by the trusted project owner before re-trusting this device.');
+  }
+  const sourceProjectId = summary.state.sourceProjectId ?? projectId;
+  const existingAnchors = await withTransaction(['trustAnchors'], 'readonly', transaction =>
+    idbRequest<TrustedProjectAnchor[]>(transaction.objectStore('trustAnchors').index('sourceProjectId').getAll(IDBKeyRange.only(sourceProjectId))));
+  if (existingAnchors.some(item => item.projectId !== projectId && item.deletedAt === undefined)) {
+    throw new Error('This project identity is already trusted by another local project. Continue from that project to avoid a second signing history.');
+  }
+  for (const anchor of existingAnchors) {
+    if (anchor.rootKeyId !== summary.state.rootKeyId || anchor.recoveryKeyId !== summary.state.recoveryKeyId
+      || anchor.rootPublicKeyFingerprint !== await publicKeyFingerprint(summary.state.rootPublicKeyJwk)
+      || anchor.recoveryPublicKeyFingerprint !== await publicKeyFingerprint(summary.state.recoveryPublicKeyJwk)) {
+      throw new Error('Imported trust identity does not match the locally trusted project anchor.');
+    }
+    assertTrustChainContainsHead({ sequence: anchor.sequence, eventHash: anchor.headHash }, summary.events);
+  }
+  const unlocked = await unlockRecoveryBundle(bundle, passphrase);
+  if (unlocked.keyId !== summary.state.recoveryKeyId
+    || unlocked.authorizedRootKeyId !== summary.state.rootKeyId
+    || unlocked.authorizedRootPublicKeyFingerprint !== await publicKeyFingerprint(summary.state.rootPublicKeyJwk)
+    || bundle.authorizedRootKeyId !== summary.state.rootKeyId
+    || await publicKeyFingerprint(bundle.publicKeyJwk) !== await publicKeyFingerprint(summary.state.recoveryPublicKeyJwk)) {
+    throw new Error('Recovery bundle does not match the project trust anchor.');
+  }
+  const identity = await generateSigningIdentity();
+  const revokeKeyId = summary.verification?.activeKeyIds.includes(summary.state.activeKeyId) ? summary.state.activeKeyId : undefined;
+  const event = await appendProjectTrustEvent(projectId, {
+    eventType: 'identity.device-retrusted', subjectId: identity.keyId,
+    subjectFingerprint: await publicKeyFingerprint(identity.publicKeyJwk), subjectVersion: summary.state.sequence + 1,
+    evidenceFingerprints: [], changedAt: Date.now(), details: {
+      keyId: identity.keyId, publicKeyJwk: identity.publicKeyJwk, ...(revokeKeyId ? { revokeKeyId } : {}),
+    },
+  }, { signer: unlocked, replacementIdentity: identity, discardReplacedPrivateKey: true, trustAfterRecovery: true });
+  return { event, keyId: identity.keyId };
 }
 
 function normalizeName(name: string): string {
@@ -515,7 +865,7 @@ export async function updateProject(projectId: string, changes: Partial<Pick<Pro
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
+  await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'], 'readwrite', transaction => removeProjectRows(transaction, projectId));
 }
 
 export async function saveProjectSession(projectId: string, input: ProjectSessionInput): Promise<ProjectImportResult> {
@@ -675,10 +1025,10 @@ async function readEvidenceRevision(projectId: string, sessionId: string, versio
   }
 }
 
-function evidenceReader(scope: EvidenceScope, allowLocalAttestation = true) {
-  // Keep one revision index while reading adjacent citations without retaining every session's history.
+function evidenceReader(scope: EvidenceScope, allowLocalAttestation = true): (evidence: MemoryEvidence, fact: ProjectMemoryFact) => Promise<MemoryEvidence & EvidenceAssessment> {
   let cached: { key: string; revision?: IndexedEvidenceRevision } | undefined;
-  return async (evidence: MemoryEvidence, fact: ProjectMemoryFact) => {
+  let trust: Promise<ProjectTrustSummary> | undefined;
+  return async (evidence: MemoryEvidence, fact: ProjectMemoryFact): Promise<MemoryEvidence & EvidenceAssessment> => {
     let revision: IndexedEvidenceRevision | undefined;
     if (evidence.kind === 'conversation' && evidence.sessionId && Number.isSafeInteger(evidence.version)) {
       const key = JSON.stringify([evidence.sessionId, evidence.version]);
@@ -692,7 +1042,23 @@ function evidenceReader(scope: EvidenceScope, allowLocalAttestation = true) {
       revision = cached.revision;
     }
     const binding = await assessEvidenceBinding(evidence, scope, revision);
-    return validateEvidenceRelation(fact, evidence, binding, allowLocalAttestation);
+    const assessed = await validateEvidenceRelation(fact, evidence, binding, allowLocalAttestation);
+    if (!allowLocalAttestation || assessed.relationBasis !== 'user_attestation') return assessed;
+    const relationEvent = assessed.relationHistory?.at(-1);
+    if (!relationEvent?.trustEventId || !relationEvent.trustEventHash || !relationEvent.trustKeyId) {
+      return { ...assessed, relation: 'unverified', relationBasis: 'none', bindingIssue: 'relation_mismatch' };
+    }
+    trust ??= getProjectTrustSummary(scope.projectId);
+    const summary = await trust;
+    const signed = summary.events.find(event => event.id === relationEvent.trustEventId);
+    if (!summary.trusted || !signed || signed.eventHash !== relationEvent.trustEventHash
+      || signed.actorKeyId !== relationEvent.trustKeyId || signed.eventType !== 'evidence.relation-attested'
+      || signed.details?.relationEventId !== relationEvent.id || signed.details?.evidenceId !== evidence.id
+      || signed.details?.relation !== relationEvent.relation || signed.subjectId !== fact.id
+      || signed.subjectVersion !== fact.revision || signed.subjectFingerprint !== (await factConfirmationMaterial(fact)).subjectFingerprint) {
+      return { ...assessed, relation: 'unverified', relationBasis: 'none', bindingIssue: 'relation_mismatch' };
+    }
+    return assessed;
   };
 }
 
@@ -735,15 +1101,44 @@ async function prepareMemoryEvidence(projectId: string, input: MemoryEvidenceInp
   };
 }
 
+async function factConfirmationTrust(fact: ProjectMemoryFact, trust: ProjectTrustSummary): Promise<ProjectMemoryFact['confirmationTrust']> {
+  if (!fact.confirmationEventId) return fact.status === 'confirmed' ? 'legacy-unverified' : 'inactive';
+  if (trust.issue && trust.issue !== 'active-local-signing-key-missing') return 'invalid';
+  if (!trust.trusted || !trust.verification) return fact.status === 'confirmed' ? 'legacy-unverified' : 'inactive';
+  const confirmation = trust.events.find(event => event.id === fact.confirmationEventId);
+  if (!confirmation || confirmation.eventType !== 'claim.confirmed' || confirmation.subjectId !== fact.id
+    || confirmation.details?.confirmationVersion !== fact.confirmationVersion) return 'invalid';
+  const revocation = fact.confirmationRevocationEventId
+    ? trust.events.find(event => event.id === fact.confirmationRevocationEventId)
+    : trust.events.find(event => event.eventType === 'claim.confirmation-revoked'
+      && event.details?.confirmationEventId === confirmation.id);
+  if (revocation) {
+    if (revocation.eventType !== 'claim.confirmation-revoked' || revocation.subjectId !== confirmation.subjectId
+      || revocation.subjectVersion !== confirmation.subjectVersion || revocation.subjectFingerprint !== confirmation.subjectFingerprint
+      || revocation.details?.confirmationEventId !== confirmation.id
+      || JSON.stringify([...revocation.evidenceFingerprints].sort()) !== JSON.stringify([...confirmation.evidenceFingerprints].sort())
+      || fact.confirmationRevocationEventId !== undefined && fact.confirmationRevocationEventId !== revocation.id) return 'invalid';
+    return 'revoked';
+  }
+  if (fact.status !== 'confirmed') return 'inactive';
+  if (confirmation.subjectVersion !== fact.revision) return 'invalid';
+  const material = await factConfirmationMaterial(fact);
+  if (confirmation.subjectFingerprint !== material.subjectFingerprint
+    || JSON.stringify([...confirmation.evidenceFingerprints].sort()) !== JSON.stringify(material.evidenceFingerprints)) return 'invalid';
+  return 'authenticated';
+}
+
 export async function listProjectMemory(projectId: string): Promise<ProjectMemoryFact[]> {
   if (typeof projectId !== 'string' || projectId.length > 200) throw new Error('This project is unavailable.');
   const facts = await withTransaction(['memory'], 'readonly', transaction =>
     idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))));
+  const trust = await getProjectTrustSummary(projectId);
   const assess = evidenceReader({ projectId, sourceProjectId: projectId });
   for (const fact of facts) {
     const evidence: MemoryEvidence[] = [];
     for (const citation of fact.evidence) evidence.push(await assess(citation, fact));
     fact.evidence = evidence;
+    fact.confirmationTrust = await factConfirmationTrust(fact, trust);
   }
   return facts.sort((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -756,47 +1151,86 @@ export async function updateProjectMemoryEvidenceRelation(
   }
   const before = await withTransaction(['projects', 'memory'], 'readonly', async transaction => {
     const project = await idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId));
-    const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(`${projectId}\0${factId}`));
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + factId));
     if (!project || project.restoringSince || !fact || fact.status === 'rejected' || fact.status === 'superseded') {
       throw new Error('This project memory entry is unavailable for evidence review.');
     }
     const evidence = fact.evidence.find(item => item.id === evidenceId);
     if (!evidence) throw new Error('This evidence entry is unavailable.');
-    return { project, fact, evidence: { ...evidence } };
+    return { fact, evidence: { ...evidence } };
   });
   const assessed = await evidenceReader({ projectId, sourceProjectId: projectId })(before.evidence, before.fact);
   if (relation !== 'unverified' && !canAttestEvidenceRelation(assessed)) {
     throw new Error('This evidence source is unavailable for a user relationship review.');
   }
+  const trust = await getProjectTrustSummary(projectId);
+  const revokeConfirmation = await factConfirmationTrust(before.fact, trust) === 'authenticated';
+  if (revokeConfirmation) await ensureProjectTrustReady(projectId);
   const changedAt = Date.now();
   const resetInvalidHistory = assessed.bindingIssue === 'relation_mismatch';
-  const event = await createEvidenceRelationEvent(before.fact, assessed, relation, makeId(), changedAt);
-  return withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
-    const projects = transaction.objectStore('projects');
-    const memory = transaction.objectStore('memory');
-    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
-    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${factId}`));
-    if (!project || project.restoringSince || !fact || fact.updatedAt !== before.fact.updatedAt
-      || fact.status === 'rejected' || fact.status === 'superseded') {
-      throw new Error('This project memory entry changed during evidence review. Reopen it and try again.');
-    }
+  const relationEvent = await createEvidenceRelationEvent(before.fact, assessed, relation, makeId(), changedAt);
+  const previousWasAttested = assessed.relationBasis === 'user_attestation';
+  const signedRelationChange = relation !== 'unverified' || previousWasAttested;
+  const nextRevision = (before.fact.revision ?? 1) + 1;
+  const applyRelationChange = (fact: ProjectMemoryFact, signedEvent?: SignedTrustEvent) => {
     const evidence = fact.evidence.find(item => item.id === evidenceId);
     if (!evidence || JSON.stringify(evidence) !== JSON.stringify(before.evidence)) {
       throw new Error('This evidence entry changed during review. Reopen it and try again.');
     }
+    if (revokeConfirmation) {
+      appendStatusChange(fact, 'needs-review', changedAt);
+      fact.status = 'needs-review';
+    }
     Object.assign(evidence, assessed, {
-      relation: event.relation, relationBasis: event.relationBasis,
-      relationHistory: [...(resetInvalidHistory ? [] : evidence.relationHistory ?? []), event],
+      relation: relationEvent.relation, relationBasis: relationEvent.relationBasis,
+      relationHistory: [...(resetInvalidHistory ? [] : evidence.relationHistory ?? []), {
+        ...relationEvent,
+        ...(signedEvent ? { trustEventId: signedEvent.id, trustEventHash: signedEvent.eventHash, trustKeyId: signedEvent.actorKeyId } : {}),
+      }],
       ...(resetInvalidHistory || evidence.legacyRelationHistory?.length
         ? { legacyRelationHistory: [...(evidence.legacyRelationHistory ?? []), ...(resetInvalidHistory ? evidence.relationHistory ?? [] : [])] }
         : {}),
     });
     fact.updatedAt = changedAt;
-    memory.put(fact);
-    touchProject(project, changedAt);
-    projects.put(project);
-    return fact;
-  });
+    fact.revision = nextRevision;
+  };
+  if (signedRelationChange) {
+    await ensureProjectTrustReady(projectId);
+    const projectedEvidence: MemoryEvidence[] = before.fact.evidence.map(item => item.id === evidenceId
+      ? { ...assessed, relation, relationBasis: relationEvent.relationBasis } : item);
+    const projectedFact = { ...before.fact, evidence: projectedEvidence, revision: nextRevision,
+      ...(revokeConfirmation ? { status: 'needs-review' as const } : {}) };
+    const material = await factConfirmationMaterial(projectedFact);
+    await appendProjectTrustEvent(projectId, {
+      eventType: relation === 'unverified' ? 'evidence.relation-revoked' : 'evidence.relation-attested',
+      subjectId: before.fact.id, subjectFingerprint: material.subjectFingerprint, subjectVersion: nextRevision,
+      evidenceFingerprints: material.evidenceFingerprints, changedAt,
+      details: { evidenceId, relation, relationBasis: relationEvent.relationBasis, relationEventId: relationEvent.id },
+    }, { factMutation: {
+      factId, expectedUpdatedAt: before.fact.updatedAt, expectedRevision: before.fact.revision ?? 1,
+      apply(fact, signedEvent) { applyRelationChange(fact, signedEvent); },
+    } });
+  } else {
+    await withTransaction(['projects', 'memory'], 'readwrite', async transaction => {
+      const projects = transaction.objectStore('projects');
+      const memory = transaction.objectStore('memory');
+      const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+      const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + factId));
+      if (!project || project.restoringSince || !fact || fact.updatedAt !== before.fact.updatedAt
+        || fact.revision !== before.fact.revision || fact.status === 'rejected' || fact.status === 'superseded') {
+        throw new Error('This project memory entry changed during evidence review. Reopen it and try again.');
+      }
+      applyRelationChange(fact);
+      memory.put(fact);
+      touchProject(project, changedAt);
+      projects.put(project);
+    });
+  }
+  const current = await withTransaction(['memory'], 'readonly', transaction =>
+    idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + factId)));
+  if (!current) throw new Error('The project fact disappeared during evidence review.');
+  if (revokeConfirmation) return recordFactConfirmationRevocation(projectId, before.fact, current, 'needs-review');
+  return (await listProjectMemory(projectId)).find(item => item.id === factId) ?? current;
 }
 
 async function createProjectMemoryFactInternal(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
@@ -830,7 +1264,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
     const now = Date.now();
     const fact: ProjectMemoryFact = {
       key: `${projectId}\0${id}`, id, projectId, category: input.category, topic, normalizedTopic,
-      statement: input.statement.trim(), origin: input.origin, status: input.status,
+      statement: input.statement.trim(), revision: 1, origin: input.origin, status: input.status,
       statusHistory: [{ status: input.status, changedAt: now }],
       ...(input.category === 'task' ? { taskState: input.taskState ?? 'unclear' } : {}),
       evidence, conflictsWith: [], createdAt: now, updatedAt: now,
@@ -844,6 +1278,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
       appendStatusChange(previous, 'superseded', now);
       previous.supersededBy = fact.id;
       previous.updatedAt = now;
+      previous.revision = (previous.revision ?? 1) + 1;
       await revokeAcceptedProposals(transaction, projectId, previous.id, now);
       fact.supersedes = previous.id;
       for (const otherId of previous.conflictsWith) {
@@ -851,12 +1286,13 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         if (other) {
           other.conflictsWith = other.conflictsWith.filter(id => id !== previous.id);
           if (!other.conflictsWith.length && other.status === 'needs-review' && other.reviewStateBeforeConflict) {
-            const restoredStatus = other.reviewStateBeforeConflict;
+            const restoredStatus = other.reviewStateBeforeConflict === 'proposed' ? 'proposed' : 'needs-review';
             other.status = restoredStatus;
             appendStatusChange(other, restoredStatus, now);
             delete other.reviewStateBeforeConflict;
           }
           other.updatedAt = now;
+          other.revision = (other.revision ?? 1) + 1;
           memory.put(other);
         }
       }
@@ -883,6 +1319,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         if (sameUserFact.status !== input.status) appendStatusChange(sameUserFact, input.status, now);
         sameUserFact.status = input.status;
         sameUserFact.updatedAt = now;
+        sameUserFact.revision = (sameUserFact.revision ?? 1) + 1;
         memory.put(sameUserFact);
         touchProject(project, now);
         projects.put(project);
@@ -901,6 +1338,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         if (duplicateAIFact.evidence.length + additions.length > 20) throw new Error('A memory fact can hold at most 20 evidence entries.');
         duplicateAIFact.evidence.push(...additions);
         duplicateAIFact.updatedAt = now;
+        duplicateAIFact.revision = (duplicateAIFact.revision ?? 1) + 1;
         memory.put(duplicateAIFact);
         touchProject(project, now);
         projects.put(project);
@@ -924,6 +1362,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         previous.status = 'needs-review';
         previous.conflictsWith = [...new Set([...previous.conflictsWith, fact.id])];
         previous.updatedAt = now;
+        previous.revision = (previous.revision ?? 0) + 1;
         memory.put(previous);
       }
     }
@@ -934,11 +1373,104 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
   });
 }
 
-export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
-  return createProjectMemoryFactInternal(projectId, input);
+async function factConfirmationMaterial(fact: ProjectMemoryFact): Promise<{ subjectFingerprint: string; evidenceFingerprints: string[] }> {
+  const evidenceFingerprints = await Promise.all(fact.evidence.map(async evidence => sha256Fingerprint(JSON.stringify([
+    'threadpack-confirmation-evidence-v1', evidence.id, evidence.kind, evidence.reference, evidence.quote,
+    fact.confirmationProjectId ?? fact.projectId,
+    evidence.sourceProjectId ?? evidence.projectId ?? fact.confirmationProjectId ?? fact.projectId,
+    evidence.sessionId ?? null, evidence.version ?? null, evidence.messageId ?? null,
+    evidence.messageFingerprint ?? null, evidence.revisionFingerprint ?? null, evidence.quoteFingerprint ?? null,
+    evidence.quoteByteRange ?? null, evidence.bindingStatus ?? 'unverified', evidence.relation ?? 'unverified',
+    evidence.relationBasis ?? 'none', evidence.commit ?? null, evidence.command ?? null,
+  ]))));
+  evidenceFingerprints.sort();
+  const subjectFingerprint = await sha256Fingerprint(JSON.stringify([
+    'threadpack-confirmed-claim-v1', fact.confirmationProjectId ?? fact.projectId, fact.id, fact.revision ?? 1, fact.category, fact.normalizedTopic,
+    fact.topic, fact.statement, fact.taskState ?? null, fact.origin, fact.status, evidenceFingerprints,
+  ]));
+  return { subjectFingerprint, evidenceFingerprints };
 }
 
-export async function updateProjectMemoryStatus(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
+async function ensureProjectTrustReady(projectId: string): Promise<void> {
+  const trust = await getProjectTrustSummary(projectId);
+  if (!trust.state) throw new Error('Set up a local trust identity and recovery kit before confirming project facts.');
+  if (!trust.trusted) throw new Error('This project identity is not trusted on this device. Restore trust with its recovery kit.');
+  if (!trust.state.recoveryAcknowledgedAt) throw new Error('Download and acknowledge the encrypted recovery kit before adding trusted project history.');
+}
+
+async function recordFactConfirmation(projectId: string, fact: ProjectMemoryFact): Promise<ProjectMemoryFact> {
+  if (fact.status !== 'confirmed') return fact;
+  await ensureProjectTrustReady(projectId);
+  const confirmationVersion = (fact.confirmationVersion ?? 0) + 1;
+  const trust = await getProjectTrustSummary(projectId);
+  if (!trust.state) throw new Error('Set up a local trust identity before confirming project facts.');
+  const candidate = { ...fact, confirmationProjectId: trust.state.sourceProjectId ?? fact.projectId, confirmationVersion };
+  const material = await factConfirmationMaterial(candidate);
+  await appendProjectTrustEvent(projectId, {
+    eventType: 'claim.confirmed', subjectId: fact.id, subjectFingerprint: material.subjectFingerprint,
+    subjectVersion: candidate.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints, changedAt: Date.now(),
+    details: { confirmationVersion },
+  }, { factMutation: {
+    factId: fact.id, expectedUpdatedAt: fact.updatedAt, expectedRevision: fact.revision ?? 1,
+    apply(current, event, changedAt) {
+      current.confirmationVersion = confirmationVersion;
+      current.confirmationProjectId = candidate.confirmationProjectId;
+      current.confirmationEventId = event.id;
+      delete current.confirmationRevocationEventId;
+      current.confirmationTrust = 'authenticated';
+      current.updatedAt = changedAt;
+    },
+  } });
+  const confirmed = (await listProjectMemory(projectId)).find(item => item.id === fact.id);
+  if (!confirmed) throw new Error('The signed confirmation completed but its project fact is unavailable.');
+  return confirmed;
+}
+
+async function recordFactConfirmationRevocation(
+  projectId: string, before: ProjectMemoryFact, current: ProjectMemoryFact, reason: 'needs-review' | 'rejected' | 'superseded' | 'superseded-by-new-confirmation',
+): Promise<ProjectMemoryFact> {
+  if (!before.confirmationEventId || before.status !== 'confirmed') return current;
+  await ensureProjectTrustReady(projectId);
+  const material = await factConfirmationMaterial(before);
+  await appendProjectTrustEvent(projectId, {
+    eventType: 'claim.confirmation-revoked', subjectId: before.id, subjectFingerprint: material.subjectFingerprint,
+    subjectVersion: before.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints,
+    changedAt: Date.now(), details: { confirmationEventId: before.confirmationEventId, reason },
+  }, { factMutation: {
+    factId: before.id, expectedUpdatedAt: current.updatedAt, expectedRevision: current.revision ?? 1,
+    apply(fact, event, changedAt) {
+      fact.confirmationRevocationEventId = event.id;
+      fact.confirmationTrust = 'revoked';
+      fact.updatedAt = changedAt;
+    },
+  } });
+  const revoked = (await listProjectMemory(projectId)).find(item => item.id === before.id);
+  if (!revoked) throw new Error('The signed confirmation revocation completed but its project fact is unavailable.');
+  return revoked;
+}
+
+export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
+  if (input.status === 'confirmed') await ensureProjectTrustReady(projectId);
+  const beforeFacts = await listProjectMemory(projectId);
+  const fact = await createProjectMemoryFactInternal(projectId, input);
+  const afterFacts = await listProjectMemory(projectId);
+  const currentFacts = new Map(afterFacts.map(item => [item.id, item]));
+  for (const previous of beforeFacts) {
+    if (previous.status !== 'confirmed' || previous.confirmationTrust !== 'authenticated' || !previous.confirmationEventId) continue;
+    const current = currentFacts.get(previous.id);
+    if (!current) continue;
+    const changed = current.revision !== previous.revision;
+    if (current.status !== 'confirmed' || changed) {
+      const reason = current.status === 'confirmed' ? 'superseded-by-new-confirmation'
+        : current.status === 'superseded' ? 'superseded' : current.status === 'rejected' ? 'rejected' : 'needs-review';
+      await recordFactConfirmationRevocation(projectId, previous, current, reason);
+    }
+  }
+  if (input.status === 'confirmed' && fact.status === 'confirmed') return recordFactConfirmation(projectId, fact);
+  return (await listProjectMemory(projectId)).find(item => item.id === fact.id) ?? fact;
+}
+
+async function updateProjectMemoryStatusInternal(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
   if (!MEMORY_STATUSES.includes(status)) throw new Error('Choose a valid memory review state.');
   return withTransaction(['projects', 'memory', 'updates'], 'readwrite', async transaction => {
     const projects = transaction.objectStore('projects');
@@ -955,7 +1487,7 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
         if (conflict) {
           conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
           if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
-            const restoredStatus = conflict.reviewStateBeforeConflict;
+            const restoredStatus = conflict.reviewStateBeforeConflict === 'proposed' ? 'proposed' : 'needs-review';
             conflict.status = restoredStatus;
             appendStatusChange(conflict, restoredStatus, now);
             delete conflict.reviewStateBeforeConflict;
@@ -970,6 +1502,7 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
     fact.status = status;
     appendStatusChange(fact, status, now);
     fact.updatedAt = now;
+    fact.revision = (fact.revision ?? 0) + 1;
     if (status === 'rejected') await revokeAcceptedProposals(transaction, projectId, fact.id, now);
     memory.put(fact);
     touchProject(project, fact.updatedAt);
@@ -977,6 +1510,23 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
     return fact;
   });
 }
+
+export async function updateProjectMemoryStatus(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
+  const before = await withTransaction(['memory'], 'readonly', async transaction =>
+    idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + factId)));
+  if (!before) throw new Error('This project memory entry is unavailable.');
+  if (status === 'confirmed') await ensureProjectTrustReady(projectId);
+  const trust = status === 'confirmed' ? undefined : await getProjectTrustSummary(projectId);
+  const priorConfirmationTrust = trust ? await factConfirmationTrust(before, trust) : undefined;
+  const shouldRevokeSignedConfirmation = status !== 'confirmed' && before.confirmationEventId
+    && before.status === 'confirmed' && priorConfirmationTrust === 'authenticated';
+  if (shouldRevokeSignedConfirmation) await ensureProjectTrustReady(projectId);
+  const updated = await updateProjectMemoryStatusInternal(projectId, factId, status);
+  if (status === 'confirmed' && updated.status === 'confirmed') return recordFactConfirmation(projectId, updated);
+  if (shouldRevokeSignedConfirmation) return recordFactConfirmationRevocation(projectId, before, updated, status);
+  return updated;
+}
+
 
 async function* backupLines(projectId: string): AsyncGenerator<string> {
   const project = await withTransaction(['projects'], 'readonly', async transaction =>
@@ -989,11 +1539,16 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
   const claims = await withTransaction(['claims'], 'readonly', async transaction =>
     idbRequest<ProjectTaskClaimEvent[]>(transaction.objectStore('claims').index('projectId').getAll(IDBKeyRange.only(projectId))));
   claims.sort((first, second) => first.createdAt - second.createdAt || first.id.localeCompare(second.id));
+  const trust = await getProjectTrustSummary(projectId);
+  if (trust.issue) throw new Error('Project trust history failed integrity validation. Resolve the trust diagnostic before exporting a backup.');
+  const trustState = trust.state ? { ...trust.state, trustStatus: 'untrusted-import' as const, recoveryAcknowledgedAt: undefined } : undefined;
+  const trustEvents = trust.events;
   let revisionCount = 0;
   for (const session of sessions) revisionCount += session.currentVersion;
-  yield JSON.stringify({ type: 'threadpack_project', version: 7, projectId, createdAt: Date.now(), project: {
+  yield JSON.stringify({ type: 'threadpack_project', version: 8, projectId, createdAt: Date.now(), project: {
     name: project.name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt, updatedAt: project.updatedAt,
-  }, sessionCount: sessions.length, revisionCount, factCount: facts.length, updateCount: updates.length, claimCount: claims.length }) + '\n';
+  }, sessionCount: sessions.length, revisionCount, factCount: facts.length, updateCount: updates.length, claimCount: claims.length,
+    trustStateCount: trustState ? 1 : 0, trustEventCount: trustEvents.length }) + '\n';
   for (const session of sessions) {
     yield JSON.stringify({ type: 'session', data: {
       id: session.id, sessionKey: session.sessionKey, title: session.title, sourceName: session.sourceName,
@@ -1014,7 +1569,7 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
     }
   }
   for (const fact of facts) {
-    const { key: _key, projectId: _projectId, ...data } = fact;
+    const { key: _key, projectId: _projectId, confirmationTrust: _confirmationTrust, ...data } = fact;
     yield JSON.stringify({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data }) + '\n';
   }
   for (const update of updates) {
@@ -1037,6 +1592,13 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
     const { key: _key, ...record } = claim;
     const data = { ...record, projectId };
     yield JSON.stringify({ type: 'claim', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+  }
+  if (trustState) {
+    yield JSON.stringify({ type: 'trust_state', fingerprint: await sha256Fingerprint(JSON.stringify(trustState)), data: trustState }) + '\n';
+  }
+  for (const event of trustEvents) {
+    const data = { projectId, sequence: event.sequence, event };
+    yield JSON.stringify({ type: 'trust_event', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
   }
 }
 
@@ -1426,7 +1988,7 @@ export async function reviewProjectUpdateProposal(projectId: string, proposalId:
     let acceptedFactStatus: MemoryStatus | undefined;
     let acceptedFactId: string | undefined;
     if (decision === 'accepted') {
-      const acceptedFact = await createProjectMemoryFactInternal(projectId, {
+      const acceptedFact = await createProjectMemoryFact(projectId, {
         category: proposal.category, topic: proposal.topic, statement: proposal.statement, taskState: proposal.taskState,
         origin: 'user', status: 'confirmed',
         evidence: [{ kind: 'conversation', reference: `MCP candidate · ${proposal.client} · ${proposal.id}`,
@@ -1513,16 +2075,27 @@ export async function editProjectUpdateProposal(projectId: string, proposalId: s
 }
 
 export async function revokeAcceptedProjectUpdate(projectId: string, proposalId: string): Promise<void> {
+  const before = await withTransaction(['updates', 'memory'], 'readonly', async transaction => {
+    const proposal = await idbRequest<ProjectUpdateProposal | undefined>(transaction.objectStore('updates').get(projectId + String.fromCharCode(0) + proposalId));
+    if (!proposal || proposal.status !== 'accepted' || !proposal.acceptedFactId) throw new Error('This accepted project update cannot be revoked.');
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + proposal.acceptedFactId));
+    if (!fact || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact is unavailable for revocation.');
+    return fact;
+  });
+  const trust = await getProjectTrustSummary(projectId);
+  const hasAuthenticatedConfirmation = await factConfirmationTrust(before, trust) === 'authenticated';
+  if (hasAuthenticatedConfirmation) await ensureProjectTrustReady(projectId);
   const now = Date.now();
   await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
     const updates = transaction.objectStore('updates');
     const projects = transaction.objectStore('projects');
     const memory = transaction.objectStore('memory');
-    const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(`${projectId}\0${proposalId}`));
+    const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(projectId + String.fromCharCode(0) + proposalId));
     if (!current || current.status !== 'accepted' || !current.acceptedFactId) throw new Error('This accepted project update cannot be revoked.');
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
-    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${current.acceptedFactId}`));
-    if (!project || project.restoringSince || !fact || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact is unavailable for revocation.');
+    const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + current.acceptedFactId));
+    if (!project || project.restoringSince || !fact || fact.updatedAt !== before.updatedAt
+      || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact changed or is unavailable for revocation.');
     current.status = 'reviewing';
     current.reviewingSince = now;
     current.statusHistory.push({ status: 'reviewing', changedAt: now });
@@ -1530,9 +2103,10 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
     fact.status = 'rejected';
     appendStatusChange(fact, 'rejected', now);
     fact.updatedAt = now;
+    fact.revision = (fact.revision ?? 1) + 1;
     if (fact.conflictsWith.length) {
       for (const conflictId of fact.conflictsWith) {
-        const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
+        const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + conflictId));
         if (conflict) {
           conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
           if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
@@ -1542,6 +2116,7 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
             delete conflict.reviewStateBeforeConflict;
           }
           conflict.updatedAt = now;
+          conflict.revision = (conflict.revision ?? 1) + 1;
           memory.put(conflict);
         }
       }
@@ -1559,8 +2134,12 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
     appendProposalAudit(current, 'revoked', 'user', now);
     updates.put(current);
   });
+  if (hasAuthenticatedConfirmation) {
+    const current = await withTransaction(['memory'], 'readonly', transaction =>
+      idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + before.id)));
+    if (current) await recordFactConfirmationRevocation(projectId, before, current, 'rejected');
+  }
 }
-
 function publicSharedStatus(project: ProjectRecord | undefined, shared: SharedProjectBackupRecord | undefined,
   state?: SharedProjectBackupStatus['state']): SharedProjectBackupStatus {
   if (!project || !shared) return { connected: false, state: 'disconnected' };
@@ -1703,7 +2282,7 @@ function parseBackupLine(line: string): Record<string, unknown> {
 }
 
 interface ProjectBackupHeader {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   projectId?: string;
   project: Omit<ProjectRecord, 'id' | 'restoringSince'>;
   sessionCount: number;
@@ -1711,11 +2290,13 @@ interface ProjectBackupHeader {
   factCount: number;
   updateCount: number;
   claimCount: number;
+  trustStateCount: number;
+  trustEventCount: number;
 }
 
 function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHeader {
   const project = value.project;
-  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 || !isRecord(project)
+  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 || !isRecord(project)
     || !Number.isSafeInteger(value.createdAt)
     || value.projectId !== undefined && (typeof value.projectId !== 'string' || !value.projectId || value.projectId.length > 200)
     || typeof project.name !== 'string' || typeof project.summary !== 'string' || typeof project.importantNotes !== 'string'
@@ -1726,8 +2307,11 @@ function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHead
     || value.version >= 2 && (!Number.isSafeInteger(value.factCount) || (value.factCount as number) < 0 || (value.factCount as number) > 100_000)
     || value.version >= 6 && (!Number.isSafeInteger(value.updateCount) || (value.updateCount as number) < 0 || (value.updateCount as number) > 1_000_000)
     || value.version < 6 && value.updateCount !== undefined && value.updateCount !== 0
-    || value.version === 7 && (!Number.isSafeInteger(value.claimCount) || (value.claimCount as number) < 0 || (value.claimCount as number) > 1_000_000)
-    || value.version < 7 && value.claimCount !== undefined && value.claimCount !== 0) {
+    || value.version >= 7 && (!Number.isSafeInteger(value.claimCount) || (value.claimCount as number) < 0 || (value.claimCount as number) > 1_000_000)
+    || value.version === 8 && (!Number.isSafeInteger(value.trustStateCount) || (value.trustStateCount as number) < 0 || (value.trustStateCount as number) > 1
+      || !Number.isSafeInteger(value.trustEventCount) || (value.trustEventCount as number) < 0 || (value.trustEventCount as number) > 1_000_000)
+    || value.version < 7 && value.claimCount !== undefined && value.claimCount !== 0
+    || value.version < 8 && (value.trustStateCount !== undefined && value.trustStateCount !== 0 || value.trustEventCount !== undefined && value.trustEventCount !== 0)) {
     throw new Error('This project backup has an unsupported or invalid header.');
   }
   const name = normalizeName(project.name);
@@ -1739,8 +2323,49 @@ function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHead
     sessionCount: value.sessionCount, revisionCount: value.revisionCount,
     factCount: value.version >= 2 ? value.factCount as number : 0,
     updateCount: value.version >= 6 ? value.updateCount as number : 0,
-    claimCount: value.version === 7 ? value.claimCount as number : 0,
+    claimCount: value.version >= 7 ? value.claimCount as number : 0,
+    trustStateCount: value.version === 8 ? value.trustStateCount as number : 0,
+    trustEventCount: value.version === 8 ? value.trustEventCount as number : 0,
   };
+}
+
+async function validateBackupTrustState(value: unknown, localProjectId: string, sourceProjectId: string): Promise<ProjectTrustState> {
+  if (!isRecord(value) || value.projectId !== sourceProjectId
+    || value.sourceProjectId !== undefined && (typeof value.sourceProjectId !== 'string' || !value.sourceProjectId || value.sourceProjectId.length > 200)
+    || typeof value.rootKeyId !== 'string'
+    || !isRecord(value.rootPublicKeyJwk) || typeof value.recoveryKeyId !== 'string' || !isRecord(value.recoveryPublicKeyJwk)
+    || !isRecord(value.recoveryBundle) || typeof value.activeKeyId !== 'string'
+    || !Number.isSafeInteger(value.sequence) || (value.sequence as number) < 0
+    || typeof value.headHash !== 'string' || !/^[a-f0-9]{64}$/i.test(value.headHash)
+    || !Number.isSafeInteger(value.createdAt) || !Number.isSafeInteger(value.updatedAt)) {
+    throw new Error('The project backup contains invalid trust identity metadata.');
+  }
+  const rootPublicKeyJwk = value.rootPublicKeyJwk as JsonWebKey;
+  const recoveryPublicKeyJwk = value.recoveryPublicKeyJwk as JsonWebKey;
+  const recoveryBundle = value.recoveryBundle as unknown as RecoveryBundle;
+  if (!isPublicSigningKeyJwk(rootPublicKeyJwk) || !isPublicSigningKeyJwk(recoveryPublicKeyJwk)
+    || !isPublicSigningKeyJwk(recoveryBundle.publicKeyJwk) || !Number.isSafeInteger(recoveryBundle.iterations)
+    || recoveryBundle.iterations < 100_000 || recoveryBundle.iterations > 1_000_000
+    || typeof recoveryBundle.salt !== 'string' || typeof recoveryBundle.iv !== 'string' || typeof recoveryBundle.ciphertext !== 'string'
+    || recoveryBundle.ciphertext.length > 100_000
+    || await keyIdForPublicKey(rootPublicKeyJwk) !== value.rootKeyId
+    || await keyIdForPublicKey(recoveryPublicKeyJwk) !== value.recoveryKeyId
+    || recoveryBundle.schema !== 'threadpack.recovery.v1' || recoveryBundle.keyId !== value.recoveryKeyId
+    || recoveryBundle.algorithm !== 'ECDSA-P256-SHA256' || recoveryBundle.kdf !== 'PBKDF2-SHA-256'
+    || recoveryBundle.authorizedRootKeyId !== value.rootKeyId
+    || await publicKeyFingerprint(recoveryBundle.authorizedRootPublicKeyJwk) !== await publicKeyFingerprint(rootPublicKeyJwk)
+    || await publicKeyFingerprint(recoveryBundle.publicKeyJwk) !== await publicKeyFingerprint(recoveryPublicKeyJwk)
+    || await publicKeyFingerprint(recoveryPublicKeyJwk) !== recoveryBundle.publicKeyFingerprint) {
+    throw new Error('The project backup trust identity keys or recovery bundle do not match.');
+  }
+  const trustSourceProjectId = typeof value.sourceProjectId === 'string' ? value.sourceProjectId : sourceProjectId;
+  const state: ProjectTrustState = {
+    projectId: localProjectId, sourceProjectId: trustSourceProjectId, trustStatus: 'untrusted-import',
+    rootKeyId: value.rootKeyId, rootPublicKeyJwk, recoveryKeyId: value.recoveryKeyId, recoveryPublicKeyJwk, recoveryBundle,
+    activeKeyId: value.activeKeyId, sequence: value.sequence as number, headHash: value.headHash,
+    createdAt: value.createdAt as number, updatedAt: value.updatedAt as number,
+  };
+  return state;
 }
 
 async function memoryBackupFingerprint(data: Omit<ProjectMemoryFact, 'key' | 'projectId'>): Promise<string> {
@@ -1754,6 +2379,11 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     || typeof value.topic !== 'string' || !value.topic.trim() || value.topic.length > 160
     || value.normalizedTopic !== normalizeMemoryTopic(value.topic)
     || typeof value.statement !== 'string' || !value.statement.trim() || value.statement.length > 4000
+    || value.revision !== undefined && (!Number.isSafeInteger(value.revision) || (value.revision as number) < 1)
+    || value.confirmationEventId !== undefined && (typeof value.confirmationEventId !== 'string' || !value.confirmationEventId || value.confirmationEventId.length > 200)
+    || value.confirmationProjectId !== undefined && (typeof value.confirmationProjectId !== 'string' || !value.confirmationProjectId || value.confirmationProjectId.length > 200)
+    || value.confirmationVersion !== undefined && (!Number.isSafeInteger(value.confirmationVersion) || (value.confirmationVersion as number) < 1)
+    || value.confirmationRevocationEventId !== undefined && (typeof value.confirmationRevocationEventId !== 'string' || !value.confirmationRevocationEventId || value.confirmationRevocationEventId.length > 200)
     || value.taskState !== undefined && !TASK_STATES.includes(value.taskState as TaskState)
     || value.category !== 'task' && value.taskState !== undefined
     || value.statusHistory !== undefined && (!Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 100)
@@ -1797,6 +2427,12 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     key: `${projectId}\0${id}`, id, projectId, category: value.category as MemoryCategory,
     topic: value.topic, normalizedTopic, statement: value.statement, origin: value.origin as MemoryOrigin,
     status: value.status as MemoryStatus, statusHistory, evidence, conflictsWith: [...value.conflictsWith as string[]],
+    revision: Number.isSafeInteger(value.revision) ? value.revision as number : Math.max(1, statusHistory.length),
+    ...(typeof value.confirmationEventId === 'string' ? { confirmationEventId: value.confirmationEventId } : {}),
+    ...(typeof value.confirmationProjectId === 'string' ? { confirmationProjectId: value.confirmationProjectId } : {}),
+    ...(typeof value.confirmationVersion === 'number' ? { confirmationVersion: value.confirmationVersion } : {}),
+    ...(typeof value.confirmationRevocationEventId === 'string' ? { confirmationRevocationEventId: value.confirmationRevocationEventId } : {}),
+    confirmationTrust: value.status === 'confirmed' ? 'legacy-unverified' : 'inactive',
     ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
     ...(value.reviewStateBeforeConflict === 'confirmed' || value.reviewStateBeforeConflict === 'proposed'
       ? { reviewStateBeforeConflict: value.reviewStateBeforeConflict } : {}),
@@ -1965,6 +2601,9 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   let seenMemory = false;
   let seenUpdates = false;
   let seenClaims = false;
+  let seenTrustState = false;
+  const trustEvents: StoredProjectTrustEvent[] = [];
+  let trustState: ProjectTrustState | undefined;
   const facts: ProjectMemoryFact[] = [];
   const factIds = new Set<string>();
   const updates: ProjectUpdateProposal[] = [];
@@ -2046,7 +2685,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
           quoteByteRange: binding.quoteByteRange, sourceIdentity: binding.sourceIdentity });
         updates.push(proposal);
       } else if (record.type === 'claim') {
-        if (header.version !== 7 || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+        if (header.version < 7 || !isRecord(record.data) || typeof record.fingerprint !== 'string'
           || !/^[a-f0-9]{64}$/.test(record.fingerprint) || claims.length >= header.claimCount
           || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint) {
           throw new Error('The project backup contains an invalid task claim event.');
@@ -2060,12 +2699,38 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         if (claimIds.has(claim.id)) throw new Error('The project backup contains duplicate task claim events.');
         claimIds.add(claim.id);
         claims.push({ ...claim, key: `${project.id}\0${claim.id}`, projectId: project.id });
+      } else if (record.type === 'trust_state') {
+        if (header.version !== 8 || seenTrustState || trustEvents.length || !isRecord(record.data)
+          || typeof record.fingerprint !== 'string' || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint
+          || !header.projectId || header.trustStateCount !== 1) {
+          throw new Error('The project backup contains an invalid trust-state record.');
+        }
+        trustState = await validateBackupTrustState(record.data, project.id, header.projectId);
+        seenTrustState = true;
+      } else if (record.type === 'trust_event') {
+        if (header.version !== 8 || !trustState || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+          || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint
+          || record.data.projectId !== (trustState.sourceProjectId ?? header.projectId)
+          || !Number.isSafeInteger(record.data.sequence) || !isRecord(record.data.event)
+          || record.data.sequence !== trustEvents.length + 1 || record.data.event.sequence !== record.data.sequence) {
+          throw new Error('The project backup contains an invalid signed trust event.');
+        }
+        trustEvents.push({ key: [project.id, record.data.sequence as number], projectId: project.id,
+          sequence: record.data.sequence as number, event: record.data.event as unknown as SignedTrustEvent });
       } else throw new Error('The project backup contains an unknown record type.');
     }
     if (activeSession && expectedVersion <= activeSession.currentVersion
       || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount || facts.length !== header.factCount
-      || updates.length !== header.updateCount || claims.length !== header.claimCount) {
+      || updates.length !== header.updateCount || claims.length !== header.claimCount
+      || trustEvents.length !== header.trustEventCount || (trustState ? 1 : 0) !== header.trustStateCount) {
       throw new Error('The project backup is incomplete.');
+    }
+    if (trustState) {
+      const verification = await verifyTrustEventChain(trustEvents.map(record => record.event), trustedPublicKeySet(trustState));
+      if (verification.head.sequence !== trustState.sequence || verification.head.eventHash !== trustState.headHash
+        || verification.head.sequence !== trustEvents.length || !verification.activeKeyIds.includes(trustState.activeKeyId)) {
+        throw new Error('The project backup trust chain does not match its saved trust state.');
+      }
     }
     const factsById = new Map(facts.map(fact => [fact.id, fact]));
     for (const fact of facts) {
@@ -2108,12 +2773,17 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
       const claimStore = transaction.objectStore('claims');
       for (const claim of claims) claimStore.add(claim);
     });
+    if (trustState) await withTransaction(['projectTrust', 'trustEvents'], 'readwrite', async transaction => {
+      transaction.objectStore('projectTrust').add(trustState!);
+      const trustStore = transaction.objectStore('trustEvents');
+      for (const event of trustEvents) trustStore.add(event);
+    });
     const completed = { ...project, restoringSince: undefined, updatedAt: Date.now() };
     delete completed.restoringSince;
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').put(completed); });
     return completed;
   } catch (error) {
-    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
+    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
     throw error;
   } finally { await iterator.return(undefined).catch(() => {}); }
 }

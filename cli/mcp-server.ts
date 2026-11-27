@@ -5,10 +5,12 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import { generateProjectContext } from '../src/projects/memory-context';
-import type { MemoryEvidence, MemorySessionState, ProjectMemoryFact, ProjectTaskClaimEvent } from '../src/projects/memory-types';
+import type { MemoryEvidence, MemorySessionState, ProjectMemoryFact, ProjectTaskClaimEvent, ProjectTrustState } from '../src/projects/memory-types';
 import { assessEvidenceBinding, bindNewConversationEvidence, prepareEvidenceRevision, validateEvidenceRelation } from '../src/projects/evidence-binding';
 import type { IndexedEvidenceRevision } from '../src/projects/evidence-binding';
 import { MAX_SHARED_PROJECT_BACKUP_BYTES } from '../src/projects/limits';
+import { isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, verifyTrustEventChain } from '../src/projects/trust-crypto';
+import type { SignedTrustEvent } from '../src/projects/trust-crypto';
 
 const MAX_BACKUP_BYTES = MAX_SHARED_PROJECT_BACKUP_BYTES;
 const MEMORY_STATUSES = new Set(['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded']);
@@ -223,7 +225,7 @@ function parseFact(data: unknown, index: number): ProjectMemoryFact {
     ...(data as Omit<ProjectMemoryFact, 'key' | 'projectId'>),
     evidence,
     key: `mcp\0${data.id}`,
-    projectId: 'mcp',
+    projectId: 'mcp', confirmationTrust: data.status === 'confirmed' ? 'legacy-unverified' : 'inactive',
   } as ProjectMemoryFact;
 }
 
@@ -304,11 +306,19 @@ async function loadBackup(path: string): Promise<BackupContext> {
   if (!lines.length) throw error('The MCP backup is empty.');
   let project: BackupContext['project'] | undefined;
   let projectId = '';
+  let trustSourceProjectId = '';
   let expectedSessions = -1;
   let expectedRevisions = -1;
   let expectedFacts = -1;
   let expectedUpdates = 0;
   let expectedClaims = 0;
+  let expectedTrustStates = 0;
+  let expectedTrustEvents = 0;
+  let trustStates = 0;
+  let trustEvents = 0;
+  let sawTrustState = false;
+  let trustState: ProjectTrustState | undefined;
+  const trustEventsForVerification: SignedTrustEvent[] = [];
   let projectVersion = 0;
   let snapshotCreatedAt = 0;
   let evidenceProjectId = '';
@@ -328,25 +338,31 @@ async function loadBackup(path: string): Promise<BackupContext> {
     try { parsed = JSON.parse(line); } catch { throw error('The MCP backup contains invalid JSON.'); }
     if (!isRecord(parsed) || typeof parsed.type !== 'string') throw error('The MCP backup contains an invalid record.');
     if (parsed.type === 'threadpack_project') {
-      if (project || parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4 && parsed.version !== 5 && parsed.version !== 6 && parsed.version !== 7 || !isRecord(parsed.project) || typeof parsed.project.name !== 'string'
+      if (project || parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4 && parsed.version !== 5 && parsed.version !== 6 && parsed.version !== 7 && parsed.version !== 8 || !isRecord(parsed.project) || typeof parsed.project.name !== 'string'
         || typeof parsed.project.summary !== 'string' || typeof parsed.project.importantNotes !== 'string'
         || !Number.isSafeInteger(parsed.project.updatedAt) || !Number.isSafeInteger(parsed.createdAt)
         || (parsed.projectId !== undefined && (typeof parsed.projectId !== 'string' || !parsed.projectId))
         || !Number.isSafeInteger(parsed.sessionCount) || !Number.isSafeInteger(parsed.revisionCount)
         || parsed.version >= 2 && !Number.isSafeInteger(parsed.factCount)
         || parsed.version >= 6 && !Number.isSafeInteger(parsed.updateCount)
-        || parsed.version === 7 && !Number.isSafeInteger(parsed.claimCount)
+        || parsed.version >= 7 && !Number.isSafeInteger(parsed.claimCount)
+        || parsed.version === 8 && (!Number.isSafeInteger(parsed.trustStateCount) || (parsed.trustStateCount as number) < 0 || (parsed.trustStateCount as number) > 1
+          || !Number.isSafeInteger(parsed.trustEventCount) || (parsed.trustEventCount as number) < 0)
+        || parsed.version < 8 && (parsed.trustStateCount !== undefined && parsed.trustStateCount !== 0 || parsed.trustEventCount !== undefined && parsed.trustEventCount !== 0)
         || parsed.version < 6 && parsed.updateCount !== undefined && parsed.updateCount !== 0) throw error('The MCP backup header is invalid.');
       projectVersion = parsed.version as number;
       project = { name: parsed.project.name, summary: parsed.project.summary, importantNotes: parsed.project.importantNotes, updatedAt: parsed.project.updatedAt as number };
       projectId = typeof parsed.projectId === 'string' ? parsed.projectId : '';
+      trustSourceProjectId = projectId;
       evidenceProjectId = projectId || `legacy-${fingerprint([parsed.project.name, parsed.createdAt]).slice(0, 32)}`;
       snapshotCreatedAt = parsed.createdAt as number;
       expectedSessions = parsed.sessionCount as number;
       expectedRevisions = parsed.revisionCount as number;
       expectedFacts = parsed.version >= 2 ? parsed.factCount as number : 0;
       expectedUpdates = parsed.version >= 6 ? parsed.updateCount as number : 0;
-      expectedClaims = parsed.version === 7 ? parsed.claimCount as number : 0;
+      expectedClaims = parsed.version >= 7 ? parsed.claimCount as number : 0;
+      expectedTrustStates = parsed.version === 8 ? parsed.trustStateCount as number : 0;
+      expectedTrustEvents = parsed.version === 8 ? parsed.trustEventCount as number : 0;
     } else if (parsed.type === 'session') {
       if (!isRecord(parsed.data) || typeof parsed.data.id !== 'string' || typeof parsed.data.title !== 'string'
         || !Number.isSafeInteger(parsed.data.currentVersion) || (parsed.data.currentVersion as number) < 1
@@ -418,18 +434,57 @@ async function loadBackup(path: string): Promise<BackupContext> {
         createdAt: parsed.data.createdAt as number });
       expectedUpdates--;
     } else if (parsed.type === 'claim') {
-      if (projectVersion !== 7 || expectedClaims === 0 || typeof parsed.fingerprint !== 'string'
+      if (projectVersion < 7 || expectedClaims === 0 || typeof parsed.fingerprint !== 'string'
         || fingerprint(parsed.data) !== parsed.fingerprint) throw error('The MCP backup task claim record is invalid.');
       const claim = parseTaskClaimEvent(parsed.data, projectId);
       if (claimIds.has(claim.id)) throw error('The MCP backup contains duplicate task claim events.');
       claimIds.add(claim.id);
       claims.push(claim);
       expectedClaims--;
+    } else if (parsed.type === 'trust_state') {
+      if (projectVersion !== 8 || sawTrustState || trustEvents > 0 || expectedTrustStates !== 1
+        || typeof parsed.fingerprint !== 'string' || fingerprint(parsed.data) !== parsed.fingerprint
+        || !isRecord(parsed.data) || parsed.data.projectId !== projectId || !isRecord(parsed.data.rootPublicKeyJwk)
+        || !isRecord(parsed.data.recoveryPublicKeyJwk) || !isRecord(parsed.data.recoveryBundle)) {
+        throw error('The MCP backup trust-state record is invalid.');
+      }
+      trustState = parsed.data as unknown as ProjectTrustState;
+      trustSourceProjectId = typeof parsed.data.sourceProjectId === 'string' ? parsed.data.sourceProjectId : projectId;
+      if (await keyIdForPublicKey(trustState.rootPublicKeyJwk) !== trustState.rootKeyId
+        || await keyIdForPublicKey(trustState.recoveryPublicKeyJwk) !== trustState.recoveryKeyId
+        || !isPublicSigningKeyJwk(trustState.recoveryBundle.publicKeyJwk)
+        || trustState.recoveryBundle.authorizedRootKeyId !== trustState.rootKeyId
+        || await publicKeyFingerprint(trustState.recoveryBundle.authorizedRootPublicKeyJwk) !== await publicKeyFingerprint(trustState.rootPublicKeyJwk)) {
+        throw error('The MCP backup trust anchor or root-bound recovery kit is invalid.');
+      }
+      sawTrustState = true;
+      trustStates++;
+    } else if (parsed.type === 'trust_event') {
+      if (projectVersion !== 8 || !sawTrustState || !trustState || trustEvents >= expectedTrustEvents
+        || typeof parsed.fingerprint !== 'string' || fingerprint(parsed.data) !== parsed.fingerprint
+        || !isRecord(parsed.data) || parsed.data.projectId !== projectId || !Number.isSafeInteger(parsed.data.sequence)
+        || !isRecord(parsed.data.event) || parsed.data.event.projectId !== trustSourceProjectId
+        || parsed.data.event.sequence !== parsed.data.sequence || parsed.data.sequence !== trustEvents + 1) {
+        throw error('The MCP backup trust event is invalid.');
+      }
+      trustEventsForVerification.push(parsed.data.event as unknown as SignedTrustEvent);
+      trustEvents++;
     } else throw error('The MCP backup contains an unsupported record type.');
   }
   if (!project || expectedSessions !== sessions.length || expectedRevisions !== revisions || expectedFacts !== facts.length
-    || expectedUpdates !== 0 || expectedClaims !== 0) {
+    || expectedUpdates !== 0 || expectedClaims !== 0 || trustStates !== expectedTrustStates || trustEvents !== expectedTrustEvents) {
     throw error('The MCP backup is incomplete.');
+  }
+  if (expectedTrustStates === 1) {
+    if (!trustState || trustEventsForVerification.length !== expectedTrustEvents) throw error('The MCP backup trust chain is incomplete.');
+    const verifiedChain = await verifyTrustEventChain(trustEventsForVerification, {
+      [trustState.rootKeyId]: trustState.rootPublicKeyJwk,
+      [trustState.recoveryKeyId]: trustState.recoveryPublicKeyJwk,
+    });
+    if (verifiedChain.head.sequence !== trustState.sequence || verifiedChain.head.eventHash !== trustState.headHash
+      || verifiedChain.head.sequence !== trustEventsForVerification.length || !verifiedChain.activeKeyIds.includes(trustState.activeKeyId)) {
+      throw error('The MCP backup trust chain failed its cryptographic consistency check.');
+    }
   }
   const sessionsById = new Map(sessions.map(session => [session.id, session]));
   const revisionsBySession = new Map<string, Set<number>>();

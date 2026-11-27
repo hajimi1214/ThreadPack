@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, Check, Clipboard, Download, LoaderCircle, Plus, Search, ShieldAlert, Sparkles, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, Check, Clipboard, Download, KeyRound, LoaderCircle, Plus, Search, ShieldAlert, Sparkles, X } from 'lucide-react';
 import { parseInput } from '../core';
 import type { Message } from '../core';
 import type { TranslationKey } from '../i18n';
-import type { ProjectRecord, ProjectSessionSummary } from './store';
+import type { ProjectRecord, ProjectSessionSummary, ProjectTrustSummary } from './store';
 import {
-  createProjectMemoryFact, getProjectSession, listProjectMemory, listProjectRevisions,
-  listProjectSessionStates, updateProjectMemoryEvidenceRelation, updateProjectMemoryStatus,
+  acknowledgeProjectRecoveryBundle, createProjectMemoryFact, createProjectTrustIdentity, getProjectSession, getProjectTrustSummary,
+  listProjectMemory, listProjectRevisions, listProjectSessionStates, retrustProjectDevice, rotateProjectTrustKey,
+  revokeProjectTrustKey, updateProjectMemoryEvidenceRelation, updateProjectMemoryStatus,
 } from './store';
 import type { EvidenceRelation, MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
 import { canAttestEvidenceRelation } from './evidence-binding';
+import { publicKeyFingerprint } from './trust-crypto';
+import type { RecoveryBundle } from './trust-crypto';
 import { generateProjectContext, memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from './memory-ai';
 import type { AIEvidenceMessage } from './memory-ai';
@@ -57,6 +60,18 @@ function memoryStatusLabel(status: MemoryStatus, t: Record<TranslationKey, strin
   return t[labels[status]];
 }
 
+function confirmationTrustLabel(fact: ProjectMemoryFact, t: Record<TranslationKey, string>): string {
+  const labels = {
+    authenticated: 'memoryTrustStatusAuthenticated', legacy: 'memoryTrustStatusLegacy', invalid: 'memoryTrustStatusInvalid',
+    revoked: 'memoryTrustStatusRevoked', inactive: 'memoryTrustStatusInactive',
+  } as const;
+  const key = fact.confirmationTrust === 'authenticated' ? labels.authenticated
+    : fact.confirmationTrust === 'invalid' ? labels.invalid
+      : fact.confirmationTrust === 'revoked' ? labels.revoked
+        : fact.confirmationTrust === 'inactive' ? labels.inactive : labels.legacy;
+  return t[key];
+}
+
 function safeEvidenceMessages(content: string): Message[] {
   const archive = parseInput(content, 'threadpack-session.jsonl');
   const conversation = archive.conversations[0];
@@ -92,6 +107,13 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [facts, setFacts] = useState<ProjectMemoryFact[]>([]);
   const [sessionStates, setSessionStates] = useState<SessionState[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [trust, setTrust] = useState<ProjectTrustSummary>({ events: [], trusted: false, deviceKeyAvailable: false, readyForConfirmations: false });
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState('');
+  const [recoveryPassphraseConfirm, setRecoveryPassphraseConfirm] = useState('');
+  const [recoveryKitDownloaded, setRecoveryKitDownloaded] = useState(false);
+  const [recoveryImport, setRecoveryImport] = useState<RecoveryBundle | null>(null);
+  const [recoveryImportPassphrase, setRecoveryImportPassphrase] = useState('');
+  const [recoveryFingerprintConfirmation, setRecoveryFingerprintConfirmation] = useState('');
   const [error, setError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [category, setCategory] = useState<MemoryCategory>('decision');
@@ -138,24 +160,110 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     setError('');
     let source = 'memory records';
     try {
-      const nextFacts = await listProjectMemory(project.id);
+      const [nextFacts, nextSessions, nextTrust] = await Promise.all([
+        listProjectMemory(project.id), listProjectSessionStates(project.id), getProjectTrustSummary(project.id),
+      ]);
       source = 'session index';
-      const nextSessions = await listProjectSessionStates(project.id);
       setFacts(nextFacts);
       setSessionStates(nextSessions);
+      setTrust(nextTrust);
     } catch (value) { setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`); }
     finally { setRefreshing(false); }
+  }
+
+  async function setupTrustIdentity() {
+    if (working) return;
+    if (recoveryPassphrase.length < 12 || recoveryPassphrase !== recoveryPassphraseConfirm) {
+      setError(t.memoryTrustPassphraseConfirm);
+      return;
+    }
+    setWorking('trust-setup'); setError('');
+    try {
+      await createProjectTrustIdentity(project.id, recoveryPassphrase);
+      setTrust(await getProjectTrustSummary(project.id));
+      setRecoveryPassphrase(''); setRecoveryPassphraseConfirm(''); setRecoveryKitDownloaded(false);
+      await onChanged();
+    } catch (value) { setError(diagnosticMessage(value, t.memorySaveFailed)); }
+    finally { setWorking(''); }
+  }
+
+  function downloadRecoveryKit() {
+    const bundle = trust.state?.recoveryBundle;
+    if (!bundle) return;
+    const blobUrl = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = 'threadpack-recovery-' + project.id.slice(0, 8) + '.json';
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+    setRecoveryKitDownloaded(true);
+  }
+
+  async function acknowledgeRecoveryKit() {
+    if (!trust.state || !recoveryKitDownloaded || working) return;
+    setWorking('trust-recovery'); setError('');
+    try {
+      const fingerprint = await publicKeyFingerprint(trust.state.recoveryPublicKeyJwk);
+      await acknowledgeProjectRecoveryBundle(project.id, fingerprint);
+      setTrust(await getProjectTrustSummary(project.id));
+      await onChanged();
+      notify(t.memoryTrustReady);
+    } catch (value) { setError(diagnosticMessage(value, t.memorySaveFailed)); }
+    finally { setWorking(''); }
+  }
+
+  async function rotateSigningKey() {
+    if (working) return;
+    setWorking('trust-rotate'); setError('');
+    try {
+      await rotateProjectTrustKey(project.id);
+      setTrust(await getProjectTrustSummary(project.id));
+      await onChanged();
+    } catch (value) { setError(diagnosticMessage(value, t.memorySaveFailed)); }
+    finally { setWorking(''); }
+  }
+
+  async function revokeSigningKey(keyId: string) {
+    if (working) return;
+    setWorking('trust-revoke'); setError('');
+    try {
+      await revokeProjectTrustKey(project.id, keyId);
+      setTrust(await getProjectTrustSummary(project.id));
+      await onChanged();
+    } catch (value) { setError(diagnosticMessage(value, t.memorySaveFailed)); }
+    finally { setWorking(''); }
+  }
+
+  async function loadRecoveryFile(file?: File) {
+    if (!file) { setRecoveryImport(null); return; }
+    try {
+      const parsed = JSON.parse(await file.text()) as RecoveryBundle;
+      setRecoveryImport(parsed);
+      setRecoveryFingerprintConfirmation('');
+    } catch { setRecoveryImport(null); setError(t.memoryTrustRecoveryFile); }
+  }
+
+  async function restoreTrustOnDevice() {
+    if (!recoveryImport || !recoveryImportPassphrase || !recoveryFingerprintConfirmation.trim() || working) return;
+    setWorking('trust-restore'); setError('');
+    try {
+      await retrustProjectDevice(project.id, recoveryImport, recoveryImportPassphrase, recoveryFingerprintConfirmation.trim());
+      setTrust(await getProjectTrustSummary(project.id));
+      setRecoveryImport(null); setRecoveryImportPassphrase(''); setRecoveryFingerprintConfirmation('');
+      await onChanged();
+      notify(t.memoryTrustReady);
+    } catch (value) { setError(diagnosticMessage(value, t.memorySaveFailed)); }
+    finally { setWorking(''); }
   }
 
   useEffect(() => {
     let active = true;
     setGenerated(null);
     let source = 'memory records';
-    void listProjectMemory(project.id).then(async nextFacts => {
-      source = 'session index';
-      const nextSessions = await listProjectSessionStates(project.id);
-      if (active) { setFacts(nextFacts); setSessionStates(nextSessions); setError(''); }
-    }).catch(value => { if (active) setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`); });
+    void Promise.all([listProjectMemory(project.id), listProjectSessionStates(project.id), getProjectTrustSummary(project.id)])
+      .then(([nextFacts, nextSessions, nextTrust]) => {
+        if (active) { setFacts(nextFacts); setSessionStates(nextSessions); setTrust(nextTrust); setError(''); }
+      }).catch(value => { if (active) setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`); });
     return () => { active = false; aiUserCancelled.current = true; aiController.current?.abort(); };
   }, [project.id, reloadKey, t.memoryLoadFailed]);
 
@@ -384,7 +492,35 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     <div className="project-memory-heading"><div><h3 id="project-memory-heading"><Sparkles size={15} />{t.projectMemoryTitle}<span>{facts.length}</span></h3><p>{t.projectMemoryHint}</p></div><button className="button secondary small" disabled={!!working || refreshing} onClick={() => { setCreateOpen(value => !value); setError(''); }}><Plus size={14} />{t.projectMemoryAdd}</button></div>
     {error && <p className="project-error" role="alert"><AlertCircle size={14} />{error}</p>}
     {refreshing && <p className="project-memory-loading" role="status"><LoaderCircle size={14} className="spin" />{t.projectWorking}</p>}
-    {facts.some(fact => !['rejected', 'superseded'].includes(fact.status) && (fact.status === 'needs-review' || fact.conflictsWith.length > 0)) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
+    {facts.some(fact => !['rejected', 'superseded'].includes(fact.status) && fact.conflictsWith.length > 0) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
+    <section className="memory-trust-panel" aria-label={t.memoryTrustTitle}>
+      <div className="memory-trust-heading"><KeyRound size={15} /><strong>{t.memoryTrustTitle}</strong></div>
+      {!trust.state ? <>
+        <p>{t.memoryTrustHint}</p>
+        <label><span>{t.memoryTrustPassphrase}</span><input type="password" autoComplete="new-password" maxLength={2000} value={recoveryPassphrase} onChange={event => setRecoveryPassphrase(event.target.value)} /></label>
+        <label><span>{t.memoryTrustPassphraseConfirm}</span><input type="password" autoComplete="new-password" maxLength={2000} value={recoveryPassphraseConfirm} onChange={event => setRecoveryPassphraseConfirm(event.target.value)} /></label>
+        <button className="button secondary small" disabled={!!working || recoveryPassphrase.length < 12 || recoveryPassphrase !== recoveryPassphraseConfirm} onClick={() => void setupTrustIdentity()}><KeyRound size={13} />{t.memoryTrustSetup}</button>
+      </> : <>
+        <p>{trust.issue === 'active-local-signing-key-missing' ? t.memoryTrustKeyMissing : trust.trusted ? t.memoryTrustReady : t.memoryTrustUntrustedImport}</p>
+        <small>{t.memoryTrustFingerprint}: <code>{trust.state.recoveryBundle.publicKeyFingerprint}</code></small>
+        {trust.issue && <small role="alert">{trust.issue}</small>}
+        {trust.trusted && trust.issue !== 'active-local-signing-key-missing' && <>
+          {!trust.readyForConfirmations && <p>{t.memoryTrustHint}</p>}
+          <button className="button secondary small" disabled={!!working} onClick={downloadRecoveryKit}><Download size={13} />{t.memoryTrustDownload}</button>
+          {!trust.readyForConfirmations && <button className="button primary small" disabled={!!working || !recoveryKitDownloaded} onClick={() => void acknowledgeRecoveryKit()}><Check size={13} />{t.memoryTrustAcknowledge}</button>}
+        </>}
+        {trust.readyForConfirmations && <button className="button secondary small" disabled={!!working} onClick={() => void rotateSigningKey()}><KeyRound size={13} />{t.memoryTrustRotate}</button>}
+        {!!trust.verification?.activeKeyIds.filter(keyId => keyId !== trust.state!.activeKeyId).length && trust.readyForConfirmations && <div className="memory-trust-key-list">
+          {trust.verification.activeKeyIds.filter(keyId => keyId !== trust.state!.activeKeyId && keyId !== trust.state!.recoveryKeyId).map(keyId => <div key={keyId}><code>{keyId}</code><button className="text-button danger-text" disabled={!!working} onClick={() => void revokeSigningKey(keyId)}>{t.memoryTrustRevoke}</button></div>)}
+        </div>}
+        {(trust.state.trustStatus === 'untrusted-import' || trust.issue === 'active-local-signing-key-missing') && <div className="memory-trust-restore">
+          <label><span>{t.memoryTrustRecoveryFile}</span><input type="file" accept="application/json,.json" onChange={event => void loadRecoveryFile(event.target.files?.[0])} /></label>
+          <label><span>{t.memoryTrustRecoveryPassphrase}</span><input type="password" autoComplete="current-password" value={recoveryImportPassphrase} onChange={event => setRecoveryImportPassphrase(event.target.value)} /></label>
+          <label><span>{t.memoryTrustConfirmFingerprint}</span><input value={recoveryFingerprintConfirmation} onChange={event => setRecoveryFingerprintConfirmation(event.target.value)} /></label>
+          <button className="button secondary small" disabled={!!working || !recoveryImport || !recoveryImportPassphrase || !recoveryFingerprintConfirmation.trim()} onClick={() => void restoreTrustOnDevice()}>{t.memoryTrustRestore}</button>
+        </div>}
+      </>}
+    </section>
     {createOpen && <div className="memory-form">
       <label><span>{t.memoryCategory}</span><select value={category} onChange={event => setCategory(event.target.value as MemoryCategory)}>{categoryChoices}</select></label>
       <label><span>{t.memoryTopic}</span><input maxLength={160} value={topic} onChange={event => setTopic(event.target.value)} /></label>
@@ -410,12 +546,12 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         <p className="memory-unverified-note memory-wide"><ShieldAlert size={13} />{t.memoryUserRecordedDisclaimer}</p>
       </>}
       <label><span>{t.memoryReplaces}</span><select value={replacesId} onChange={event => setReplacesId(event.target.value)}><option value="">{t.memoryNoReplacement}</option>{selectableReplacements.map(fact => <option key={fact.id} value={fact.id}>{memoryCategoryLabel(fact.category, t)} · {fact.topic}</option>)}</select></label>
-      <div className="memory-form-actions memory-wide"><button className="button secondary small" disabled={!!working} onClick={resetFactForm}><X size={13} />{t.cancel}</button><button className="button secondary small" disabled={!!working || !topic.trim() || !statement.trim()} onClick={() => void saveFact('needs-review')}>{t.memorySaveReview}</button><button className="button primary small" disabled={!!working || !topic.trim() || !statement.trim()} onClick={() => void saveFact('confirmed')}>{working === 'save' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t.memorySaveConfirmed}</button></div>
+      <div className="memory-form-actions memory-wide"><button className="button secondary small" disabled={!!working} onClick={resetFactForm}><X size={13} />{t.cancel}</button><button className="button secondary small" disabled={!!working || !topic.trim() || !statement.trim()} onClick={() => void saveFact('needs-review')}>{t.memorySaveReview}</button><button className="button primary small" disabled={!!working || !trust.readyForConfirmations || !topic.trim() || !statement.trim()} onClick={() => void saveFact('confirmed')}>{working === 'save' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t.memorySaveConfirmed}</button></div>
     </div>}
 
     {!facts.length && !refreshing && <p className="project-empty">{t.projectMemoryEmpty}</p>}
     <div className="memory-fact-list">{facts.map(fact => <article className={`memory-fact ${fact.status}`} key={fact.id}>
-      <div className="memory-fact-heading"><span className={`memory-status ${fact.status}`}>{memoryStatusLabel(fact.status, t)}</span><span>{memoryCategoryLabel(fact.category, t)}</span><span>{fact.origin === 'ai' ? t.memoryOriginAI : t.memoryOriginUser}</span>{staleCount(fact) && <span className="memory-stale"><ShieldAlert size={12} />{t.memoryStaleEvidence}</span>}</div>
+      <div className="memory-fact-heading"><span className={`memory-status ${fact.status}`}>{memoryStatusLabel(fact.status, t)}</span>{(fact.status === 'confirmed' || fact.confirmationTrust === 'revoked') && <span className="memory-confirmation-trust">{confirmationTrustLabel(fact, t)}</span>}<span>{memoryCategoryLabel(fact.category, t)}</span><span>{fact.origin === 'ai' ? t.memoryOriginAI : t.memoryOriginUser}</span>{staleCount(fact) && <span className="memory-stale"><ShieldAlert size={12} />{t.memoryStaleEvidence}</span>}</div>
       <strong>{fact.topic}</strong><p>{fact.statement}</p>
       {fact.conflictsWith.length > 0 && <small className="memory-conflict-note">{t.memoryPotentialConflict} · {fact.conflictsWith.length}</small>}
       {fact.supersedes && <small>{t.memorySupersedes} · {fact.supersedes}</small>}
@@ -424,7 +560,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         {evidence.quote && <blockquote>{evidence.quote}</blockquote>}
         <small>{evidence.verification === 'source-matched' ? t.memoryEvidenceMatched : evidence.verification === 'user-recorded' ? t.memoryEvidenceUserRecorded : t.memoryEvidenceUnattached}</small>
         <small>{t.memoryEvidenceBinding}: {evidence.bindingStatus === 'source_matched' ? t.memoryBindingMatched : evidence.bindingStatus === 'invalid' ? `${t.memoryBindingInvalid}${evidence.bindingIssue ? ` · ${evidence.bindingIssue}` : ''}` : t.memoryBindingUnverified}</small>
-        <label className="memory-evidence-relation"><span>{t.memoryEvidenceRelation}</span><select aria-label={`${t.memoryEvidenceRelation}: ${evidence.reference}`} value={evidence.relation ?? 'unverified'} disabled={!!working || !canAttestEvidenceRelation(evidence)} onChange={event => void reviewEvidenceRelation(fact, evidence.id, event.target.value as EvidenceRelation)}>
+        <label className="memory-evidence-relation"><span>{t.memoryEvidenceRelation}</span><select aria-label={`${t.memoryEvidenceRelation}: ${evidence.reference}`} value={evidence.relation ?? 'unverified'} disabled={!!working || !trust.readyForConfirmations || !canAttestEvidenceRelation(evidence)} onChange={event => void reviewEvidenceRelation(fact, evidence.id, event.target.value as EvidenceRelation)}>
           <option value="unverified">{t.memoryRelationUnverified}</option><option value="supports">{t.memoryRelationSupports}</option><option value="contradicts">{t.memoryRelationContradicts}</option><option value="context_only">{t.memoryRelationContext}</option><option value="insufficient">{t.memoryRelationInsufficient}</option>
         </select></label>
         <small>{evidence.relationBasis === 'user_attestation' ? t.memoryRelationSaved : t.memoryEvidenceRelationHint}</small>
@@ -432,7 +568,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         {!!evidence.relationHistory?.length && evidence.relationBasis !== 'user_attestation' && <small>{t.memoryRelationHistoryUntrusted}</small>}
       </div>)}</div>
       {fact.status !== 'rejected' && fact.status !== 'superseded' && <div className="memory-fact-actions">
-        {fact.status !== 'confirmed' && <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'confirmed')}>{t.memoryConfirmFact}</button>}
+        {fact.status !== 'confirmed' && <button className="text-button" disabled={!!working || !trust.readyForConfirmations} onClick={() => void reviewFact(fact, 'confirmed')}>{t.memoryConfirmFact}</button>}
         <button className="text-button" disabled={!!working} onClick={() => void startCorrection(fact)}>{t.memoryCorrectFact}</button>
         {fact.status !== 'needs-review' && <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'needs-review')}>{t.memoryMarkReview}</button>}
         <button className="text-button danger-text" disabled={!!working} onClick={() => void reviewFact(fact, 'rejected')}>{t.memoryRejectFact}</button>

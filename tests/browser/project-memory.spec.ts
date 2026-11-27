@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { strFromU8, unzipSync } from 'fflate';
+import { setupLocalProjectTrust } from './helpers/project-trust';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -43,11 +44,35 @@ async function restoreBackup(page: Page, dialog: Locator, name: string, contents
   await (await chooser).setFiles({ name, mimeType: 'application/x-ndjson', buffer: Buffer.from(contents) });
 }
 
+async function readProjectTrustStates(page: Page) {
+  return page.evaluate(async () => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['projectTrust'], 'readonly');
+    const states = await new Promise<{ projectId: string; sourceProjectId?: string; trustStatus: string; sequence: number }[]>((resolve, reject) => {
+      const rows = transaction.objectStore('projectTrust').getAll();
+      rows.onsuccess = () => resolve(rows.result);
+      rows.onerror = () => reject(rows.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+    return states;
+  });
+}
+
 test('project facts cite saved messages, expose conflicts, and generate a budgeted handoff', async ({ page }) => {
   await page.goto('/');
   await importConversation(page, 'runtime.json', 'The runtime must stay offline and use JSONL for backups.');
   const dialog = await openProjectMemory(page);
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
 
   let form = dialog.locator('.memory-form');
@@ -69,6 +94,8 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
   await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
   await expect(dialog.locator('.memory-conflict-banner')).toBeVisible();
+  await expect(dialog.locator('.memory-fact').filter({ hasText: 'The runtime must stay offline.' }))
+    .toContainText('Confirmation was revoked');
   const conflict = dialog.locator('.memory-fact').filter({ hasText: 'The runtime requires a cloud connection.' });
   await expect(conflict).toContainText('Needs review');
   await conflict.getByRole('button', { name: 'Reject', exact: true }).click();
@@ -96,6 +123,7 @@ test('rejecting a fact invalidates generated Markdown and JSON context together'
   await importConversation(page, 'state.json', 'The runtime must remain offline.');
   const dialog = await openProjectMemory(page);
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
   const form = dialog.locator('.memory-form');
   await form.locator('select').nth(0).selectOption('constraint');
@@ -178,6 +206,7 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
   expect(capturedEvidence).toContain('The service must never send conversation text over the network.');
   expect(routeError).toBe('');
 
+  await setupLocalProjectTrust(page, dialog);
   await proposal.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(proposal).toContainText('Confirmed by user');
   await ai.getByRole('button', { name: 'Extract suggestions', exact: true }).click();
@@ -271,6 +300,7 @@ test('indexed database version one projects survive the schema upgrade and accep
   await expect(migratedDialog.locator('.project-list-item')).toContainText('Pre-upgrade project');
   await migratedDialog.getByRole('button', { name: /Pre-upgrade project/ }).click();
   await expect(migratedDialog.locator('.project-session-item')).toContainText('Existing session');
+  await setupLocalProjectTrust(page, migratedDialog);
   await migratedDialog.getByRole('button', { name: 'Add fact', exact: true }).click();
   const form = migratedDialog.locator('.memory-form');
   await form.locator('select').nth(0).selectOption('decision');
@@ -279,6 +309,340 @@ test('indexed database version one projects survive the schema upgrade and accep
   await form.locator('select').nth(1).selectOption('user');
   await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
   await expect(migratedDialog.locator('.memory-fact')).toContainText('The previous project remains available after migration.');
+});
+
+test('local fact confirmations are signed, revocable, and retained as authenticated trust history', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await importConversation(page, 'signed-confirmation.json', 'The recovery record stays on this device.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  const recoveryKit = await setupLocalProjectTrust(page, dialog);
+  const sourceTrustState = (await readProjectTrustStates(page)).find(state => state.trustStatus === 'trusted-local');
+  expect(sourceTrustState).toBeTruthy();
+  const sourceProjectId = sourceTrustState!.projectId;
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Recovery handling');
+  await form.locator('textarea').nth(0).fill('The recovery record stays on this device.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The recovery record stays on this device.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+
+  const fact = dialog.locator('.memory-fact').filter({ hasText: 'The recovery record stays on this device.' });
+  await expect(fact).toContainText('Signed by this project’s local trusted key');
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  const backup = await readFile(backupPath!, 'utf8');
+  const records = backup.trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown>; fingerprint?: string });
+  const header = records[0]!.data ?? records[0] as unknown as Record<string, unknown>;
+  expect(header).toMatchObject({ type: 'threadpack_project', version: 8, trustStateCount: 1, trustEventCount: 1 });
+  expect(records.some(record => record.type === 'trust_state')).toBe(true);
+  expect(records.filter(record => record.type === 'trust_event')).toHaveLength(1);
+  const factRecord = records.find(record => record.type === 'memory')!.data as { confirmationEventId?: string; confirmationVersion?: number; confirmationTrust?: string };
+  expect(factRecord.confirmationEventId).toBeTruthy();
+  expect(factRecord.confirmationVersion).toBe(1);
+  expect('confirmationTrust' in factRecord).toBe(false);
+
+  await restoreBackup(page, dialog, 'signed-confirmation-copy.jsonl', backup);
+  await expect(dialog.locator('.project-list-item')).toHaveCount(2);
+  const importedProjectId = (await readProjectTrustStates(page)).find(state =>
+    state.projectId !== sourceProjectId && state.sourceProjectId === sourceProjectId)?.projectId;
+  expect(importedProjectId).toBeTruthy();
+  await dialog.locator(`.project-list-item[data-project-id="${importedProjectId}"]`).click();
+  const imported = dialog.locator('.memory-fact').filter({ hasText: 'The recovery record stays on this device.' });
+  await expect(imported).toContainText('Confirmed status · no authenticated confirmation event');
+  const importedTrustPanel = dialog.getByLabel('Verifiable project confirmations');
+  await importedTrustPanel.locator('input[type="file"]').setInputFiles({
+    name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryKit)),
+  });
+  await importedTrustPanel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+  await importedTrustPanel.locator('input:not([type])').fill(recoveryKit.publicKeyFingerprint);
+  await importedTrustPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('already trusted by another local project');
+  await expect(imported).toContainText('Confirmed status · no authenticated confirmation event');
+
+  await dialog.locator(`.project-list-item[data-project-id="${sourceProjectId}"]`).click();
+  const trustedFact = dialog.locator('.memory-fact').filter({ hasText: 'The recovery record stays on this device.' });
+  await trustedFact.getByRole('button', { name: 'Needs review', exact: true }).click();
+  await expect(trustedFact).toContainText('Confirmation was revoked');
+  const trustedPanel = dialog.getByLabel('Verifiable project confirmations');
+  await trustedPanel.getByRole('button', { name: 'Rotate signing key', exact: true }).click();
+  await expect(trustedPanel.getByRole('button', { name: 'Revoke key', exact: true })).toBeVisible();
+  await trustedPanel.getByRole('button', { name: 'Revoke key', exact: true }).click();
+  const revokedDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const revokedPath = await (await revokedDownload).path();
+  const revokedBackupText = await readFile(revokedPath!, 'utf8');
+  const revokedRecords = revokedBackupText.trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: { event?: { eventType?: string } } });
+  expect(revokedRecords.filter(record => record.type === 'trust_event')).toHaveLength(4);
+  expect((revokedRecords.filter(record => record.type === 'trust_event').map(record => record.data?.event?.eventType))).toContain('identity.key-rotated');
+  expect((revokedRecords.filter(record => record.type === 'trust_event').map(record => record.data?.event?.eventType))).toContain('identity.key-revoked');
+  const revokedMemory = revokedRecords.find(record => record.type === 'memory')!.data as unknown as Record<string, unknown>;
+  expect(revokedMemory.confirmationRevocationEventId).toBeTruthy();
+
+  const deletedProjectId = await page.evaluate(async () => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const projectsTransaction = db.transaction(['projects'], 'readonly');
+    const projectsRequest = projectsTransaction.objectStore('projects').getAll();
+    const projects = await new Promise<{ id: string; name: string }[]>((resolve, reject) => {
+      projectsRequest.onsuccess = () => resolve(projectsRequest.result);
+      projectsRequest.onerror = () => reject(projectsRequest.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      projectsTransaction.oncomplete = () => resolve();
+      projectsTransaction.onerror = () => reject(projectsTransaction.error);
+      projectsTransaction.onabort = () => reject(projectsTransaction.error);
+    });
+    let selected: { projectId: string; activeKeyId: string } | undefined;
+    for (const project of projects.filter(item => item.name === 'Memory project')) {
+      const trustTransaction = db.transaction(['projectTrust'], 'readonly');
+      const trustRequest = trustTransaction.objectStore('projectTrust').get(project.id);
+      const trust = await new Promise<{ activeKeyId: string; trustStatus: string } | undefined>((resolve, reject) => {
+        trustRequest.onsuccess = () => resolve(trustRequest.result as { activeKeyId: string; trustStatus: string } | undefined);
+        trustRequest.onerror = () => reject(trustRequest.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        trustTransaction.oncomplete = () => resolve();
+        trustTransaction.onerror = () => reject(trustTransaction.error);
+        trustTransaction.onabort = () => reject(trustTransaction.error);
+      });
+      if (trust?.trustStatus === 'trusted-local') { selected = { projectId: project.id, activeKeyId: trust.activeKeyId }; break; }
+    }
+    if (!selected) throw new Error('Trusted source project was not found.');
+    const keyTransaction = db.transaction(['deviceKeys'], 'readwrite');
+    keyTransaction.objectStore('deviceKeys').delete([selected.projectId, selected.activeKeyId]);
+    await new Promise<void>((resolve, reject) => {
+      keyTransaction.oncomplete = () => resolve();
+      keyTransaction.onerror = () => reject(keyTransaction.error);
+      keyTransaction.onabort = () => reject(keyTransaction.error);
+    });
+    db.close();
+    return selected.projectId;
+  });
+  expect(deletedProjectId).toBe(sourceProjectId);
+  await page.reload();
+  const restoredDeviceDialog = await openProjectMemory(page);
+  await restoredDeviceDialog.locator(`.project-list-item[data-project-id="${deletedProjectId}"]`).click();
+  const missingKeyPanel = restoredDeviceDialog.getByLabel('Verifiable project confirmations');
+  await expect(missingKeyPanel).toContainText('The active signing key is missing');
+  const missingKeyFact = restoredDeviceDialog.locator('.memory-fact').filter({ hasText: 'The recovery record stays on this device.' });
+  await expect(missingKeyFact).toContainText('Confirmation was revoked');
+  await missingKeyPanel.locator('input[type="file"]').setInputFiles({
+    name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryKit)),
+  });
+  await missingKeyPanel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+  await missingKeyPanel.locator('input:not([type])').fill(recoveryKit.publicKeyFingerprint);
+  await missingKeyPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+  await expect.poll(async () => missingKeyPanel.getByText('Signed confirmations are enabled on this device.', { exact: true }).count(),
+    { timeout: 10_000 }).toBe(1);
+  await expect(missingKeyFact).toContainText('Confirmation was revoked');
+  await missingKeyFact.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(missingKeyFact).toContainText('Signed by this project’s local trusted key');
+  const latestBackupDownload = page.waitForEvent('download');
+  await restoredDeviceDialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const latestBackupPath = await (await latestBackupDownload).path();
+  const latestTrustBackupText = await readFile(latestBackupPath!, 'utf8');
+
+  const sourceTrustPanel = dialog.getByLabel('Verifiable project confirmations');
+  await dialog.locator(`.project-list-item[data-project-id="${deletedProjectId}"]`).click();
+  await expect(sourceTrustPanel).toContainText('Signed confirmations are enabled on this device.');
+  await dialog.getByRole('button', { name: 'Delete project', exact: true }).first().click();
+  await dialog.locator('.project-confirm').getByRole('button', { name: 'Delete project', exact: true }).click();
+  await expect(dialog.locator(`.project-list-item[data-project-id="${deletedProjectId}"]`)).toHaveCount(0);
+
+  const trustProjectIdsBeforeStaleRestore = new Set((await readProjectTrustStates(page)).map(state => state.projectId));
+  await restoreBackup(page, dialog, 'stale-trust-history.jsonl', backup);
+  let staleTrustProjectId = '';
+  await expect.poll(async () => {
+    staleTrustProjectId = (await readProjectTrustStates(page)).find(state =>
+      !trustProjectIdsBeforeStaleRestore.has(state.projectId) && state.sourceProjectId === deletedProjectId
+      && state.trustStatus === 'untrusted-import' && state.sequence === 1)?.projectId ?? '';
+    return staleTrustProjectId;
+  }, { timeout: 15_000 }).not.toBe('');
+  await dialog.locator(`.project-list-item[data-project-id="${staleTrustProjectId}"]`).click();
+  const staleTrustPanel = dialog.getByLabel('Verifiable project confirmations');
+  await staleTrustPanel.locator('input[type="file"]').setInputFiles({
+    name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryKit)),
+  });
+  await staleTrustPanel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+  await staleTrustPanel.locator('input:not([type])').fill(recoveryKit.publicKeyFingerprint);
+  await staleTrustPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText(/already anchored|rollback|fork/i);
+
+  const trustProjectIdsBeforeLatestRestore = new Set((await readProjectTrustStates(page)).map(state => state.projectId));
+  await restoreBackup(page, dialog, 'latest-trust-history-after-delete.jsonl', latestTrustBackupText);
+  let latestTrustProjectId = '';
+  await expect.poll(async () => {
+    latestTrustProjectId = (await readProjectTrustStates(page)).find(state =>
+      !trustProjectIdsBeforeLatestRestore.has(state.projectId) && state.sourceProjectId === deletedProjectId
+      && state.trustStatus === 'untrusted-import' && state.sequence === 6)?.projectId ?? '';
+    return latestTrustProjectId;
+  }, { timeout: 15_000 }).not.toBe('');
+  await dialog.locator(`.project-list-item[data-project-id="${latestTrustProjectId}"]`).click();
+  const latestTrustPanel = dialog.getByLabel('Verifiable project confirmations');
+  await latestTrustPanel.locator('input[type="file"]').setInputFiles({ name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryKit)) });
+  await latestTrustPanel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+  await latestTrustPanel.locator('input:not([type])').fill(recoveryKit.publicKeyFingerprint);
+  await latestTrustPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+  await expect.poll(async () => latestTrustPanel.getByText('Signed confirmations are enabled on this device.', { exact: true }).count(),
+    { timeout: 10_000 }).toBe(1).catch(async error => {
+      const alerts = await dialog.locator('[role=alert]').allTextContents();
+      throw new Error('Latest-backup re-trust did not complete. Alerts: ' + JSON.stringify(alerts) + ' Panel: ' + await latestTrustPanel.textContent() + '\n' + String(error));
+    });
+});
+
+test('deleting an imported trust copy leaves the source project anchor intact', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'trust-anchor-owner.json', 'The original project owns its local trust anchor.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  const sourceProjectId = await page.evaluate(async () => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['projects'], 'readonly');
+    const projects = await new Promise<{ id: string }[]>((resolve, reject) => {
+      const rows = transaction.objectStore('projects').getAll();
+      rows.onsuccess = () => resolve(rows.result);
+      rows.onerror = () => reject(rows.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+    if (projects.length !== 1) throw new Error(`Expected one source project, found ${projects.length}.`);
+    return projects[0]!.id;
+  });
+
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  await restoreBackup(page, dialog, 'imported-trust-copy.jsonl', await readFile(backupPath!, 'utf8'));
+  await expect(dialog.locator('.project-list-item')).toHaveCount(2);
+
+  const importedProjectId = (await readProjectTrustStates(page)).find(state =>
+    state.projectId !== sourceProjectId && state.sourceProjectId === sourceProjectId)?.projectId;
+  expect(importedProjectId).toBeTruthy();
+  await dialog.locator(`.project-list-item[data-project-id="${importedProjectId}"]`).click();
+  await dialog.getByRole('button', { name: 'Delete project', exact: true }).first().click();
+  await dialog.locator('.project-confirm').getByRole('button', { name: 'Delete project', exact: true }).click();
+  await expect(dialog.locator(`.project-list-item[data-project-id="${importedProjectId}"]`)).toHaveCount(0);
+
+  const anchor = await page.evaluate(async sourceId => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['trustAnchors'], 'readonly');
+    const anchor = await new Promise<{ projectId: string; deletedAt?: number } | undefined>((resolve, reject) => {
+      const result = transaction.objectStore('trustAnchors').get([sourceId, sourceId]);
+      result.onsuccess = () => resolve(result.result);
+      result.onerror = () => reject(result.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+    return anchor;
+  }, sourceProjectId);
+  expect(anchor?.projectId).toBe(sourceProjectId);
+  expect(anchor?.deletedAt).toBeUndefined();
+
+  await dialog.locator('.project-list-item').click();
+  await expect(dialog.getByLabel('Verifiable project confirmations'))
+    .toContainText('Signed confirmations are enabled on this device.');
+});
+
+test('an isolated device re-trusts a v8 backup with its root-bound recovery kit', async ({ page, browserName }) => {
+  test.setTimeout(120_000);
+  test.skip(browserName !== 'chromium', 'The test browser must implement the Origin Private File System used by the live project-sharing layer.');
+  await page.goto('/');
+  await importConversation(page, 'device-retrust.json', 'The shared trusted project root stays unchanged.');
+  const sourceDialog = await openProjectMemory(page);
+  await sourceDialog.getByLabel('Project name', { exact: true }).first().fill('Device re-trust source');
+  await sourceDialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await saveCurrentSession(sourceDialog);
+  const recoveryKit = await setupLocalProjectTrust(page, sourceDialog);
+  await sourceDialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = sourceDialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Trust root');
+  await form.locator('textarea').nth(0).fill('The shared trusted project root stays unchanged.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The shared trusted project root stays unchanged.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const sourceFact = sourceDialog.locator('.memory-fact').filter({ hasText: 'The shared trusted project root stays unchanged.' });
+  await expect(sourceFact).toContainText('Signed by this project’s local trusted key');
+  const downloadReady = page.waitForEvent('download');
+  await sourceDialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await downloadReady).path();
+  const backup = await readFile(backupPath!, 'utf8');
+  const backupRows = backup.trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+  expect(backupRows[0]).toMatchObject({ type: 'threadpack_project', version: 8, trustStateCount: 1, trustEventCount: 1 });
+  expect(backupRows.some(record => record.type === 'trust_state')).toBe(true);
+
+  const devicePage = await page.context().browser()!.newPage();
+  try {
+    await devicePage.goto(new URL(page.url()).origin);
+    const deviceDialog = await openProjectMemory(devicePage);
+    await restoreBackup(devicePage, deviceDialog, 'device-retrust-source.jsonl', backup);
+    await expect(deviceDialog.locator('.project-list-item')).toHaveCount(2);
+    const importedProjectId = (await readProjectTrustStates(devicePage))
+      .find(state => state.trustStatus === 'untrusted-import')?.projectId;
+    expect(importedProjectId).toBeTruthy();
+    await deviceDialog.locator(`.project-list-item[data-project-id="${importedProjectId}"]`).click();
+    const panel = deviceDialog.getByLabel('Verifiable project confirmations');
+    await expect(panel).toContainText('Imported trust events are not authenticated on this device');
+    const importedFact = deviceDialog.locator('.memory-fact').filter({ hasText: 'The shared trusted project root stays unchanged.' });
+    await expect(importedFact).toContainText('Confirmed status · no authenticated confirmation event');
+    await panel.locator('input[type="file"]').setInputFiles({
+      name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryKit)),
+    });
+    await panel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+    await panel.locator('input:not([type])').fill(recoveryKit.publicKeyFingerprint);
+    await panel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+    await expect(panel).toContainText('Signed confirmations are enabled on this device.');
+    await expect(importedFact).toContainText('Signed by this project’s local trusted key');
+    await deviceDialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+    const restoredForm = deviceDialog.locator('.memory-form');
+    await restoredForm.locator('select').nth(0).selectOption('constraint');
+    await restoredForm.locator('input').nth(0).fill('New local work');
+    await restoredForm.locator('textarea').nth(0).fill('The recovered device can sign follow-up project facts.');
+    await restoredForm.locator('select').nth(1).selectOption('user');
+    await restoredForm.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+    await expect(deviceDialog.locator('.memory-fact').filter({ hasText: 'The recovered device can sign follow-up project facts.' }))
+      .toContainText('Signed by this project’s local trusted key');
+    const trustedBackup = devicePage.waitForEvent('download');
+    await deviceDialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+    const trustedBackupPath = await (await trustedBackup).path();
+    const trustedBackupText = await readFile(trustedBackupPath!, 'utf8');
+    const trustedRecords = trustedBackupText.trim().split(/\r?\n/)
+      .map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+    expect(trustedRecords.filter(record => record.type === 'trust_event')).toHaveLength(3);
+    await restoreBackup(devicePage, deviceDialog, 'retrusted-project-roundtrip.jsonl', trustedBackupText);
+    await expect(deviceDialog.locator('.project-list-item')).toHaveCount(2);
+    const restoredTrust = trustedRecords.find(record => record.type === 'trust_state')!.data!;
+    expect(restoredTrust.trustStatus).toBe('untrusted-import');
+  } finally {
+    await devicePage.context().close();
+  }
 });
 
 test('legacy evidence binding is consistent across browser restore, Context Pack, and MCP', async ({ page }, testInfo) => {
@@ -298,6 +662,7 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
   await dialog.getByLabel('Project name', { exact: true }).first().fill('Evidence binding project');
   await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
   const form = dialog.locator('.memory-form');
   await form.locator('select').nth(0).selectOption('decision');
@@ -324,9 +689,10 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
   const pack = unzipSync(await readFile(packPath!));
   expect(strFromU8(pack['PROJECT_CONTEXT.md']!)).toBe(context);
   const memoryProjection = JSON.parse(strFromU8(pack['threadpack-memory.json']!)) as {
-    facts: { trust: string; evidence: { bindingStatus: string; relation: string; relationBasis: string; trust: string }[] }[];
+    facts: { trust: string; confirmationTrust?: string; evidence: { bindingStatus: string; relation: string; relationBasis: string; trust: string }[] }[];
   };
-  expect(memoryProjection.facts[0]!.trust).toBe('legacy-confirmed-claim-unverified');
+  expect(memoryProjection.facts[0]!.trust).toBe('user-confirmed-by-locally-trusted-key');
+  expect(memoryProjection.facts[0]!.confirmationTrust).toBe('authenticated');
   expect(memoryProjection.facts[0]!.evidence[0]).toMatchObject({
     bindingStatus: 'source_matched', relation: 'unverified', relationBasis: 'none', trust: 'untrusted-evidence',
   });
@@ -350,7 +716,9 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
   }
 
   const contextFromMcp = await readMcpContext(backupText);
-  expect(contextFromMcp.result?.content?.[0]?.text.endsWith(context)).toBe(true);
+  const untrustedMcpContext = context.replace('CONFIRMED · SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY · NOT INDEPENDENTLY VERIFIED',
+    'CONFIRMED STATUS · LEGACY CONFIRMATION EVENT NOT AVAILABLE IN THIS RELEASE');
+  expect(contextFromMcp.result?.content?.[0]?.text.endsWith(untrustedMcpContext)).toBe(true);
   expect(contextFromMcp.result?.content?.[0]?.text).toContain('binding=source_matched; relation=unverified; relationBasis=none');
 
   const legacyRecords = backupText.trim().split(/\r?\n/).map(line => JSON.parse(line) as {
@@ -400,11 +768,41 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
   await expect(invalidFact).toContainText(/Evidence relationship\s*Not assessed/);
 });
 
+test('changing evidence relationships revokes the prior signed fact confirmation', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'relation-revocation.json', 'The service listens only on localhost.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Network binding');
+  await form.locator('textarea').nth(0).fill('The service listens only on localhost.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The service listens only on localhost.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const fact = dialog.locator('.memory-fact').filter({ hasText: 'The service listens only on localhost.' });
+  await expect(fact).toContainText('Signed by this project’s local trusted key');
+  await fact.locator('.memory-evidence-relation select').selectOption('supports');
+  await expect(fact).toContainText('Needs review');
+  await expect(fact).toContainText('Confirmation was revoked');
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const path = await (await download).path();
+  const records = (await readFile(path!, 'utf8')).trim().split(/\r?\n/).map(line => JSON.parse(line) as {
+    type: string; data?: { event?: { eventType?: string } };
+  });
+  const trustEvents = records.filter(record => record.type === 'trust_event').map(record => record.data?.event?.eventType);
+  expect(trustEvents).toEqual(['claim.confirmed', 'evidence.relation-attested', 'claim.confirmation-revoked']);
+});
+
 test('a user-attested evidence relation stays distinct from fact confirmation and backup import', async ({ page }, testInfo) => {
   await page.goto('/');
   await importConversation(page, 'relation.json', 'The service listens only on localhost.');
   const dialog = await openProjectMemory(page);
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
   const form = dialog.locator('.memory-form');
   await form.locator('select').nth(0).selectOption('constraint');
@@ -495,6 +893,7 @@ test('missing source revisions remain visible as unverified without breaking pro
   await dialog.getByLabel('Project name', { exact: true }).first().fill('Orphan evidence project');
   await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
   await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
   const form = dialog.locator('.memory-form');
   await form.locator('select').nth(0).selectOption('decision');
