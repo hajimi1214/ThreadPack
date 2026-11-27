@@ -1,0 +1,30 @@
+[WebServer] (node:14876) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:49212) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 19 tests using 1 worker
+
+(node:33856) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [chromium] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (6.1s)
+  ok  2 [chromium] › tests\browser\project-memory.spec.ts:238:1 › rejecting a fact invalidates generated Markdown and JSON context together (4.0s)
+  ok  3 [chromium] › tests\browser\project-memory.spec.ts:279:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (4.5s)
+  ok  4 [chromium] › tests\browser\project-memory.spec.ts:334:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (4.0s)
+  ok  5 [chromium] › tests\browser\project-memory.spec.ts:400:1 › user preferences are categorized, reviewed, and included with their lifecycle status (3.4s)
+  ok  6 [chromium] › tests\browser\project-memory.spec.ts:434:1 › rejected claims stay terminal until the user creates a linked review candidate (7.4s)
+  ok  7 [chromium] › tests\browser\project-memory.spec.ts:518:1 › expired facts leave current context while preserving signed history after reload (5.0s)
+  ok  8 [chromium] › tests\browser\project-memory.spec.ts:572:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (4.2s)
+  ok  9 [chromium] › tests\browser\project-memory.spec.ts:621:1 › version-one project backups restore after the IndexedDB schema migration (2.8s)
+  ok 10 [chromium] › tests\browser\project-memory.spec.ts:641:1 › project backup versions one through eight migrate with a deterministic untrusted history record (5.0s)
+  ok 11 [chromium] › tests\browser\project-memory.spec.ts:694:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (5.2s)
+  ok 12 [chromium] › tests\browser\project-memory.spec.ts:775:1 › indexed database version one projects survive the schema upgrade and accept memory facts (3.9s)
+  ok 13 [chromium] › tests\browser\project-memory.spec.ts:841:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (10.5s)
+  ok 14 [chromium] › tests\browser\project-memory.spec.ts:1030:1 › deleting an imported trust copy leaves the source project anchor intact (3.5s)
+  ok 15 [chromium] › tests\browser\project-memory.spec.ts:1101:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit (8.5s)
+  ok 16 [chromium] › tests\browser\project-memory.spec.ts:1177:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (5.9s)
+  ok 17 [chromium] › tests\browser\project-memory.spec.ts:1300:1 › changing evidence relationships revokes the prior signed fact confirmation (3.4s)
+  ok 18 [chromium] › tests\browser\project-memory.spec.ts:1329:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (4.8s)
+  ok 19 [chromium] › tests\browser\project-memory.spec.ts:1418:1 › missing source revisions remain visible as unverified without breaking project memory reads (6.1s)
+
+  19 passed (2.1m)

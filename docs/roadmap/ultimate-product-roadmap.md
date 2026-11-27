@@ -7,7 +7,7 @@ This roadmap tracks the ten-stage product mission in `docs/release/ultimate-stag
 | 0 | Source preservation and reproducible baseline | PASS | `docs/release/ultimate-stage0-baseline.md` |
 | 1 | User confirmation events and local trust authentication | PASS | `docs/release/ultimate-stage1-trust-authentication.md` |
 | 2 | Trusted memory lifecycle and terminal-history governance | CONDITIONAL PASS | `docs/release/ultimate-stage2-memory-lifecycle-report.md` |
-| 3 | Complete backup, restoration and historical migration | NOT STARTED | The v1-v8 migration and recovery matrix remains open. |
+| 3 | Complete backup, restoration and historical migration | CONDITIONAL PASS | Source `e534644a0e2d148456f4595ac80b0fc525b1dee5`; `docs/release/ultimate-stage3-backup-migration-report.md`; v1-v8 and v9 migration/recovery tests pass on Windows browsers. Linux and crash-resume continuation remain unverified. |
 | 4 | Unified project memory and context projection | NOT STARTED | Shared cross-client projection work remains open. |
 | 5 | Multi-AI bidirectional collaboration engine | NOT STARTED | Client identity and authorization expansion remains open. |
 | 6 | Multi-project management and client ecosystem | NOT STARTED | Ecosystem and configuration workflow work remains open. |
@@ -17,4 +17,4 @@ This roadmap tracks the ten-stage product mission in `docs/release/ultimate-stag
 
 Stage 2 adds explicit rejected, superseded, expired and revoked fact states, signed lifecycle events when the local trust identity is available, exact duplicate rejection, user-linked reconsideration, optional expiration, terminal-history projections and a first-class user-preference category. Static backup import remains untrusted until locally re-trusted.
 
-The current Stage 2 conditional status reflects unavailable Linux evidence and intermittent WebKit Playwright process/resource failures in combined runs. Isolated affected WebKit cases passed. The detailed evidence and limits are in the Stage 2 acceptance report.
+Stage 2 remains conditional on Linux and resource-sensitive combined browser runs. Stage 3 preserves the v7 IndexedDB schema, imports v1-v8 into untrusted v9 project copies, and validates v9 exports with an ordered manifest. Its remaining Linux and true continuation-after-crash limits are listed in the Stage 3 report.

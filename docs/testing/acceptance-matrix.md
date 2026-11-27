@@ -14,6 +14,9 @@ This matrix is updated at each product stage. `PASS` denotes direct evidence for
 | Expiration, rejection, supersession and reconsideration | NOT IN SCOPE | NOT IN SCOPE | PASS in targeted browser and unit tests | Semantic duplicate detection is exact-text normalization, not semantic equivalence |
 | MCP lifecycle projection | NOT IN SCOPE | PASS | PASS for expired history and preference schema | Static backups deliberately cannot establish local identity trust |
 | Linux | NOT VERIFIED | NOT VERIFIED | NOT VERIFIED | Requires Linux CI or a Linux host |
+| Backup migration v1-v8 to v9 | NOT IN SCOPE | NOT IN SCOPE | PASS for generated fixtures on Chromium, Firefox and WebKit | Historical real-world backup corpus NOT VERIFIED |
+| v9 manifest tamper and staging rollback | NOT IN SCOPE | NOT IN SCOPE | PASS in unit/MCP and all three browser projects | Arbitrary process-kill timing and disk-full recovery NOT VERIFIED |
+| v9 migration ledger, duplicate rejection and trust-preserving round-trip | NOT IN SCOPE | NOT IN SCOPE | PASS in unit/MCP and all three browser projects | Physical-device transfer remains separate from browser profile restore |
 | Real cross-AI client exchange | NOT VERIFIED | NOT IN SCOPE | NOT IN SCOPE | Planned for later stages with authorized clients |
 
 The current Firefox and WebKit skips are tied to the tests that need local file-handle permission or Chromium Origin Private File System capabilities. Chromium runs those paths. Tests were not removed or weakened to obtain these results.

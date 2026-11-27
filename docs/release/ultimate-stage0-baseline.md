@@ -128,3 +128,11 @@
 阶段 2 可信记忆生命周期结论为 **CONDITIONAL PASS**。事实终态、状态历史、拒绝去重、用户显式重新考虑、有效期、用户偏好类别、签名生命周期事件以及 Context、JSON、MCP 和备份中的终态投影已有实际实现和测试。阶段源码提交为 `59ecf052f508e7425af2f53bd797a44d724ad0b5`。详细报告见 [ultimate-stage2-memory-lifecycle-report.md](ultimate-stage2-memory-lifecycle-report.md)。
 
 最终质量门禁：类型检查通过，npm test 245/245 通过，Web/CLI 生产构建通过。Chromium 项目组 26/26 通过；Firefox 项目组 23 通过、2 项平台能力跳过；WebKit 项目组 23 通过、2 项平台能力跳过。Firefox 与 WebKit 的超大项目持久化另有隔离运行通过。Linux 未验证。阶段 3 完整历史迁移尚未开始。
+
+## 阶段 3 验收结果（2026-11-28）
+
+阶段 3 完整备份、恢复与历史迁移结论为 **CONDITIONAL PASS**。项目备份升级为 v9，有序 manifest 校验、确定性迁移账本、v1–v8 格式导入及恢复暂存回滚均已实现。迁移账本作为可选项目记录字段持久化，IndexedDB 保持 v7，避免改动对象 store 版本。导入的旧确认和签名状态继续保持未认证。
+
+阶段 3 源码提交为 `e534644a0e2d148456f4595ac80b0fc525b1dee5`。详细报告见 [ultimate-stage3-backup-migration-report.md](ultimate-stage3-backup-migration-report.md)，设计见 [ultimate-stage3-migration-design.md](ultimate-stage3-migration-design.md)。可复核的检查、247 项单测、构建、MCP 和 Chromium/Firefox/WebKit 项目记忆浏览器日志保存在 `docs/release/evidence/ultimate-stage3/`。
+
+最终 Windows 门禁：类型检查通过、`npm test` 247/247 通过、Web/CLI 生产构建通过。Chromium 19/19；Firefox 18 通过、1 项隔离设备密钥恢复能力跳过；WebKit 18 通过、1 项同类能力跳过。v1–v8 迁移与 v9 损坏恢复专项用例在三个浏览器均 2/2 通过。Linux、真实旧版用户备份集合、任意进程强制终止、磁盘耗尽及从持久化游标续传未验证。阶段 4 统一项目记忆和上下文引擎仍未开始。
