@@ -12,6 +12,13 @@ import { canReviewMemoryStatusTransition, isTerminalMemoryStatus, normalizeMemor
 import { assertTrustChainContainsHead, createRecoveryBundle, generateSigningIdentity, isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, signTrustEvent, unlockRecoveryBundle, verifyTrustEventChain, TRUST_CHAIN_ORIGIN, TRUST_EVENT_SCHEMA } from './trust-crypto';
 import type { LocalSigningIdentity, RecoveryBundle, SignedTrustEvent, TrustEventPayload, TrustChainVerification } from './trust-crypto';
 import { MAX_PROJECT_SESSION_BYTES, MAX_SHARED_PROJECT_BACKUP_BYTES, utf8ByteLength } from './limits';
+import {
+  backupRecordCountsMatch, createProjectBackupMigration, digestProjectBackupRecord,
+  emptyBackupRecordCounts, extendProjectBackupRecordChain, incrementBackupRecordCount,
+  PROJECT_BACKUP_CHAIN_SEED, PROJECT_BACKUP_MANIFEST_VERSION, PROJECT_BACKUP_VERSION,
+  validateProjectBackupManifest, validateProjectBackupMigration,
+} from './backup-format';
+import type { ProjectBackupMigrationRecord } from './backup-format';
 
 const DATABASE_NAME = 'threadpack-project-library';
 const DATABASE_VERSION = 7;
@@ -27,6 +34,7 @@ export interface ProjectRecord {
   createdAt: number;
   updatedAt: number;
   restoringSince?: number;
+  migrationHistory?: ProjectBackupMigrationRecord[];
 }
 
 export interface SharedProjectFileHandle extends FileSystemFileHandle {
@@ -1785,34 +1793,45 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
   if (trust.issue) throw new Error('Project trust history failed integrity validation. Resolve the trust diagnostic before exporting a backup.');
   const trustState = trust.state ? { ...trust.state, trustStatus: 'untrusted-import' as const, recoveryAcknowledgedAt: undefined } : undefined;
   const trustEvents = trust.events;
+  const migrations = project.migrationHistory ?? [];
+  migrations.sort((first, second) => first.createdAt - second.createdAt || first.id.localeCompare(second.id));
   let revisionCount = 0;
   for (const session of sessions) revisionCount += session.currentVersion;
-  yield JSON.stringify({ type: 'threadpack_project', version: 8, projectId, createdAt: Date.now(), project: {
+  let recordChain = PROJECT_BACKUP_CHAIN_SEED;
+  const recordCounts = emptyBackupRecordCounts();
+  let recordCount = 0;
+  const emitRecord = async (record: Record<string, unknown>): Promise<string> => {
+    recordChain = await extendProjectBackupRecordChain(recordChain, await digestProjectBackupRecord(record));
+    recordCount++;
+    if (record.type !== 'threadpack_project') incrementBackupRecordCount(recordCounts, record.type as string);
+    return `${JSON.stringify(record)}\n`;
+  };
+  yield await emitRecord({ type: 'threadpack_project', version: PROJECT_BACKUP_VERSION, projectId, createdAt: Date.now(), project: {
     name: project.name, summary: project.summary, importantNotes: project.importantNotes, createdAt: project.createdAt, updatedAt: project.updatedAt,
   }, sessionCount: sessions.length, revisionCount, factCount: facts.length, updateCount: updates.length, claimCount: claims.length,
-    trustStateCount: trustState ? 1 : 0, trustEventCount: trustEvents.length }) + '\n';
+    trustStateCount: trustState ? 1 : 0, trustEventCount: trustEvents.length, migrationCount: migrations.length });
   for (const session of sessions) {
-    yield JSON.stringify({ type: 'session', data: {
+    yield await emitRecord({ type: 'session', data: {
       id: session.id, sessionKey: session.sessionKey, title: session.title, sourceName: session.sourceName,
       platform: session.platform, ...(session.sourceId ? { sourceId: session.sourceId } : {}), format: session.format,
       messageCount: session.messageCount, fingerprint: session.fingerprint, currentVersion: session.currentVersion,
       createdAt: session.createdAt, updatedAt: session.updatedAt,
-    } }) + '\n';
+    } });
     for (let version = 1; version <= session.currentVersion; version++) {
       const revision = await withTransaction(['revisions'], 'readonly', async transaction =>
         idbRequest<RevisionRecord | undefined>(transaction.objectStore('revisions').get([projectId, session.id, version])));
       if (!revision) throw new Error('Project history is incomplete. The backup was canceled.');
-      yield JSON.stringify({ type: 'revision', data: {
+      yield await emitRecord({ type: 'revision', data: {
         sessionId: session.id, version: revision.version, fingerprint: revision.fingerprint,
         content: revision.content, title: revision.title, platform: revision.platform,
         ...(revision.sourceId ? { sourceId: revision.sourceId } : {}), format: revision.format,
         messageCount: revision.messageCount, sourceName: revision.sourceName, createdAt: revision.createdAt,
-      } }) + '\n';
+      } });
     }
   }
   for (const fact of facts) {
     const { key: _key, projectId: _projectId, confirmationTrust: _confirmationTrust, lifecycleTrust: _lifecycleTrust, ...data } = fact;
-    yield JSON.stringify({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data }) + '\n';
+    yield await emitRecord({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data });
   }
   for (const update of updates) {
     const { key: _key, reviewingSince: _reviewingSince, ...record } = update;
@@ -1828,20 +1847,26 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
         auditHistory: [...exportRecord.auditHistory, { action, actor: 'user', status, changedAt, snapshot: proposalSnapshot(exportRecord) }],
       };
     }
-    yield JSON.stringify({ type: 'update', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+    yield await emitRecord({ type: 'update', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data });
   }
   for (const claim of claims) {
     const { key: _key, ...record } = claim;
     const data = { ...record, projectId };
-    yield JSON.stringify({ type: 'claim', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+    yield await emitRecord({ type: 'claim', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data });
   }
   if (trustState) {
-    yield JSON.stringify({ type: 'trust_state', fingerprint: await sha256Fingerprint(JSON.stringify(trustState)), data: trustState }) + '\n';
+    yield await emitRecord({ type: 'trust_state', fingerprint: await sha256Fingerprint(JSON.stringify(trustState)), data: trustState });
   }
   for (const event of trustEvents) {
     const data = { projectId, sequence: event.sequence, event };
-    yield JSON.stringify({ type: 'trust_event', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data }) + '\n';
+    yield await emitRecord({ type: 'trust_event', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data });
   }
+  for (const migration of migrations) {
+    const { key: _key, ...data } = migration;
+    yield await emitRecord({ type: 'migration', fingerprint: await sha256Fingerprint(JSON.stringify(data)), data });
+  }
+  yield `${JSON.stringify({ type: 'manifest', version: PROJECT_BACKUP_MANIFEST_VERSION, recordCount,
+    recordChainHash: recordChain, recordCounts })}\n`;
 }
 
 export async function exportProjectBackup(projectId: string): Promise<Blob> {
@@ -2531,7 +2556,7 @@ function parseBackupLine(line: string): Record<string, unknown> {
 }
 
 interface ProjectBackupHeader {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   projectId?: string;
   project: Omit<ProjectRecord, 'id' | 'restoringSince'>;
   sessionCount: number;
@@ -2541,11 +2566,12 @@ interface ProjectBackupHeader {
   claimCount: number;
   trustStateCount: number;
   trustEventCount: number;
+  migrationCount: number;
 }
 
 function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHeader {
   const project = value.project;
-  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 || !isRecord(project)
+  if (value.type !== 'threadpack_project' || value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5 && value.version !== 6 && value.version !== 7 && value.version !== 8 && value.version !== PROJECT_BACKUP_VERSION || !isRecord(project)
     || !Number.isSafeInteger(value.createdAt)
     || value.projectId !== undefined && (typeof value.projectId !== 'string' || !value.projectId || value.projectId.length > 200)
     || typeof project.name !== 'string' || typeof project.summary !== 'string' || typeof project.importantNotes !== 'string'
@@ -2557,8 +2583,10 @@ function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHead
     || value.version >= 6 && (!Number.isSafeInteger(value.updateCount) || (value.updateCount as number) < 0 || (value.updateCount as number) > 1_000_000)
     || value.version < 6 && value.updateCount !== undefined && value.updateCount !== 0
     || value.version >= 7 && (!Number.isSafeInteger(value.claimCount) || (value.claimCount as number) < 0 || (value.claimCount as number) > 1_000_000)
-    || value.version === 8 && (!Number.isSafeInteger(value.trustStateCount) || (value.trustStateCount as number) < 0 || (value.trustStateCount as number) > 1
+    || value.version >= 8 && (!Number.isSafeInteger(value.trustStateCount) || (value.trustStateCount as number) < 0 || (value.trustStateCount as number) > 1
       || !Number.isSafeInteger(value.trustEventCount) || (value.trustEventCount as number) < 0 || (value.trustEventCount as number) > 1_000_000)
+    || value.version === PROJECT_BACKUP_VERSION && (!Number.isSafeInteger(value.migrationCount) || (value.migrationCount as number) < 0 || (value.migrationCount as number) > 1_000_000 || typeof value.projectId !== 'string')
+    || value.version < PROJECT_BACKUP_VERSION && value.migrationCount !== undefined && value.migrationCount !== 0
     || value.version < 7 && value.claimCount !== undefined && value.claimCount !== 0
     || value.version < 8 && (value.trustStateCount !== undefined && value.trustStateCount !== 0 || value.trustEventCount !== undefined && value.trustEventCount !== 0)) {
     throw new Error('This project backup has an unsupported or invalid header.');
@@ -2573,8 +2601,9 @@ function validateBackupHeader(value: Record<string, unknown>): ProjectBackupHead
     factCount: value.version >= 2 ? value.factCount as number : 0,
     updateCount: value.version >= 6 ? value.updateCount as number : 0,
     claimCount: value.version >= 7 ? value.claimCount as number : 0,
-    trustStateCount: value.version === 8 ? value.trustStateCount as number : 0,
-    trustEventCount: value.version === 8 ? value.trustEventCount as number : 0,
+    trustStateCount: value.version >= 8 ? value.trustStateCount as number : 0,
+    trustEventCount: value.version >= 8 ? value.trustEventCount as number : 0,
+    migrationCount: value.version === PROJECT_BACKUP_VERSION ? value.migrationCount as number : 0,
   };
 }
 
@@ -2861,6 +2890,11 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   let seenUpdates = false;
   let seenClaims = false;
   let seenTrustState = false;
+  let seenManifest = false;
+  let seenMigration = false;
+  let sourceChain = PROJECT_BACKUP_CHAIN_SEED;
+  let sourceRecordCount = 0;
+  const sourceRecordCounts = emptyBackupRecordCounts();
   const trustEvents: StoredProjectTrustEvent[] = [];
   let trustState: ProjectTrustState | undefined;
   const facts: ProjectMemoryFact[] = [];
@@ -2869,11 +2903,16 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
   const updateIds = new Set<string>();
   const claims: ProjectTaskClaimEvent[] = [];
   const claimIds = new Set<string>();
+  const migrationEvents: ProjectBackupMigrationRecord[] = [];
+  const migrationIds = new Set<string>();
   let assess: ReturnType<typeof evidenceReader> | undefined;
   try {
     const first = await iterator.next();
     if (first.done) throw new Error('The project backup is empty.');
-    header = validateBackupHeader(parseBackupLine(first.value));
+    const headerRecord = parseBackupLine(first.value);
+    header = validateBackupHeader(headerRecord);
+    sourceChain = await extendProjectBackupRecordChain(sourceChain, await digestProjectBackupRecord(headerRecord));
+    sourceRecordCount = 1;
     project = { id: makeId(), ...header.project, updatedAt: Date.now(), restoringSince: Date.now() };
     assess = evidenceReader({ projectId: project.id, sourceProjectId: header.projectId }, false);
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').add(project!); });
@@ -2881,6 +2920,20 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
       const next = await iterator.next();
       if (next.done) break;
       const record = parseBackupLine(next.value);
+      if (seenManifest) throw new Error('The project backup contains records after its manifest.');
+      if (seenMigration && record.type !== 'migration' && record.type !== 'manifest') {
+        throw new Error('The project backup contains data records after its migration history.');
+      }
+      if (record.type === 'manifest') {
+        if (header.version !== PROJECT_BACKUP_VERSION) throw new Error('A legacy project backup cannot contain a v9 manifest.');
+        const manifest = validateProjectBackupManifest(record);
+        if (manifest.recordCount !== sourceRecordCount || manifest.recordChainHash !== sourceChain
+          || !backupRecordCountsMatch(manifest.recordCounts, sourceRecordCounts)) {
+          throw new Error('The project backup manifest does not match the validated records.');
+        }
+        seenManifest = true;
+        continue;
+      }
       if (record.type === 'session') {
         if (seenMemory) throw new Error('The project backup puts session records after memory records.');
         if (activeSession && expectedVersion <= activeSession.currentVersion) throw new Error('The project backup has an incomplete conversation history.');
@@ -2959,7 +3012,7 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         claimIds.add(claim.id);
         claims.push({ ...claim, key: `${project.id}\0${claim.id}`, projectId: project.id });
       } else if (record.type === 'trust_state') {
-        if (header.version !== 8 || seenTrustState || trustEvents.length || !isRecord(record.data)
+        if (header.version < 8 || seenTrustState || trustEvents.length || !isRecord(record.data)
           || typeof record.fingerprint !== 'string' || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint
           || !header.projectId || header.trustStateCount !== 1) {
           throw new Error('The project backup contains an invalid trust-state record.');
@@ -2967,21 +3020,36 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
         trustState = await validateBackupTrustState(record.data, project.id, header.projectId);
         seenTrustState = true;
       } else if (record.type === 'trust_event') {
-        if (header.version !== 8 || !trustState || !isRecord(record.data) || typeof record.fingerprint !== 'string'
+        if (header.version < 8 || !trustState || !isRecord(record.data) || typeof record.fingerprint !== 'string'
           || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint
-          || record.data.projectId !== (trustState.sourceProjectId ?? header.projectId)
+          || record.data.projectId !== header.projectId
           || !Number.isSafeInteger(record.data.sequence) || !isRecord(record.data.event)
           || record.data.sequence !== trustEvents.length + 1 || record.data.event.sequence !== record.data.sequence) {
           throw new Error('The project backup contains an invalid signed trust event.');
         }
         trustEvents.push({ key: [project.id, record.data.sequence as number], projectId: project.id,
           sequence: record.data.sequence as number, event: record.data.event as unknown as SignedTrustEvent });
+      } else if (record.type === 'migration') {
+        if (header.version !== PROJECT_BACKUP_VERSION || !header.projectId || !isRecord(record.data)
+          || typeof record.fingerprint !== 'string' || await sha256Fingerprint(JSON.stringify(record.data)) !== record.fingerprint
+          || migrationEvents.length >= header.migrationCount) {
+          throw new Error('The project backup contains an invalid migration record.');
+        }
+        const migration = await validateProjectBackupMigration(record.data, header.projectId);
+        if (migrationIds.has(migration.id)) throw new Error('The project backup contains duplicate migration records.');
+        migrationIds.add(migration.id);
+        migrationEvents.push({ ...migration, projectId: project.id, key: [project.id, migration.id] });
+        seenMigration = true;
       } else throw new Error('The project backup contains an unknown record type.');
+      sourceChain = await extendProjectBackupRecordChain(sourceChain, await digestProjectBackupRecord(record));
+      sourceRecordCount++;
+      incrementBackupRecordCount(sourceRecordCounts, record.type);
     }
     if (activeSession && expectedVersion <= activeSession.currentVersion
       || sessionCount !== header.sessionCount || revisionCount !== header.revisionCount || facts.length !== header.factCount
       || updates.length !== header.updateCount || claims.length !== header.claimCount
-      || trustEvents.length !== header.trustEventCount || (trustState ? 1 : 0) !== header.trustStateCount) {
+      || trustEvents.length !== header.trustEventCount || (trustState ? 1 : 0) !== header.trustStateCount
+      || migrationEvents.length !== header.migrationCount || header.version === PROJECT_BACKUP_VERSION && !seenManifest) {
       throw new Error('The project backup is incomplete.');
     }
     if (trustState) {
@@ -3026,7 +3094,12 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
     if (activeClaims.some((claim, index) => activeClaims.slice(index + 1).some(other => other.taskId === claim.taskId))) {
       throw new Error('The project backup contains multiple active claims for one task.');
     }
-    if (facts.length || updates.length || claims.length) await withTransaction(['memory', 'updates', 'claims'], 'readwrite', async transaction => {
+    const migration = await createProjectBackupMigration(project.id, header.projectId, header.version,
+      sourceChain, header.version === PROJECT_BACKUP_VERSION ? 'manifest-verified' : 'record-validated',
+      sourceRecordCounts, Date.now());
+    if (migrationIds.has(migration.id)) throw new Error('The project backup migration would duplicate a prior migration event.');
+    migrationEvents.push({ ...migration, key: [project.id, migration.id] });
+    await withTransaction(['memory', 'updates', 'claims'], 'readwrite', async transaction => {
       const memory = transaction.objectStore('memory');
       for (const fact of facts) memory.add(fact);
       const updateStore = transaction.objectStore('updates');
@@ -3039,12 +3112,19 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
       const trustStore = transaction.objectStore('trustEvents');
       for (const event of trustEvents) trustStore.add(event);
     });
-    const completed = { ...project, restoringSince: undefined, updatedAt: Date.now() };
+    const completed = { ...project, migrationHistory: migrationEvents, restoringSince: undefined, updatedAt: Date.now() };
     delete completed.restoringSince;
     await withTransaction(['projects'], 'readwrite', async transaction => { transaction.objectStore('projects').put(completed); });
     return completed;
   } catch (error) {
-    if (project) await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'], 'readwrite', transaction => removeProjectRows(transaction, project!.id)).catch(() => {});
+    if (project) {
+      try {
+        await withTransaction(['projects', 'sessions', 'revisions', 'memory', 'shared', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'],
+          'readwrite', transaction => removeProjectRows(transaction, project!.id));
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'Project restore failed and its staging data could not be fully removed.');
+      }
+    }
     throw error;
   } finally { await iterator.return(undefined).catch(() => {}); }
 }

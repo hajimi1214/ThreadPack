@@ -6,6 +6,10 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { test, before, after } from 'node:test';
+import {
+  createProjectBackupMigration, digestProjectBackupRecord, emptyBackupRecordCounts, extendProjectBackupRecordChain,
+  PROJECT_BACKUP_CHAIN_SEED,
+} from '../src/projects/backup-format';
 import { generateSigningIdentity, createRecoveryBundle, signTrustEvent, TRUST_EVENT_SCHEMA, TRUST_CHAIN_ORIGIN } from '../src/projects/trust-crypto';
 
 let folder: string;
@@ -86,6 +90,47 @@ test('MCP bridge fails closed for a tampered memory record', async () => {
   const response = JSON.parse(result.stdout.trim()) as { error?: { code: number; message: string } };
   assert.equal(response.error?.code, -32000);
   assert.equal(response.error?.message, 'ThreadPack could not read the authorized project context.');
+});
+
+test('MCP validates v9 migration records and the backup manifest', async () => {
+  const projectId = 'v9-manifest-project';
+  const now = 1_700_000_000_000;
+  const hashText = async (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+  const migration = await createProjectBackupMigration(projectId, 'old-source-project', 8, 'b'.repeat(64),
+    'record-validated', emptyBackupRecordCounts(), now, hashText);
+  const records: Record<string, unknown>[] = [
+    { type: 'threadpack_project', version: 9, projectId, createdAt: now,
+      project: { name: 'Migration test', summary: '', importantNotes: '', createdAt: now, updatedAt: now },
+      sessionCount: 0, revisionCount: 0, factCount: 0, updateCount: 0, claimCount: 0,
+      trustStateCount: 0, trustEventCount: 0, migrationCount: 1 },
+    { type: 'migration', fingerprint: createHash('sha256').update(JSON.stringify(migration), 'utf8').digest('hex'), data: migration },
+  ];
+  let recordChain = PROJECT_BACKUP_CHAIN_SEED;
+  for (const record of records) {
+    const digest = await digestProjectBackupRecord(record, hashText);
+    recordChain = await extendProjectBackupRecordChain(recordChain, digest, hashText);
+  }
+  const backup = [...records, { type: 'manifest', version: 1, recordCount: records.length,
+    recordChainHash: recordChain, recordCounts: { ...emptyBackupRecordCounts(), migration: 1 } }]
+    .map(record => JSON.stringify(record)).join('\n') + '\n';
+  const backupPath = join(folder, 'v9-migration-backup.jsonl');
+  await writeFile(backupPath, backup, 'utf8');
+  const request = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+    name: 'threadpack_project_context', arguments: { query: 'migration' },
+  } }) + '\n';
+  const valid = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--read-only'], { encoding: 'utf8', input: request });
+  assert.equal(valid.status, 0, valid.stderr);
+
+  const tamperedRecords = [...records, { type: 'manifest', version: 1, recordCount: records.length,
+    recordChainHash: recordChain, recordCounts: { ...emptyBackupRecordCounts(), migration: 1 } }];
+  (tamperedRecords[0]!.project as Record<string, unknown>).name = 'Changed after manifest';
+  await writeFile(backupPath, tamperedRecords.map(record => JSON.stringify(record)).join('\n') + '\n', 'utf8');
+  const invalid = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--read-only'], { encoding: 'utf8', input: request });
+  assert.equal(invalid.status, 0);
+  assert.match(invalid.stderr, /manifest does not match/i);
+  const invalidResponse = JSON.parse(invalid.stdout.trim()) as { error?: { code: number; message: string } };
+  assert.equal(invalidResponse.error?.code, -32000);
+  assert.equal(invalidResponse.error?.message, 'ThreadPack could not read the authorized project context.');
 });
 
 test('MCP binds a matching quote to its exact message rather than any revision message', async () => {

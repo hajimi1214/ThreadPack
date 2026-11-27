@@ -6,6 +6,10 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { strFromU8, unzipSync } from 'fflate';
 import { setupLocalProjectTrust } from './helpers/project-trust';
+import {
+  digestProjectBackupRecord, emptyBackupRecordCounts, extendProjectBackupRecordChain,
+  incrementBackupRecordCount, PROJECT_BACKUP_CHAIN_SEED,
+} from '../../src/projects/backup-format';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -43,6 +47,118 @@ async function restoreBackup(page: Page, dialog: Locator, name: string, contents
   await expect(importButton).toBeEnabled();
   await importButton.click();
   await (await chooser).setFiles({ name, mimeType: 'application/x-ndjson', buffer: Buffer.from(contents) });
+}
+
+function legacyBackup(version: number): string {
+  const now = 1_700_000_000_000;
+  const projectId = `legacy-project-v${version}`;
+  const content = JSON.stringify({ id: 'legacy-message', role: 'user', content: 'Legacy project evidence.' }) + '\n';
+  const fingerprint = createHash('sha256').update(content).digest('hex');
+  const header: Record<string, unknown> = {
+    type: 'threadpack_project', version, projectId, createdAt: now,
+    project: { name: `Legacy v${version}`, summary: 'Historical backup fixture.', importantNotes: '', createdAt: now, updatedAt: now },
+    sessionCount: 1, revisionCount: 1,
+  };
+  if (version >= 2) header.factCount = 1;
+  if (version >= 6) header.updateCount = 0;
+  if (version >= 7) header.claimCount = 0;
+  if (version >= 8) { header.trustStateCount = 0; header.trustEventCount = 0; }
+  const records: Record<string, unknown>[] = [
+    header,
+    { type: 'session', data: { id: 'legacy-session', sessionKey: `source:generic:legacy-v${version}`,
+      title: 'Legacy history', sourceName: 'legacy.json', platform: 'generic', sourceId: `legacy-${version}`,
+      format: 'Messages JSON export', messageCount: 1, fingerprint, currentVersion: 1, createdAt: now, updatedAt: now } },
+    { type: 'revision', data: { sessionId: 'legacy-session', version: 1, fingerprint, content, title: 'Legacy history',
+      platform: 'generic', sourceId: `legacy-${version}`, format: 'Messages JSON export', messageCount: 1,
+      sourceName: 'legacy.json', createdAt: now } },
+  ];
+  if (version >= 2) {
+    const memory = { id: `legacy-fact-v${version}`, category: 'decision', topic: 'Release policy', normalizedTopic: 'release policy',
+      statement: 'Keep the release process controlled.', origin: 'user', status: 'confirmed',
+      evidence: [{ id: `legacy-evidence-v${version}`, kind: 'user', reference: 'Historical note', quote: '', recordedAt: now, verification: 'unattached' }],
+      conflictsWith: [], createdAt: now, updatedAt: now };
+    records.push({ type: 'memory', fingerprint: createHash('sha256').update(JSON.stringify(memory)).digest('hex'), data: memory });
+  }
+  return `${records.map(record => JSON.stringify(record)).join('\n')}\n`;
+}
+
+async function readProjectMigrationState(page: Page, projectId: string) {
+  return page.evaluate(async (id): Promise<{
+    project?: Record<string, unknown>;
+    facts: Record<string, unknown>[];
+    migrations: Record<string, unknown>[];
+  }> => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction(['projects', 'memory'], 'readonly');
+    const transactionDone = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    const projectRequest = transaction.objectStore('projects').get(id);
+    const factRequest = transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(id));
+    const [project, facts] = await Promise.all([
+      new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
+        projectRequest.onsuccess = () => resolve(projectRequest.result);
+        projectRequest.onerror = () => reject(projectRequest.error);
+      }),
+      new Promise<Record<string, unknown>[]>((resolve, reject) => {
+        factRequest.onsuccess = () => resolve(factRequest.result);
+        factRequest.onerror = () => reject(factRequest.error);
+      }),
+    ]);
+    await transactionDone;
+    db.close();
+    return { project, facts, migrations: (project?.migrationHistory ?? []) as Record<string, unknown>[] };
+  }, projectId);
+}
+
+async function readProjectRecordCounts(page: Page, projectId: string) {
+  return page.evaluate(async (id) => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const names = ['projects', 'sessions', 'revisions', 'memory', 'updates', 'claims', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors'];
+    const readRequest = <T>(storeName: string, makeRequest: (store: IDBObjectStore) => IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+      const transaction = db.transaction([storeName], 'readonly');
+      const request = makeRequest(transaction.objectStore(storeName));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const counts: number[] = [];
+    for (const name of names) {
+      const keys = await readRequest(name, store => name === 'projects' || name === 'projectTrust'
+        ? store.getAllKeys(IDBKeyRange.only(id))
+        : name === 'trustAnchors' ? store.index('sourceProjectId').getAllKeys(IDBKeyRange.only(id))
+          : store.index('projectId').getAllKeys(IDBKeyRange.only(id)));
+      counts.push(keys.length);
+    }
+    const project = await readRequest('projects', store => store.get(id)) as { migrationHistory?: unknown[] } | undefined;
+    db.close();
+    return Object.fromEntries([...names.map((name, index) => [name, counts[index]]), ['migrations', project?.migrationHistory?.length ?? 0]]);
+  }, projectId);
+}
+
+async function rechainBackupManifest(records: Record<string, unknown>[]): Promise<string> {
+  const manifest = records.at(-1);
+  if (!manifest || manifest.type !== 'manifest') throw new Error('Expected a v9 backup manifest.');
+  const hashText = async (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+  let recordChainHash = PROJECT_BACKUP_CHAIN_SEED;
+  const recordCounts = emptyBackupRecordCounts();
+  const dataRecords = records.slice(0, -1);
+  for (const record of dataRecords) {
+    const digest = await digestProjectBackupRecord(record, hashText);
+    recordChainHash = await extendProjectBackupRecordChain(recordChainHash, digest, hashText);
+    if (record.type !== 'threadpack_project') incrementBackupRecordCount(recordCounts, record.type as string);
+  }
+  Object.assign(manifest, { recordCount: dataRecords.length, recordChainHash, recordCounts });
+  return `${records.map(record => JSON.stringify(record)).join('\n')}\n`;
 }
 
 async function readProjectTrustStates(page: Page) {
@@ -522,6 +638,140 @@ test('version-one project backups restore after the IndexedDB schema migration',
   await expect(page.locator('.message-content')).toContainText('Legacy project evidence.');
 });
 
+test('project backup versions one through eight migrate with a deterministic untrusted history record', async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  const dialog = await openProjectMemory(page);
+  const migrationIds = new Map<number, string>();
+
+  for (let version = 1; version <= 8; version++) {
+    await restoreBackup(page, dialog, `legacy-v${version}.jsonl`, legacyBackup(version));
+    const importedProject = dialog.locator('.project-list-item').filter({ hasText: `Legacy v${version}` }).first();
+    await expect(importedProject).toBeVisible();
+    const projectId = await importedProject.getAttribute('data-project-id');
+    expect(projectId).toBeTruthy();
+    const state = await readProjectMigrationState(page, projectId!);
+    expect(state.project?.name).toBe(`Legacy v${version}`);
+    expect(state.migrations).toHaveLength(1);
+    const migration = state.migrations[0]!;
+    expect(migration).toMatchObject({
+      sourceFormatVersion: version,
+      targetFormatVersion: 9,
+      migrationVersion: 1,
+      sourceProjectId: `legacy-project-v${version}`,
+      sourceIntegrity: 'record-validated',
+      trustDisposition: 'untrusted-import',
+      recordCounts: { session: 1, revision: 1, memory: version >= 2 ? 1 : 0 },
+    });
+    expect(migration.id).toMatch(/^[a-f0-9]{64}$/);
+    migrationIds.set(version, migration.id as string);
+
+    if (version >= 2) {
+      expect(state.facts).toHaveLength(1);
+      expect(state.facts[0]).toMatchObject({
+        status: 'confirmed',
+        confirmationTrust: 'legacy-unverified',
+        statement: 'Keep the release process controlled.',
+      });
+    } else {
+      expect(state.facts).toHaveLength(0);
+    }
+  }
+
+  const v8Download = page.waitForEvent('download');
+  const v8Project = dialog.locator('.project-list-item').filter({ hasText: 'Legacy v8' }).first();
+  await v8Project.click();
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await v8Download).path();
+  const exported = (await readFile(backupPath!, 'utf8')).trim().split(/\r?\n/)
+    .map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown>; migrationCount?: number; version?: number });
+  expect(exported[0]).toMatchObject({ type: 'threadpack_project', version: 9, migrationCount: 1 });
+  expect(exported.filter(record => record.type === 'migration')).toHaveLength(1);
+  expect(exported.at(-1)).toMatchObject({ type: 'manifest', version: 1 });
+  expect(migrationIds.size).toBe(8);
+});
+
+test('v9 backup manifests reject corruption and rollback staging before a clean retry', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/');
+  await importConversation(page, 'backup-recovery.json', 'The runtime stays on local storage. The deprecated transport was HTTP.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  let form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Runtime storage');
+  await form.locator('textarea').nth(0).fill('The runtime stays on local storage.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The runtime stays on local storage.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('decision');
+  await form.locator('input').nth(0).fill('Deprecated transport');
+  await form.locator('textarea').nth(0).fill('The deprecated transport was HTTP.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The deprecated transport was HTTP.');
+  await form.getByRole('button', { name: 'Save for review', exact: true }).click();
+  const rejected = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'The deprecated transport was HTTP.' });
+  await rejected.getByRole('button', { name: 'Reject', exact: true }).click();
+
+  const originalProjectId = await dialog.locator('.project-list-item[aria-pressed="true"]').getAttribute('data-project-id');
+  expect(originalProjectId).toBeTruthy();
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  const validBackup = await readFile(backupPath!, 'utf8');
+  const beforeCounts = await readProjectRecordCounts(page, originalProjectId!);
+  const records = validBackup.trim().split(/\r?\n/).map(line => JSON.parse(line) as Record<string, unknown>);
+  const manifest = records.at(-1)!;
+  expect(manifest.type).toBe('manifest');
+  manifest.recordChainHash = `${String(manifest.recordChainHash).startsWith('a') ? 'b' : 'a'}${String(manifest.recordChainHash).slice(1)}`;
+  const damagedBackup = `${records.map(record => JSON.stringify(record)).join('\n')}\n`;
+
+  await restoreBackup(page, dialog, 'damaged-manifest.jsonl', damagedBackup);
+  await expect(dialog.getByRole('alert')).toContainText('manifest does not match');
+  await expect(dialog.locator('.project-list-item')).toHaveCount(1);
+  expect(await readProjectRecordCounts(page, originalProjectId!)).toEqual(beforeCounts);
+
+  await restoreBackup(page, dialog, 'recovery-retry.jsonl', validBackup);
+  await expect(dialog.locator('.project-list-item')).toHaveCount(2);
+  const restoredTrustState = (await readProjectTrustStates(page)).find(state => state.projectId !== originalProjectId);
+  expect(restoredTrustState).toMatchObject({ sourceProjectId: originalProjectId, trustStatus: 'untrusted-import' });
+  const restoredProjectId = restoredTrustState!.projectId;
+  const restored = await readProjectMigrationState(page, restoredProjectId);
+  expect(restored.migrations).toHaveLength(1);
+  expect(restored.migrations[0]).toMatchObject({
+    sourceFormatVersion: 9,
+    targetFormatVersion: 9,
+    sourceIntegrity: 'manifest-verified',
+    trustDisposition: 'untrusted-import',
+    recordCounts: { session: 1, revision: 1, memory: 2, trust_state: 1 },
+  });
+  expect(restored.facts.map(fact => fact.status).sort()).toEqual(['confirmed', 'rejected']);
+  expect(restored.facts.find(fact => fact.status === 'confirmed')?.confirmationTrust).toBe('legacy-unverified');
+  expect(restored.facts.find(fact => fact.status === 'rejected')?.lifecycleTrust).toBe('legacy-unverified');
+
+  await dialog.locator(`.project-list-item[data-project-id="${restoredProjectId}"]`).click();
+  const roundTripDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const roundTripPath = await (await roundTripDownload).path();
+  const roundTripRecords = (await readFile(roundTripPath!, 'utf8')).trim().split(/\r?\n/)
+    .map(line => JSON.parse(line) as Record<string, unknown>);
+  const migrationIndex = roundTripRecords.findIndex(record => record.type === 'migration');
+  expect(migrationIndex).toBeGreaterThanOrEqual(0);
+  const migrationRecord = roundTripRecords[migrationIndex]!;
+  roundTripRecords.splice(roundTripRecords.length - 1, 0, structuredClone(migrationRecord));
+  (roundTripRecords[0] as { migrationCount: number }).migrationCount++;
+  const duplicateMigrationBackup = await rechainBackupManifest(roundTripRecords);
+  await restoreBackup(page, dialog, 'duplicate-migration.jsonl', duplicateMigrationBackup);
+  await expect(dialog.getByRole('alert')).toContainText('duplicate migration records');
+  await expect(dialog.locator('.project-list-item')).toHaveCount(2);
+});
+
 test('indexed database version one projects survive the schema upgrade and accept memory facts', async ({ page }) => {
   const projectId = 'pre-upgrade-project';
   const sessionId = 'pre-upgrade-session';
@@ -616,7 +866,8 @@ test('local fact confirmations are signed, revocable, and retained as authentica
   const backup = await readFile(backupPath!, 'utf8');
   const records = backup.trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown>; fingerprint?: string });
   const header = records[0]!.data ?? records[0] as unknown as Record<string, unknown>;
-  expect(header).toMatchObject({ type: 'threadpack_project', version: 8, trustStateCount: 1, trustEventCount: 1 });
+  expect(header).toMatchObject({ type: 'threadpack_project', version: 9, trustStateCount: 1, trustEventCount: 1, migrationCount: 0 });
+  expect(records.at(-1)).toMatchObject({ type: 'manifest', version: 1, recordCount: records.length - 1 });
   expect(records.some(record => record.type === 'trust_state')).toBe(true);
   expect(records.filter(record => record.type === 'trust_event')).toHaveLength(1);
   const factRecord = records.find(record => record.type === 'memory')!.data as { confirmationEventId?: string; confirmationVersion?: number; confirmationTrust?: string };
@@ -872,7 +1123,8 @@ test('an isolated device re-trusts a v8 backup with its root-bound recovery kit'
   const backupPath = await (await downloadReady).path();
   const backup = await readFile(backupPath!, 'utf8');
   const backupRows = backup.trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
-  expect(backupRows[0]).toMatchObject({ type: 'threadpack_project', version: 8, trustStateCount: 1, trustEventCount: 1 });
+  expect(backupRows[0]).toMatchObject({ type: 'threadpack_project', version: 9, trustStateCount: 1, trustEventCount: 1, migrationCount: 0 });
+  expect(backupRows.at(-1)).toMatchObject({ type: 'manifest', version: 1, recordCount: backupRows.length - 1 });
   expect(backupRows.some(record => record.type === 'trust_state')).toBe(true);
 
   const devicePage = await page.context().browser()!.newPage();
@@ -1010,7 +1262,7 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
     delete legacyEvidence[key];
   }
   legacyMemory.fingerprint = createHash('sha256').update(JSON.stringify(legacyData), 'utf8').digest('hex');
-  const legacyBackup = legacyRecords.map(record => JSON.stringify(record)).join('\n') + '\n';
+  const legacyBackup = await rechainBackupManifest(legacyRecords as unknown as Record<string, unknown>[]);
   const legacyMcp = await readMcpContext(legacyBackup);
   expect(legacyMcp.result?.content?.[0]?.text).toContain('binding=source_matched; relation=unverified; relationBasis=none');
   await restoreBackup(page, dialog, 'legacy-source-matched.jsonl', legacyBackup);
@@ -1032,7 +1284,7 @@ test('legacy evidence binding is consistent across browser restore, Context Pack
   const data = memory.data as { evidence: { messageId: string }[] };
   data.evidence[0]!.messageId = 'wrong-message-id';
   memory.fingerprint = createHash('sha256').update(JSON.stringify(data), 'utf8').digest('hex');
-  const tamperedReferenceBackup = records.map(record => JSON.stringify(record)).join('\n') + '\n';
+  const tamperedReferenceBackup = await rechainBackupManifest(records as unknown as Record<string, unknown>[]);
   const mcpTampered = await readMcpContext(tamperedReferenceBackup);
   expect(mcpTampered.result?.content?.[0]?.text).toContain('binding=invalid');
   expect(mcpTampered.result?.content?.[0]?.text).toContain('relation=unverified');
@@ -1128,7 +1380,7 @@ test('a user-attested evidence relation stays distinct from fact confirmation an
     relation: 'supports', relationBasis: 'user_attestation', changedAt: 2,
     claimFingerprint: 'a'.repeat(64), evidenceFingerprint: 'b'.repeat(64) }];
   forgedMemory.fingerprint = createHash('sha256').update(JSON.stringify(forgedData), 'utf8').digest('hex');
-  const forgedBackup = forgedRecords.map(record => JSON.stringify(record)).join('\n') + '\n';
+  const forgedBackup = await rechainBackupManifest(forgedRecords as unknown as Record<string, unknown>[]);
 
   await restoreBackup(page, dialog, 'forged-relation-backup.jsonl', forgedBackup);
   await expect(dialog.locator('.project-list-item')).toHaveCount(3);

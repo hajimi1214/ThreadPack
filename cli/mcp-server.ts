@@ -12,6 +12,11 @@ import { MAX_SHARED_PROJECT_BACKUP_BYTES } from '../src/projects/limits';
 import { effectiveMemoryStatus, isTerminalMemoryStatus } from '../src/projects/memory-lifecycle';
 import { isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, verifyTrustEventChain } from '../src/projects/trust-crypto';
 import type { SignedTrustEvent } from '../src/projects/trust-crypto';
+import {
+  backupRecordCountsMatch, digestProjectBackupRecord, emptyBackupRecordCounts, extendProjectBackupRecordChain,
+  incrementBackupRecordCount, PROJECT_BACKUP_CHAIN_SEED, PROJECT_BACKUP_VERSION,
+  validateProjectBackupManifest, validateProjectBackupMigration,
+} from '../src/projects/backup-format';
 
 const MAX_BACKUP_BYTES = MAX_SHARED_PROJECT_BACKUP_BYTES;
 const MEMORY_STATUSES = new Set(['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded', 'expired', 'revoked']);
@@ -327,9 +332,18 @@ async function loadBackup(path: string): Promise<BackupContext> {
   let expectedClaims = 0;
   let expectedTrustStates = 0;
   let expectedTrustEvents = 0;
+  let expectedMigrations = 0;
   let trustStates = 0;
   let trustEvents = 0;
+  let migrations = 0;
   let sawTrustState = false;
+  let sawManifest = false;
+  let sawMigration = false;
+  let recordChain = PROJECT_BACKUP_CHAIN_SEED;
+  let recordCount = 0;
+  const recordCounts = emptyBackupRecordCounts();
+  const migrationIds = new Set<string>();
+  const hashText = async (value: string) => contentFingerprint(value);
   let trustState: ProjectTrustState | undefined;
   const trustEventsForVerification: SignedTrustEvent[] = [];
   let projectVersion = 0;
@@ -350,8 +364,12 @@ async function loadBackup(path: string): Promise<BackupContext> {
     let parsed: unknown;
     try { parsed = JSON.parse(line); } catch { throw error('The MCP backup contains invalid JSON.'); }
     if (!isRecord(parsed) || typeof parsed.type !== 'string') throw error('The MCP backup contains an invalid record.');
+    if (sawManifest) throw error('The MCP backup contains records after its manifest.');
+    if (sawMigration && parsed.type !== 'migration' && parsed.type !== 'manifest') {
+      throw error('The MCP backup contains data records after its migration history.');
+    }
     if (parsed.type === 'threadpack_project') {
-      if (project || parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4 && parsed.version !== 5 && parsed.version !== 6 && parsed.version !== 7 && parsed.version !== 8 || !isRecord(parsed.project) || typeof parsed.project.name !== 'string'
+      if (project || parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4 && parsed.version !== 5 && parsed.version !== 6 && parsed.version !== 7 && parsed.version !== 8 && parsed.version !== PROJECT_BACKUP_VERSION || !isRecord(parsed.project) || typeof parsed.project.name !== 'string'
         || typeof parsed.project.summary !== 'string' || typeof parsed.project.importantNotes !== 'string'
         || !Number.isSafeInteger(parsed.project.updatedAt) || !Number.isSafeInteger(parsed.createdAt)
         || (parsed.projectId !== undefined && (typeof parsed.projectId !== 'string' || !parsed.projectId))
@@ -359,9 +377,11 @@ async function loadBackup(path: string): Promise<BackupContext> {
         || parsed.version >= 2 && !Number.isSafeInteger(parsed.factCount)
         || parsed.version >= 6 && !Number.isSafeInteger(parsed.updateCount)
         || parsed.version >= 7 && !Number.isSafeInteger(parsed.claimCount)
-        || parsed.version === 8 && (!Number.isSafeInteger(parsed.trustStateCount) || (parsed.trustStateCount as number) < 0 || (parsed.trustStateCount as number) > 1
+        || parsed.version >= 8 && (!Number.isSafeInteger(parsed.trustStateCount) || (parsed.trustStateCount as number) < 0 || (parsed.trustStateCount as number) > 1
           || !Number.isSafeInteger(parsed.trustEventCount) || (parsed.trustEventCount as number) < 0)
         || parsed.version < 8 && (parsed.trustStateCount !== undefined && parsed.trustStateCount !== 0 || parsed.trustEventCount !== undefined && parsed.trustEventCount !== 0)
+        || parsed.version === PROJECT_BACKUP_VERSION && (!Number.isSafeInteger(parsed.migrationCount) || (parsed.migrationCount as number) < 0 || typeof parsed.projectId !== 'string')
+        || parsed.version < PROJECT_BACKUP_VERSION && parsed.migrationCount !== undefined && parsed.migrationCount !== 0
         || parsed.version < 6 && parsed.updateCount !== undefined && parsed.updateCount !== 0) throw error('The MCP backup header is invalid.');
       projectVersion = parsed.version as number;
       project = { name: parsed.project.name, summary: parsed.project.summary, importantNotes: parsed.project.importantNotes, updatedAt: parsed.project.updatedAt as number };
@@ -374,8 +394,9 @@ async function loadBackup(path: string): Promise<BackupContext> {
       expectedFacts = parsed.version >= 2 ? parsed.factCount as number : 0;
       expectedUpdates = parsed.version >= 6 ? parsed.updateCount as number : 0;
       expectedClaims = parsed.version >= 7 ? parsed.claimCount as number : 0;
-      expectedTrustStates = parsed.version === 8 ? parsed.trustStateCount as number : 0;
-      expectedTrustEvents = parsed.version === 8 ? parsed.trustEventCount as number : 0;
+      expectedTrustStates = parsed.version >= 8 ? parsed.trustStateCount as number : 0;
+      expectedTrustEvents = parsed.version >= 8 ? parsed.trustEventCount as number : 0;
+      expectedMigrations = parsed.version === PROJECT_BACKUP_VERSION ? parsed.migrationCount as number : 0;
     } else if (parsed.type === 'session') {
       if (!isRecord(parsed.data) || typeof parsed.data.id !== 'string' || typeof parsed.data.title !== 'string'
         || !Number.isSafeInteger(parsed.data.currentVersion) || (parsed.data.currentVersion as number) < 1
@@ -455,7 +476,7 @@ async function loadBackup(path: string): Promise<BackupContext> {
       claims.push(claim);
       expectedClaims--;
     } else if (parsed.type === 'trust_state') {
-      if (projectVersion !== 8 || sawTrustState || trustEvents > 0 || expectedTrustStates !== 1
+      if (projectVersion < 8 || sawTrustState || trustEvents > 0 || expectedTrustStates !== 1
         || typeof parsed.fingerprint !== 'string' || fingerprint(parsed.data) !== parsed.fingerprint
         || !isRecord(parsed.data) || parsed.data.projectId !== projectId || !isRecord(parsed.data.rootPublicKeyJwk)
         || !isRecord(parsed.data.recoveryPublicKeyJwk) || !isRecord(parsed.data.recoveryBundle)) {
@@ -473,7 +494,7 @@ async function loadBackup(path: string): Promise<BackupContext> {
       sawTrustState = true;
       trustStates++;
     } else if (parsed.type === 'trust_event') {
-      if (projectVersion !== 8 || !sawTrustState || !trustState || trustEvents >= expectedTrustEvents
+      if (projectVersion < 8 || !sawTrustState || !trustState || trustEvents >= expectedTrustEvents
         || typeof parsed.fingerprint !== 'string' || fingerprint(parsed.data) !== parsed.fingerprint
         || !isRecord(parsed.data) || parsed.data.projectId !== projectId || !Number.isSafeInteger(parsed.data.sequence)
         || !isRecord(parsed.data.event) || parsed.data.event.projectId !== trustSourceProjectId
@@ -482,10 +503,37 @@ async function loadBackup(path: string): Promise<BackupContext> {
       }
       trustEventsForVerification.push(parsed.data.event as unknown as SignedTrustEvent);
       trustEvents++;
+    } else if (parsed.type === 'migration') {
+      if (projectVersion !== PROJECT_BACKUP_VERSION || expectedMigrations === 0
+        || typeof parsed.fingerprint !== 'string' || fingerprint(parsed.data) !== parsed.fingerprint) {
+        throw error('The MCP backup migration record is invalid.');
+      }
+      const migration = await validateProjectBackupMigration(parsed.data, projectId, hashText);
+      if (migrationIds.has(migration.id)) throw error('The MCP backup contains duplicate migration records.');
+      migrationIds.add(migration.id);
+      migrations++;
+      expectedMigrations--;
+      sawMigration = true;
+    } else if (parsed.type === 'manifest') {
+      if (projectVersion !== PROJECT_BACKUP_VERSION) throw error('A legacy MCP backup cannot contain a v9 manifest.');
+      const manifest = validateProjectBackupManifest(parsed);
+      if (manifest.recordCount !== recordCount || manifest.recordChainHash !== recordChain
+        || !backupRecordCountsMatch(manifest.recordCounts, recordCounts)) {
+        throw error('The MCP backup manifest does not match its validated records.');
+      }
+      sawManifest = true;
     } else throw error('The MCP backup contains an unsupported record type.');
+    if (parsed.type !== 'manifest') {
+      const digest = await digestProjectBackupRecord(parsed, hashText);
+      recordChain = await extendProjectBackupRecordChain(recordChain, digest, hashText);
+      recordCount++;
+      if (parsed.type !== 'threadpack_project') incrementBackupRecordCount(recordCounts, parsed.type);
+    }
   }
   if (!project || expectedSessions !== sessions.length || expectedRevisions !== revisions || expectedFacts !== facts.length
-    || expectedUpdates !== 0 || expectedClaims !== 0 || trustStates !== expectedTrustStates || trustEvents !== expectedTrustEvents) {
+    || expectedUpdates !== 0 || expectedClaims !== 0 || trustStates !== expectedTrustStates || trustEvents !== expectedTrustEvents
+    || migrations !== (projectVersion === PROJECT_BACKUP_VERSION ? Number((JSON.parse(lines[0]!) as Record<string, unknown>).migrationCount) : 0)
+    || projectVersion === PROJECT_BACKUP_VERSION && !sawManifest) {
     throw error('The MCP backup is incomplete.');
   }
   if (expectedTrustStates === 1) {
