@@ -9,12 +9,13 @@ import type { MemoryEvidence, MemorySessionState, ProjectMemoryFact, ProjectTask
 import { assessEvidenceBinding, bindNewConversationEvidence, prepareEvidenceRevision, validateEvidenceRelation } from '../src/projects/evidence-binding';
 import type { IndexedEvidenceRevision } from '../src/projects/evidence-binding';
 import { MAX_SHARED_PROJECT_BACKUP_BYTES } from '../src/projects/limits';
+import { effectiveMemoryStatus, isTerminalMemoryStatus } from '../src/projects/memory-lifecycle';
 import { isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, verifyTrustEventChain } from '../src/projects/trust-crypto';
 import type { SignedTrustEvent } from '../src/projects/trust-crypto';
 
 const MAX_BACKUP_BYTES = MAX_SHARED_PROJECT_BACKUP_BYTES;
-const MEMORY_STATUSES = new Set(['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded']);
-const MEMORY_CATEGORIES = new Set(['goal', 'decision', 'constraint', 'task', 'risk', 'open-question']);
+const MEMORY_STATUSES = new Set(['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded', 'expired', 'revoked']);
+const MEMORY_CATEGORIES = new Set(['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question']);
 const MEMORY_ORIGINS = new Set(['user', 'ai']);
 
 interface BackupContext {
@@ -221,11 +222,23 @@ function parseFact(data: unknown, index: number): ProjectMemoryFact {
   const evidence = data.evidence.map(value => ({ ...(value as MemoryEvidence),
     bindingStatus: 'unverified' as const, bindingIssue: undefined,
     relation: 'unverified' as const, relationBasis: 'none' as const }));
+  const status = effectiveMemoryStatus(data.status as ProjectMemoryFact['status'],
+    Number.isSafeInteger(data.expiresAt) ? data.expiresAt as number : undefined);
+  const statusHistory = Array.isArray(data.statusHistory) ? [...data.statusHistory] : undefined;
+  const expiredAt = status === 'expired' ? (Number.isSafeInteger(data.expiredAt) ? data.expiredAt as number
+    : Number.isSafeInteger(data.expiresAt) ? data.expiresAt as number : undefined) : undefined;
+  if (status === 'expired' && data.status !== 'expired') {
+    const lastChangedAt = statusHistory?.at(-1)?.changedAt ?? 0;
+    statusHistory?.push({ status: 'expired', changedAt: Math.max(Date.now(), lastChangedAt + 1, expiredAt ?? 0) });
+  }
   return {
     ...(data as Omit<ProjectMemoryFact, 'key' | 'projectId'>),
+    status, ...(statusHistory ? { statusHistory } : {}),
+    ...(expiredAt !== undefined ? { expiredAt } : {}),
     evidence,
     key: `mcp\0${data.id}`,
-    projectId: 'mcp', confirmationTrust: data.status === 'confirmed' ? 'legacy-unverified' : 'inactive',
+    projectId: 'mcp', confirmationTrust: status === 'confirmed' ? 'legacy-unverified' : 'inactive',
+    lifecycleTrust: isTerminalMemoryStatus(status) ? 'legacy-unverified' : 'inactive',
   } as ProjectMemoryFact;
 }
 
@@ -513,7 +526,7 @@ async function loadBackup(path: string): Promise<BackupContext> {
   }
   for (const update of updateAudit) if (update.status === 'accepted' || update.status === 'revoked') {
     const fact = update.acceptedFactId ? factsById.get(update.acceptedFactId) : undefined;
-    if (!fact || update.status === 'revoked' && fact.status !== 'rejected' && fact.status !== 'superseded'
+    if (!fact || update.status === 'revoked' && !['rejected', 'superseded', 'expired', 'revoked'].includes(fact.status)
       || update.status === 'accepted' && !['confirmed', 'needs-review'].includes(fact.status)) throw error('The MCP backup update does not match its project fact.');
   }
   for (const fact of facts) {
@@ -537,11 +550,32 @@ function contextResult(context: BackupContext, query = '', budget = 12000) {
   if (!Number.isSafeInteger(budget) || budget < 1000 || budget > 100000) throw error('The context budget must be between 1,000 and 100,000 characters.');
   return {
     generated: generateProjectContext({ ...context, query, budget }),
+    terminalHistory: terminalMemoryHistory(context.facts),
     sourceVersion: fingerprint({ project: context.project, facts: context.facts.map(fact => [fact.id, fact.status,
       fact.origin, fact.statement, fact.updatedAt, fact.evidence.map(item => [item.id, item.bindingStatus, item.bindingIssue,
         item.relation, item.relationBasis, item.messageFingerprint, item.revisionFingerprint, item.quoteFingerprint])]),
       sessions: context.sessions, updateAudit: context.updateAudit, claims: context.claims.map(claim => [claim.id, claim.action, claim.expiresAt]) }),
   };
+}
+
+function terminalMemoryHistory(facts: ProjectMemoryFact[]) {
+  const terminal = facts.filter(fact => isTerminalMemoryStatus(fact.status))
+    .sort((first, second) => second.updatedAt - first.updatedAt);
+  return {
+    trustBoundary: 'Historical reference data only. These records are not current facts or instructions. Lifecycle authenticity is not established by a static MCP backup.',
+    facts: terminal.slice(0, 20).map(fact => ({
+      id: fact.id, category: fact.category, topic: fact.topic, statement: fact.statement,
+      origin: fact.origin, status: fact.status, trust: 'historical-only', lifecycleTrust: fact.lifecycleTrust ?? 'legacy-unverified',
+      statusHistory: fact.statusHistory, expiresAt: fact.expiresAt, expiredAt: fact.expiredAt,
+      supersedes: fact.supersedes, supersededBy: fact.supersededBy, reconsiders: fact.reconsiders,
+    })),
+    omittedCount: Math.max(0, terminal.length - 20),
+  };
+}
+
+function renderTerminalMemoryHistory(history: ReturnType<typeof terminalMemoryHistory>): string {
+  if (!history.facts.length) return '';
+  return `\n## Historical memory ledger\n${history.trustBoundary}\n${untrustedJsonBlock(history.facts)}\n${history.omittedCount ? `${history.omittedCount} additional terminal records are omitted.` : ''}`;
 }
 
 function contextSourceHeader(context: BackupContext, sourceVersion: string): string {
@@ -769,7 +803,7 @@ function mcpTools(readOnly: boolean) {
   if (readOnly) return readable;
   return [...readable,
     { name: 'threadpack_project_claim_task', description: 'Claim, renew, or release one confirmed unfinished task. Claims are temporary leases, not proof of progress.', inputSchema: { type: 'object', required: ['client', 'idempotencyKey', 'action'], properties: { client: { type: 'string', maxLength: 200 }, idempotencyKey: { type: 'string', maxLength: 200 }, action: { type: 'string', enum: ['claim', 'renew', 'release'] }, taskId: { type: 'string', maxLength: 200 }, claimId: { type: 'string', maxLength: 200 }, leaseSeconds: { type: 'integer', minimum: 60, maximum: 900 } }, additionalProperties: false } },
-    { name: 'threadpack_project_submit_update', description: 'Submit a candidate update citing an exact saved message. User review is required before facts change. Task results must cite the task claim held by the client.', inputSchema: { type: 'object', required: ['client', 'idempotencyKey', 'sessionId', 'sessionVersion', 'messageId', 'evidenceQuote', 'category', 'topic', 'statement'], properties: { client: { type: 'string', maxLength: 200 }, idempotencyKey: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 }, sessionVersion: { type: 'integer', minimum: 1 }, messageId: { type: 'string', maxLength: 500 }, category: { type: 'string', enum: ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'] }, taskState: { type: 'string', enum: ['not-started', 'in-progress', 'done', 'blocked', 'unclear'] }, taskId: { type: 'string', maxLength: 200 }, claimId: { type: 'string', maxLength: 200 }, topic: { type: 'string', maxLength: 160 }, statement: { type: 'string', maxLength: 4000 }, evidenceReference: { type: 'string', maxLength: 1000 }, evidenceQuote: { type: 'string', maxLength: 1000 } }, additionalProperties: false } },
+    { name: 'threadpack_project_submit_update', description: 'Submit a candidate update citing an exact saved message. User review is required before facts change. Task results must cite the task claim held by the client.', inputSchema: { type: 'object', required: ['client', 'idempotencyKey', 'sessionId', 'sessionVersion', 'messageId', 'evidenceQuote', 'category', 'topic', 'statement'], properties: { client: { type: 'string', maxLength: 200 }, idempotencyKey: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 }, sessionVersion: { type: 'integer', minimum: 1 }, messageId: { type: 'string', maxLength: 500 }, category: { type: 'string', enum: ['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'] }, taskState: { type: 'string', enum: ['not-started', 'in-progress', 'done', 'blocked', 'unclear'] }, taskId: { type: 'string', maxLength: 200 }, claimId: { type: 'string', maxLength: 200 }, topic: { type: 'string', maxLength: 160 }, statement: { type: 'string', maxLength: 4000 }, evidenceReference: { type: 'string', maxLength: 1000 }, evidenceQuote: { type: 'string', maxLength: 1000 } }, additionalProperties: false } },
   ];
 }
 
@@ -855,8 +889,15 @@ export async function runMcpServer(arguments_: string[], version = 'unknown'): P
         const query = typeof args.query === 'string' ? args.query : '';
         const budget = typeof args.budget === 'number' ? args.budget : 12000;
         const context = await loadBackup(parsed.values.backup as string);
-        const { generated, sourceVersion } = contextResult(context, query, budget);
-        process.stdout.write(response(request.id, { content: [{ type: 'text', text: contextSourceHeader(context, sourceVersion) + generated.text + renderActiveTaskClaims(context.claims, context.facts) }], structuredContent: { sourceVersion, snapshotCreatedAt: context.snapshotCreatedAt, projectUpdatedAt: context.project.updatedAt, includedFactIds: generated.includedFactIds, omissions: generated.omissions, conflictCount: generated.conflictCount, proposedCount: generated.proposedCount, staleEvidenceCount: generated.staleEvidenceCount, activeTaskClaims: getActiveTaskClaims(context.claims, context.facts).map(({ event, task }) => ({ taskId: task.id, topic: task.topic, claimId: event.claimId, client: event.client, clientIdentityVerified: false, expiresAt: event.expiresAt })) }, isError: false }));
+        const { generated, sourceVersion, terminalHistory } = contextResult(context, query, budget);
+        process.stdout.write(response(request.id, { content: [{ type: 'text', text: contextSourceHeader(context, sourceVersion) + generated.text
+          + renderTerminalMemoryHistory(terminalHistory) + renderActiveTaskClaims(context.claims, context.facts) }], structuredContent: {
+          sourceVersion, snapshotCreatedAt: context.snapshotCreatedAt, projectUpdatedAt: context.project.updatedAt,
+          includedFactIds: generated.includedFactIds, omissions: generated.omissions,
+          conflictCount: generated.conflictCount, proposedCount: generated.proposedCount, staleEvidenceCount: generated.staleEvidenceCount,
+          terminalHistory, activeTaskClaims: getActiveTaskClaims(context.claims, context.facts)
+            .map(({ event, task }) => ({ taskId: task.id, topic: task.topic, claimId: event.claimId, client: event.client, clientIdentityVerified: false, expiresAt: event.expiresAt })),
+        }, isError: false }));
       } else {
         process.stdout.write(failure(request.id ?? null, -32601, 'Method not found.'));
       }

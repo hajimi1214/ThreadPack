@@ -14,7 +14,9 @@ async function importConversation(page: Page, name: string, content: string) {
 
 async function openProjects(page: Page) {
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
-  return page.getByRole('dialog', { name: 'Local project library', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Local project library', exact: true });
+  await expect(dialog.locator('.project-list')).toHaveAttribute('aria-busy', 'false');
+  return dialog;
 }
 
 async function importBackup(page: Page, dialog: Locator, name: string, contents: Buffer) {

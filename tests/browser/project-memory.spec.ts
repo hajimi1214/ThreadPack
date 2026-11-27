@@ -22,6 +22,7 @@ async function importConversation(page: Page, name: string, content: string) {
 async function openProjectMemory(page: Page) {
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Local project library', exact: true });
+  await expect(dialog.locator('.project-list')).toHaveAttribute('aria-busy', 'false');
   if (!await dialog.locator('.project-list-item').count()) {
     await dialog.getByLabel('Project name', { exact: true }).first().fill('Memory project');
     await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
@@ -107,7 +108,7 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   await expect(context).toHaveValue(/The runtime must stay offline\./);
   await expect(context).toHaveValue(/Runtime decisions v1/);
   await expect(context).not.toHaveValue(/cloud connection/);
-  await expect(dialog.locator('.memory-context-summary')).toContainText('Omitted items · 0');
+  await expect(dialog.locator('.memory-context-summary')).toContainText('Omitted items · 1');
   const packageDownload = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
   const packagePath = await (await packageDownload).path();
@@ -157,6 +158,61 @@ test('rejecting a fact invalidates generated Markdown and JSON context together'
   const files = unzipSync(await readFile(packagePath!));
   expect(strFromU8(files['PROJECT_CONTEXT.md']!)).not.toContain('The runtime must remain offline.');
   expect(JSON.parse(strFromU8(files['threadpack-memory.json']!)).facts).toHaveLength(0);
+});
+
+test('memory can be rejected after local signing-key loss without claiming the rejection was signed', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'memory-key-loss-reject.json', 'The cache must remain local.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Storage');
+  await form.locator('textarea').nth(0).fill('The cache must remain local.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const confirmed = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'The cache must remain local.' });
+  await expect(confirmed).toContainText('Signed by this project’s local trusted key');
+  const activeProjectId = await dialog.locator('.project-list-item[aria-pressed="true"]').getAttribute('data-project-id');
+  expect(activeProjectId).toBeTruthy();
+
+  await page.evaluate(async projectId => {
+    if (!projectId) throw new Error('The test project identifier is unavailable.');
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const trust = await new Promise<{ activeKeyId: string }>((resolve, reject) => {
+      const read = db.transaction(['projectTrust'], 'readonly').objectStore('projectTrust').get(projectId);
+      read.onsuccess = () => resolve(read.result);
+      read.onerror = () => reject(read.error);
+    });
+    const transaction = db.transaction(['deviceKeys'], 'readwrite');
+    transaction.objectStore('deviceKeys').delete([projectId, trust.activeKeyId]);
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+  }, activeProjectId);
+  await page.reload();
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  const restoredDialog = page.getByRole('dialog', { name: 'Local project library', exact: true });
+  await expect(restoredDialog.locator('.project-list')).toHaveAttribute('aria-busy', 'false');
+  await restoredDialog.locator('.project-list-item[data-project-id="' + activeProjectId + '"]').click();
+  await expect(restoredDialog.getByLabel('Verifiable project confirmations')).toContainText('The active signing key is missing');
+  const missingKeyFact = restoredDialog.locator('.memory-fact.confirmed').filter({ hasText: 'The cache must remain local.' });
+  await missingKeyFact.getByRole('button', { name: 'Reject', exact: true }).click();
+  const rejected = restoredDialog.locator('.memory-fact.rejected').filter({ hasText: 'The cache must remain local.' });
+  await expect(rejected).toContainText('Rejected');
+  await expect(rejected).toContainText('Lifecycle status not authenticated');
+  await expect(rejected).not.toContainText('Lifecycle event signed by this project’s local trusted key');
+  await expect(rejected.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+  await expect(restoredDialog.getByLabel('Verifiable project confirmations')).toContainText('The active signing key is missing');
 });
 
 test('AI proposals are source-checked, stay pending review, and leave no stored API key', async ({ page }) => {
@@ -223,6 +279,227 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
   await expect(dialog.locator('.project-list-item')).toHaveCount(2);
   await expect(dialog.locator('.memory-fact')).toContainText('Conversation text must stay offline.');
   await expect(dialog.locator('.memory-fact')).toContainText('Excerpt matched to the saved message');
+});
+
+test('user preferences are categorized, reviewed, and included with their lifecycle status', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await importConversation(page, 'user-preference.json', 'Please keep future responses concise.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('preference');
+  await form.locator('input').nth(0).fill('Response style');
+  await form.locator('textarea').nth(0).fill('Keep responses concise.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.getByRole('button', { name: 'Save for review', exact: true }).click();
+
+  const preference = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'Keep responses concise.' });
+  await expect(preference).toContainText('User preference');
+  await expect(preference).toContainText('Needs review');
+  await dialog.locator('.memory-context-controls input').fill('response style');
+  await dialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  const context = await dialog.getByRole('textbox', { name: 'Generate project context', exact: true }).inputValue();
+  expect(context).toContain('PREFERENCE');
+  expect(context).toContain('NEEDS REVIEW');
+
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  const records = (await readFile(backupPath!, 'utf8')).trim().split(/\r?\n/)
+    .map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+  const fact = records.find(record => record.type === 'memory')?.data;
+  expect(fact).toMatchObject({ category: 'preference', origin: 'user', status: 'needs-review' });
+});
+
+test('rejected claims stay terminal until the user creates a linked review candidate', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await importConversation(page, 'memory-lifecycle-rejection.json', 'The release transport must use HTTPS only.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  const recoveryBundle = await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Release transport');
+  await form.locator('textarea').nth(0).fill('The release transport must use HTTPS only.');
+  await form.getByRole('button', { name: 'Save for review', exact: true }).click();
+  const original = dialog.locator('.memory-fact').filter({ hasText: 'The release transport must use HTTPS only.' });
+  await expect(original).toContainText('Needs review');
+  await original.getByRole('button', { name: 'Reject', exact: true }).click();
+  await expect(original).toContainText('Rejected');
+  await expect(original).toContainText('Lifecycle event signed by this project’s local trusted key');
+  await expect(original.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const duplicateForm = dialog.locator('.memory-form');
+  await duplicateForm.locator('select').nth(0).selectOption('constraint');
+  await duplicateForm.locator('input').nth(0).fill('Release transport');
+  await duplicateForm.locator('textarea').nth(0).fill('The release transport must use HTTPS only.');
+  await duplicateForm.getByRole('button', { name: 'Save for review', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('rejected or inactive terminal record');
+  await expect(dialog.locator('.memory-fact')).toHaveCount(1);
+
+  await original.getByRole('button', { name: 'Reconsider as a new review item', exact: true }).click();
+  const reconsiderForm = dialog.locator('.memory-form');
+  await expect(reconsiderForm).toContainText('Reconsiders a terminal historical record');
+  await reconsiderForm.getByRole('button', { name: 'Save for review', exact: true }).click();
+  await expect(dialog.locator('.memory-fact')).toHaveCount(2);
+  const reconsidered = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'The release transport must use HTTPS only.' });
+  await expect(reconsidered).toContainText('Needs review');
+  await expect(reconsidered).not.toContainText('Signed by this project’s local trusted key');
+
+  const downloadReady = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await downloadReady).path();
+  const backup = (await readFile(backupPath!, 'utf8')).trim().split(/\r?\n/)
+    .map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+  const memory = backup.filter(record => record.type === 'memory').map(record => record.data!);
+  const rejected = memory.find(record => record.status === 'rejected');
+  const candidate = memory.find(record => record.reconsiders === rejected?.id);
+  expect('lifecycleTrust' in rejected!).toBe(false);
+  expect(rejected?.statusHistory).toMatchObject([{ status: 'needs-review' }, { status: 'rejected' }]);
+  expect((rejected?.statusHistory as { trustEventId?: string }[]).at(-1)?.trustEventId).toBeTruthy();
+  expect(candidate?.status).toBe('needs-review');
+  expect(candidate?.origin).toBe('user');
+
+  const restoredPage = await page.context().browser()!.newPage();
+  try {
+    await restoredPage.goto(new URL(page.url()).origin);
+    const restoredDialog = await openProjectMemory(restoredPage);
+    await restoreBackup(restoredPage, restoredDialog, 'rejected-lifecycle-backup.jsonl', await readFile(backupPath!, 'utf8'));
+    await expect(restoredDialog.locator('.project-list-item')).toHaveCount(2);
+    const importedProjectId = (await readProjectTrustStates(restoredPage))
+      .find(state => state.trustStatus === 'untrusted-import')?.projectId;
+    expect(importedProjectId).toBeTruthy();
+    await restoredDialog.locator('.project-list-item[data-project-id="' + importedProjectId + '"]').click();
+    const importedRejected = restoredDialog.locator('.memory-fact.rejected').filter({ hasText: 'The release transport must use HTTPS only.' });
+    await expect(importedRejected).toContainText('Rejected');
+    await expect(importedRejected).toContainText('Lifecycle status not authenticated');
+    await expect(importedRejected.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+    const trustPanel = restoredDialog.getByLabel('Verifiable project confirmations');
+    await trustPanel.locator('input[type="file"]').setInputFiles({
+      name: 'recovery-kit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(recoveryBundle)),
+    });
+    await trustPanel.locator('input[type="password"]').fill('synthetic-stage-one-recovery-passphrase');
+    await trustPanel.locator('input:not([type])').fill(recoveryBundle.publicKeyFingerprint);
+    await trustPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+    await expect(trustPanel).toContainText('Signed confirmations are enabled on this device.');
+    await expect(importedRejected).toContainText('Lifecycle event signed by this project’s local trusted key');
+    await expect(importedRejected.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+    await expect(restoredDialog.locator('.memory-fact.needs-review')
+      .filter({ hasText: 'Reconsiders a terminal historical record' })).toContainText('Needs review');
+  } finally {
+    await restoredPage.context().close();
+  }
+});
+
+test('expired facts leave current context while preserving signed history after reload', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-27T12:00:00.000Z') });
+  await page.goto('/');
+  await importConversation(page, 'memory-lifecycle-expiration.json', 'This rollout approval expires tomorrow.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('decision');
+  await form.locator('input').nth(0).fill('Temporary rollout approval');
+  await form.locator('textarea').nth(0).fill('This rollout approval expires tomorrow.');
+  await form.locator('input[type="date"]').fill('2026-11-28');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const currentFact = dialog.locator('.memory-fact').filter({ hasText: 'This rollout approval expires tomorrow.' });
+  await expect(currentFact).toContainText('Signed by this project’s local trusted key');
+  const projectId = await dialog.locator('.project-list-item[aria-pressed="true"]').getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+
+  await page.clock.setFixedTime(new Date('2026-12-03T00:00:00.000Z'));
+  await page.reload();
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  const restoredDialog = page.getByRole('dialog', { name: 'Local project library', exact: true });
+  const restoredProject = restoredDialog.locator(`.project-list-item[data-project-id="${projectId}"]`);
+  await expect(restoredProject).toHaveCount(1);
+  await restoredProject.click();
+  const expired = restoredDialog.locator('.memory-fact').filter({ hasText: 'This rollout approval expires tomorrow.' });
+  await expect(expired).toContainText('Expired');
+  await expect(expired).toContainText('Confirmation was revoked');
+  await expect(expired).toContainText('Lifecycle event signed by this project’s local trusted key');
+  await expect(expired.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+
+  await restoredDialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  const context = await restoredDialog.getByRole('textbox', { name: 'Generate project context', exact: true }).inputValue();
+  expect(context).not.toContain('This rollout approval expires tomorrow.');
+
+  const downloadReady = page.waitForEvent('download');
+  await restoredDialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
+  const packPath = await (await downloadReady).path();
+  const pack = unzipSync(await readFile(packPath!));
+  const memoryPack = JSON.parse(strFromU8(pack['threadpack-memory.json']!)) as {
+    facts: { status: string; trust: string; expiresAt?: number }[];
+    terminalHistory: { status: string; trust: string; lifecycleTrust?: string; expiresAt?: number }[];
+    budget: { omittedFacts: { reason: string }[] };
+  };
+  expect(memoryPack.facts).toHaveLength(0);
+  expect(memoryPack.terminalHistory).toContainEqual(expect.objectContaining({
+    status: 'expired', trust: 'historical-only', lifecycleTrust: 'authenticated',
+    expiresAt: new Date('2026-11-28T23:59:59').getTime(),
+  }));
+  expect(memoryPack.budget.omittedFacts).toContainEqual(expect.objectContaining({ reason: 'terminal-status' }));
+});
+
+test('superseded facts retain signed history and can only return through an explicit reconsideration link', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'memory-lifecycle-supersede.json', 'The deployment stays on the internal network.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  let form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Deployment boundary');
+  await form.locator('textarea').nth(0).fill('The deployment stays on the internal network.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const original = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'The deployment stays on the internal network.' });
+  await expect(original).toContainText('Signed by this project’s local trusted key');
+
+  await original.getByRole('button', { name: 'Correct or replace', exact: true }).click();
+  form = dialog.locator('.memory-form');
+  await expect(form.locator('select').last()).not.toHaveValue('');
+  await form.locator('textarea').nth(0).fill('The deployment stays on the isolated internal network.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const superseded = dialog.locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' });
+  await expect(superseded).toContainText('Superseded');
+  await expect(superseded).toContainText('Confirmation was revoked');
+
+  await superseded.getByRole('button', { name: 'Reconsider as a new review item', exact: true }).click();
+  const reconsiderForm = dialog.locator('.memory-form');
+  await expect(reconsiderForm).toContainText('Reconsiders a terminal historical record');
+  await reconsiderForm.getByRole('button', { name: 'Save for review', exact: true }).click();
+  const reconsidered = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'Reconsiders a terminal historical record' });
+  await expect(reconsidered).toContainText('Needs review');
+  await expect(superseded).toContainText('Superseded');
+
+  const backupDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await backupDownload).path();
+  const records = (await readFile(backupPath!, 'utf8')).trim().split(/\r?\n/)
+    .map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown> });
+  const facts = records.filter(record => record.type === 'memory').map(record => record.data!);
+  const oldRecord = facts.find(item => item.statement === 'The deployment stays on the internal network.' && item.supersededBy);
+  const newRecord = facts.find(item => item.statement === 'The deployment stays on the isolated internal network.' && item.supersedes === oldRecord?.id);
+  const reconsiderRecord = facts.find(item => item.reconsiders === oldRecord?.id);
+  expect(oldRecord?.status).toBe('superseded');
+  expect(oldRecord?.supersededBy).toBe(newRecord?.id);
+  expect(oldRecord?.statusHistory).toMatchObject([{ status: 'confirmed' }, { status: 'superseded' }]);
+  expect((oldRecord?.statusHistory as { trustEventId?: string }[]).at(-1)?.trustEventId).toBeTruthy();
+  expect(reconsiderRecord?.status).toBe('needs-review');
 });
 
 test('version-one project backups restore after the IndexedDB schema migration', async ({ page }) => {

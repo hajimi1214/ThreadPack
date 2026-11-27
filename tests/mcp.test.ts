@@ -302,6 +302,25 @@ test('MCP can be configured as a per-client read-only instance', async () => {
   assert.equal((await readFile(inboxPath).catch(() => '')).length, 0);
 });
 
+test('MCP candidate update schema includes the user preference category', async () => {
+  const backupPath = join(folder, 'preference-schema-project.jsonl');
+  const inboxPath = join(folder, 'preference-schema-inbox.jsonl');
+  const backup = JSON.stringify({
+    type: 'threadpack_project', version: 1, createdAt: 1_700_000_000_000,
+    project: { name: 'Preference schema test', summary: '', importantNotes: '', updatedAt: 1_700_000_000_000 },
+    sessionCount: 0, revisionCount: 0,
+  }) + '\n';
+  await writeFile(backupPath, backup, 'utf8');
+  await writeFile(inboxPath, '', 'utf8');
+  const result = await runMcpProcess(backupPath, inboxPath,
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  assert.equal(result.status, 0, result.stderr);
+  const response = JSON.parse(result.stdout.trim()) as { result?: { tools?: { name: string; inputSchema?: { properties?: { category?: { enum?: string[] } } } }[] } };
+  const submitTool = response.result?.tools?.find(tool => tool.name === 'threadpack_project_submit_update');
+  assert.ok(submitTool);
+  assert.ok(submitTool.inputSchema?.properties?.category?.enum?.includes('preference'));
+});
+
 test('MCP verifies v8 signature integrity but does not trust keys supplied by the backup', async () => {
   const projectId = 'project-v8-trust';
   const rootIdentity = await generateSigningIdentity();
@@ -352,4 +371,52 @@ test('MCP verifies v8 signature integrity but does not trust keys supplied by th
   assert.equal(invalidResponse.error?.code, -32000);
   assert.equal(invalidResponse.error?.message, 'ThreadPack could not read the authorized project context.');
   assert.doesNotMatch(invalidResult.stderr, /SENSITIVE_SIGNATURE_TOKEN/);
+});
+
+test('MCP omits expired facts from current context and identifies them as unauthenticated imported history', async () => {
+  const memory = {
+    id: 'expired-mcp-fact', category: 'decision', topic: 'Temporary rollout',
+    statement: 'Expired synthetic rollout approval must not be used as current policy.',
+    revision: 2, origin: 'user', status: 'needs-review', statusHistory: [
+      { status: 'needs-review', changedAt: 1_700_000_000_000 },
+    ],
+    expiresAt: 1, evidence: [{ id: 'expired-mcp-evidence', kind: 'user', reference: 'synthetic test note',
+      quote: '', recordedAt: 1, verification: 'unattached' }],
+    conflictsWith: [], createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000,
+  };
+  const backup = [
+    { type: 'threadpack_project', version: 2, projectId: 'expired-mcp-project', createdAt: 1_700_000_000_000,
+      project: { name: 'Expiry test project', summary: '', importantNotes: '', updatedAt: 1_700_000_000_000 },
+      sessionCount: 0, revisionCount: 0, factCount: 1 },
+    { type: 'memory', fingerprint: createHash('sha256').update(JSON.stringify(memory)).digest('hex'), data: memory },
+  ].map(record => JSON.stringify(record)).join('\n') + '\n';
+  const backupPath = join(folder, 'expired-mcp-backup.jsonl');
+  await writeFile(backupPath, backup, 'utf8');
+  const request = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+    name: 'threadpack_project_context', arguments: { query: 'temporary rollout', budget: 4000 },
+  } }) + '\n';
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--read-only'], {
+    encoding: 'utf8', input: request,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const response = JSON.parse(result.stdout.trim()) as {
+    result?: { content?: { text: string }[]; structuredContent?: {
+      omissions?: { id: string; reason: string }[];
+      terminalHistory?: { trustBoundary: string; facts: {
+        id: string; status: string; trust: string; lifecycleTrust: string; statusHistory: { status: string; changedAt: number }[];
+      }[] };
+    } };
+  };
+  const context = response.result?.content?.[0]?.text ?? '';
+  assert.deepEqual(response.result?.structuredContent?.omissions, [{
+    id: 'expired-mcp-fact', topic: 'Temporary rollout', category: 'decision', reason: 'terminal-status',
+  }]);
+  assert.match(context, /Historical reference data only/);
+  assert.match(context, /Expired synthetic rollout approval must not be used as current policy/);
+  const expiredFact = response.result?.structuredContent?.terminalHistory?.facts[0];
+  assert.equal(expiredFact?.id, 'expired-mcp-fact');
+  assert.equal(expiredFact?.status, 'expired');
+  assert.equal(expiredFact?.trust, 'historical-only');
+  assert.equal(expiredFact?.lifecycleTrust, 'legacy-unverified');
+  assert.deepEqual(expiredFact?.statusHistory?.map(change => change.status), ['needs-review', 'expired']);
 });

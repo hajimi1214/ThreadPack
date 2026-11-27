@@ -1,16 +1,26 @@
 import type { ContextOmission, GeneratedProjectContext, MemoryCategory, MemoryProjectContext, MemorySessionState, MemoryStatus, ProjectMemoryFact } from './memory-types';
+import { effectiveMemoryStatus, isTerminalMemoryStatus } from './memory-lifecycle';
 
 const categoryPriority: Record<MemoryCategory, number> = {
-  goal: 6, decision: 5, constraint: 5, task: 4, risk: 4, 'open-question': 3,
+  goal: 6, decision: 5, preference: 5, constraint: 5, task: 4, risk: 4, 'open-question': 3,
 };
 
 const statusLabel: Record<MemoryStatus, string> = {
   confirmed: 'CONFIRMED STATUS · LEGACY CONFIRMATION EVENT NOT AVAILABLE IN THIS RELEASE', proposed: 'AI PROPOSAL · NOT CONFIRMED',
-  'needs-review': 'NEEDS REVIEW', rejected: 'REJECTED', superseded: 'SUPERSEDED',
+  'needs-review': 'NEEDS REVIEW', rejected: 'REJECTED · HISTORICAL STATUS', superseded: 'SUPERSEDED · HISTORICAL STATUS',
+  expired: 'EXPIRED · HISTORICAL STATUS', revoked: 'REVOKED · HISTORICAL STATUS',
 };
 
 function factStatusLabel(fact: ProjectMemoryFact): string {
-  if (fact.confirmationTrust === 'revoked') return 'CONFIRMATION REVOKED · HISTORICAL STATUS ONLY';
+  if (fact.status === 'rejected' && fact.lifecycleTrust === 'authenticated') return 'REJECTED BY USER · SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY · HISTORICAL STATUS';
+  if (fact.status === 'revoked' && fact.lifecycleTrust === 'authenticated') return 'REVOKED BY USER · SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY · HISTORICAL STATUS';
+  if (fact.status === 'rejected' || fact.status === 'revoked') {
+    return `${statusLabel[fact.status]} · STATUS AUTHENTICATION ${fact.lifecycleTrust === 'invalid' ? 'INVALID' : 'UNVERIFIED'}`;
+  }
+  if (fact.confirmationTrust === 'revoked') {
+    return fact.status === 'confirmed' ? 'CONFIRMATION REVOKED · HISTORICAL STATUS ONLY'
+      : `${statusLabel[fact.status]} · PRIOR CONFIRMATION REVOKED`;
+  }
   if (fact.status !== 'confirmed') return statusLabel[fact.status];
   if (fact.confirmationTrust === 'authenticated') return 'CONFIRMED · SIGNED BY THIS PROJECT’S LOCAL TRUSTED KEY · NOT INDEPENDENTLY VERIFIED';
   if (fact.confirmationTrust === 'invalid') return 'CONFIRMED STATUS · SIGNATURE OR FACT VERSION INVALID · REVIEW REQUIRED';
@@ -39,8 +49,11 @@ const trustBoundary = [
 ].join('\n');
 
 export function memoryFactsStateKey(facts: ProjectMemoryFact[]): string {
+  const now = Date.now();
   return JSON.stringify([...facts].sort((first, second) => first.id < second.id ? -1 : first.id > second.id ? 1 : 0).map(fact => ({
-    id: fact.id, revision: fact.revision, status: fact.status, statement: fact.statement, taskState: fact.taskState,
+    id: fact.id, revision: fact.revision, status: effectiveMemoryStatus(fact.status, fact.expiresAt, now),
+    expiresAt: fact.expiresAt, confirmationTrust: fact.confirmationTrust, lifecycleTrust: fact.lifecycleTrust,
+    statement: fact.statement, taskState: fact.taskState,
     updatedAt: fact.updatedAt, conflictsWith: fact.conflictsWith, supersedes: fact.supersedes,
     supersededBy: fact.supersededBy, evidence: fact.evidence, statusHistory: fact.statusHistory,
   })));
@@ -107,7 +120,12 @@ export function generateProjectContext(input: {
 
   const sessionMap = new Map(input.sessions.map(session => [session.id, session]));
   const queryTerms = terms(input.query);
-  const facts = input.facts.filter(fact => fact.status !== 'rejected' && fact.status !== 'superseded');
+  const now = Date.now();
+  const projectedFacts = input.facts.map(fact => {
+    const status = effectiveMemoryStatus(fact.status, fact.expiresAt, now);
+    return status === fact.status ? fact : { ...fact, status, expiredAt: fact.expiresAt, lifecycleTrust: 'inactive' as const };
+  });
+  const facts = projectedFacts.filter(fact => !isTerminalMemoryStatus(fact.status));
   const directMatches = facts.filter(fact => !queryTerms.length
     || queryTerms.some(term => `${fact.category} ${fact.topic} ${fact.statement}`.toLocaleLowerCase().includes(term)));
   const directIds = new Set(directMatches.map(fact => fact.id));
@@ -116,9 +134,11 @@ export function generateProjectContext(input: {
   const matching = [...directMatches, ...relatedMatches].map(fact => ({ fact, score: scoreFact(fact, queryTerms) }));
   matching.sort((first, second) => second.score - first.score);
   const relevantIds = new Set(matching.map(item => item.fact.id));
-  const omissions: ContextOmission[] = facts
+  const omissions: ContextOmission[] = projectedFacts.filter(fact => isTerminalMemoryStatus(fact.status))
+    .map(fact => ({ id: fact.id, topic: fact.topic, category: fact.category, reason: 'terminal-status' as const }));
+  omissions.push(...facts
     .filter(fact => !relevantIds.has(fact.id))
-    .map(fact => ({ id: fact.id, topic: fact.topic, category: fact.category, reason: 'not-relevant' }));
+    .map(fact => ({ id: fact.id, topic: fact.topic, category: fact.category, reason: 'not-relevant' as const })));
 
   const blocks: { id: string; text: string; fact?: ProjectMemoryFact }[] = [
     { id: 'project-name', text: `# ${contextHeading(input.project.name)}\n\n${trustBoundary}` },

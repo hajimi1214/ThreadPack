@@ -72,13 +72,13 @@
 .memory-fact{min-width:0;padding:10px;border:1px solid #e4eaf2;border-radius:5px;background:#fff;}
 .memory-fact.needs-review{border-left:3px solid #d4a057;}
 .memory-fact.proposed{border-left:3px solid #7892bd;}
-.memory-fact.rejected,.memory-fact.superseded{opacity:.72;}
+.memory-fact.rejected,.memory-fact.superseded,.memory-fact.expired,.memory-fact.revoked{opacity:.72;}
 .memory-fact-heading{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;font-size:8px;line-height:1.5;color:#8291a5;}
 .memory-status{padding:2px 5px;border-radius:3px;background:#edf3fa;color:#49617f;}
 .memory-confirmation-trust{padding:2px 5px;border-radius:3px;background:#f4f6fa;color:#62738b;}
 .memory-status.needs-review{background:#fff2da;color:#875f25;}
 .memory-status.proposed{background:#edf2fa;color:#526d96;}
-.memory-status.rejected,.memory-status.superseded{background:#f1f2f4;color:#737f8e;}
+.memory-status.rejected,.memory-status.superseded,.memory-status.expired,.memory-status.revoked{background:#f1f2f4;color:#737f8e;}
 .memory-fact-heading>span:nth-child(3){margin-left:auto;}
 .memory-fact-heading .memory-stale{display:flex;align-items:center;gap:4px;color:#946c39;}
 .memory-fact>strong{display:block;font-size:10px;font-weight:650;line-height:1.5;color:#344b68;overflow-wrap:anywhere;}

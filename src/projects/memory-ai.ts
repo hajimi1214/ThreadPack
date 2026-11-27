@@ -23,7 +23,7 @@ export interface AISuggestedFact {
   evidence: AIEvidenceCitation[];
 }
 
-const categories: MemoryCategory[] = ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'];
+const categories: MemoryCategory[] = ['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'];
 
 export function validateAIEndpoint(value: string): string {
   let url: URL;

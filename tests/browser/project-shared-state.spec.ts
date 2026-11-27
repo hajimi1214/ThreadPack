@@ -140,7 +140,7 @@ test('project changes update one authorized shared file and survive a reload', a
   sharedText = await page.evaluate(async () => await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile());
   expect(sharedText).toContain('The latest confirmed facts are shared automatically.');
   const sharedMemory = () => sharedText.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as {
-    type: string; data?: { status?: string; statusHistory?: { status: string }[] };
+    type: string; data?: { id?: string; status?: string; statusHistory?: { status: string }[] };
   }).find(record => record.type === 'memory')?.data;
   expect(sharedMemory()?.status).toBe('confirmed');
   const readThroughMcp = async (contents: string) => {
@@ -153,7 +153,10 @@ test('project changes update one authorized shared file and survive a reload', a
     const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script,
       '--', '--backup', backupPath], { cwd: resolve('.'), encoding: 'utf8', input: request });
     expect(result.status, result.stderr).toBe(0);
-    return JSON.parse(result.stdout.trim()) as { result?: { content?: { text: string }[]; structuredContent?: { sourceVersion: string } } };
+    return JSON.parse(result.stdout.trim()) as { result?: { content?: { text: string }[]; structuredContent?: {
+      sourceVersion: string; includedFactIds?: string[];
+      terminalHistory?: { facts: { statement: string; status: string; trust: string; lifecycleTrust: string }[] };
+    } } };
   };
   const confirmedContext = await readThroughMcp(sharedText);
   expect(confirmedContext.result?.content?.[0]?.text).toContain('The latest confirmed facts are shared automatically.');
@@ -171,7 +174,12 @@ test('project changes update one authorized shared file and survive a reload', a
   expect(sharedMemory()?.statusHistory?.map(item => item.status)).toEqual(['confirmed', 'rejected']);
   const rejectedContext = await readThroughMcp(sharedText);
   expect(rejectedContext.result?.structuredContent?.sourceVersion).not.toBe(confirmedContext.result?.structuredContent?.sourceVersion);
-  expect(rejectedContext.result?.content?.[0]?.text).not.toContain('The latest confirmed facts are shared automatically.');
+  expect(rejectedContext.result?.structuredContent?.includedFactIds).not.toContain(sharedMemory()?.id);
+  expect(rejectedContext.result?.structuredContent?.terminalHistory?.facts).toContainEqual(expect.objectContaining({
+    statement: 'The latest confirmed facts are shared automatically.',
+    status: 'rejected', trust: 'historical-only',
+  }));
+  expect(rejectedContext.result?.content?.[0]?.text).toContain('Historical reference data only');
 
   await page.reload();
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
@@ -304,8 +312,8 @@ test('project changes update one authorized shared file and survive a reload', a
   await expect(restored.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
   const acceptedHistory = restored.getByLabel('Update audit history').locator('.project-update-item').filter({ hasText: acceptedStatement });
   await acceptedHistory.getByRole('button', { name: 'Revoke accepted update', exact: true }).click();
-  await expect(restored.locator('.memory-fact').filter({ hasText: acceptedStatement })).toContainText('Rejected');
-  await expect(restored.locator('.memory-fact').filter({ hasText: conflictingStatement })).toContainText('Confirmed by user');
+  await expect(restored.locator('.memory-fact').filter({ hasText: acceptedStatement })).toContainText('Revoked');
+  await expect(restored.locator('.memory-fact').filter({ hasText: conflictingStatement })).toContainText('Needs review');
   const conflictingFact = restored.locator('.memory-fact').filter({ hasText: conflictingStatement });
   await conflictingFact.getByRole('button', { name: 'Reject', exact: true }).click();
   await expect(conflictingFact).toContainText('Rejected');
@@ -345,6 +353,6 @@ test('project changes update one authorized shared file and survive a reload', a
   await copiedProject.click();
   await expect(restored.getByLabel('Update audit history')).toContainText('revoked');
   await expect(restored.getByLabel('Update audit history')).toContainText('Accept as confirmed fact');
-  await expect(restored.locator('.memory-fact').filter({ hasText: acceptedStatement })).toContainText('Rejected');
+  await expect(restored.locator('.memory-fact').filter({ hasText: acceptedStatement })).toContainText('Revoked');
   await expect(restored.locator('.memory-fact').filter({ hasText: conflictingStatement })).toContainText('Rejected');
 });

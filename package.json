@@ -50,7 +50,7 @@
     "build:web": "tsc --noEmit && vite build",
     "build:cli": "node scripts/build-cli.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
     "test:e2e": "playwright test",
     "check": "tsc --noEmit",
     "prepack": "npm run build"

@@ -1,6 +1,7 @@
 import type { RecoveryBundle, SignedTrustEvent } from './trust-crypto';
 
 export type ConfirmationTrustStatus = 'authenticated' | 'legacy-unverified' | 'invalid' | 'revoked' | 'inactive';
+export type LifecycleTrustStatus = 'authenticated' | 'legacy-unverified' | 'invalid' | 'inactive';
 
 export interface ProjectTrustState {
   projectId: string;
@@ -49,8 +50,8 @@ export interface StoredProjectTrustEvent {
   event: SignedTrustEvent;
 }
 
-export type MemoryCategory = 'goal' | 'decision' | 'constraint' | 'task' | 'risk' | 'open-question';
-export type MemoryStatus = 'proposed' | 'confirmed' | 'needs-review' | 'rejected' | 'superseded';
+export type MemoryCategory = 'goal' | 'decision' | 'preference' | 'constraint' | 'task' | 'risk' | 'open-question';
+export type MemoryStatus = 'proposed' | 'confirmed' | 'needs-review' | 'rejected' | 'superseded' | 'expired' | 'revoked';
 export type MemoryOrigin = 'user' | 'ai';
 export type EvidenceKind = 'conversation' | 'repository' | 'test' | 'user';
 export type TaskState = 'not-started' | 'in-progress' | 'done' | 'blocked' | 'unclear';
@@ -117,6 +118,9 @@ export interface ProjectUpdateAuditEntry {
 export interface MemoryStatusChange {
   status: MemoryStatus;
   changedAt: number;
+  trustEventId?: string;
+  trustEventHash?: string;
+  trustKeyId?: string;
 }
 
 export type EvidenceBindingStatus = 'source_matched' | 'unverified' | 'invalid';
@@ -192,7 +196,12 @@ export interface ProjectMemoryFact {
   confirmationVersion?: number;
   confirmationRevocationEventId?: string;
   confirmationTrust?: ConfirmationTrustStatus;
+  lifecycleTrust?: LifecycleTrustStatus;
+  lifecycleProjectId?: string;
   reviewStateBeforeConflict?: 'confirmed' | 'proposed';
+  expiresAt?: number;
+  expiredAt?: number;
+  reconsiders?: string;
   evidence: MemoryEvidence[];
   conflictsWith: string[];
   supersedes?: string;
@@ -222,6 +231,8 @@ export interface ProjectMemoryInput {
   status: MemoryStatus;
   evidence: MemoryEvidenceInput[];
   supersedes?: string;
+  expiresAt?: number;
+  reconsiders?: string;
 }
 
 export interface ProjectUpdateProposal {
@@ -274,7 +285,7 @@ export interface ContextOmission {
   id: string;
   topic: string;
   category: MemoryCategory;
-  reason: 'budget' | 'not-relevant';
+  reason: 'budget' | 'not-relevant' | 'terminal-status';
 }
 
 export interface GeneratedProjectContext {

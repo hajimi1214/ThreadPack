@@ -8,6 +8,7 @@ import {
 } from './evidence-binding';
 import type { EvidenceScope, IndexedEvidenceRevision } from './evidence-binding';
 import type { EvidenceBindingIssue, LocalProjectSigningKey, ProjectTrustState, StoredProjectTrustEvent, TrustedProjectAnchor } from './memory-types';
+import { canReviewMemoryStatusTransition, isTerminalMemoryStatus, normalizeMemoryClaimText } from './memory-lifecycle';
 import { assertTrustChainContainsHead, createRecoveryBundle, generateSigningIdentity, isPublicSigningKeyJwk, keyIdForPublicKey, publicKeyFingerprint, signTrustEvent, unlockRecoveryBundle, verifyTrustEventChain, TRUST_CHAIN_ORIGIN, TRUST_EVENT_SCHEMA } from './trust-crypto';
 import type { LocalSigningIdentity, RecoveryBundle, SignedTrustEvent, TrustEventPayload, TrustChainVerification } from './trust-crypto';
 import { MAX_PROJECT_SESSION_BYTES, MAX_SHARED_PROJECT_BACKUP_BYTES, utf8ByteLength } from './limits';
@@ -154,8 +155,8 @@ function touchProject(project: ProjectRecord, timestamp = Date.now()): void {
   project.updatedAt = Math.max(timestamp, project.updatedAt + 1);
 }
 
-const MEMORY_CATEGORIES: MemoryCategory[] = ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'];
-const MEMORY_STATUSES: MemoryStatus[] = ['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded'];
+const MEMORY_CATEGORIES: MemoryCategory[] = ['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'];
+const MEMORY_STATUSES: MemoryStatus[] = ['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded', 'expired', 'revoked'];
 const EVIDENCE_KINDS: EvidenceKind[] = ['conversation', 'repository', 'test', 'user'];
 const TASK_STATES: TaskState[] = ['not-started', 'in-progress', 'done', 'blocked', 'unclear'];
 
@@ -189,23 +190,39 @@ async function revokeAcceptedProposals(transaction: IDBTransaction, projectId: s
   }
 }
 
-function appendStatusChange(fact: ProjectMemoryFact, status: MemoryStatus, changedAt: number): void {
+function appendStatusChange(
+  fact: ProjectMemoryFact, status: MemoryStatus, changedAt: number,
+  event?: SignedTrustEvent,
+): void {
   const history = fact.statusHistory ?? [{ status: fact.status, changedAt: fact.createdAt }];
   if (history.at(-1)?.status === status) {
     fact.statusHistory = history;
     return;
   }
-  fact.statusHistory = [...history, { status, changedAt }];
+  if (history.length >= 10_000) throw new Error('This fact reached the supported lifecycle-history limit. Preserve its history and create a linked new fact.');
+  fact.statusHistory = [...history, { status, changedAt, ...(event ? {
+    trustEventId: event.id, trustEventHash: event.eventHash, trustKeyId: event.actorKeyId,
+  } : {}) }];
 }
 
 function readStatusHistory(value: unknown, status: MemoryStatus, createdAt: number): MemoryStatusChange[] {
   if (value === undefined) return [{ status, changedAt: createdAt }];
-  if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw new Error('The project backup contains an invalid memory status history.');
+  if (!Array.isArray(value) || value.length < 1 || value.length > 10_000) throw new Error('The project backup contains an invalid memory status history.');
   const history = value.map(item => {
     if (!isRecord(item) || !MEMORY_STATUSES.includes(item.status as MemoryStatus) || !Number.isSafeInteger(item.changedAt)) {
       throw new Error('The project backup contains an invalid memory status history.');
     }
-    return { status: item.status as MemoryStatus, changedAt: item.changedAt as number };
+    if (item.trustEventId !== undefined && (typeof item.trustEventId !== 'string' || !item.trustEventId || item.trustEventId.length > 200)
+      || item.trustEventHash !== undefined && (typeof item.trustEventHash !== 'string' || !/^[a-f0-9]{64}$/i.test(item.trustEventHash))
+      || item.trustKeyId !== undefined && (typeof item.trustKeyId !== 'string' || !item.trustKeyId || item.trustKeyId.length > 100)) {
+      throw new Error('The project backup contains invalid memory status authentication metadata.');
+    }
+    return {
+      status: item.status as MemoryStatus, changedAt: item.changedAt as number,
+      ...(typeof item.trustEventId === 'string' ? { trustEventId: item.trustEventId } : {}),
+      ...(typeof item.trustEventHash === 'string' ? { trustEventHash: item.trustEventHash } : {}),
+      ...(typeof item.trustKeyId === 'string' ? { trustKeyId: item.trustKeyId } : {}),
+    };
   });
   if (history[0]!.changedAt < createdAt || history.at(-1)!.status !== status) {
     throw new Error('The project backup contains an inconsistent memory status history.');
@@ -1106,30 +1123,143 @@ async function factConfirmationTrust(fact: ProjectMemoryFact, trust: ProjectTrus
   if (trust.issue && trust.issue !== 'active-local-signing-key-missing') return 'invalid';
   if (!trust.trusted || !trust.verification) return fact.status === 'confirmed' ? 'legacy-unverified' : 'inactive';
   const confirmation = trust.events.find(event => event.id === fact.confirmationEventId);
+  const confirmationHasLifecycleBinding = confirmation?.details?.toStatus !== undefined
+    || confirmation?.details?.lifecycleRevision !== undefined || confirmation?.details?.lifecycleProjectId !== undefined;
   if (!confirmation || confirmation.eventType !== 'claim.confirmed' || confirmation.subjectId !== fact.id
-    || confirmation.details?.confirmationVersion !== fact.confirmationVersion) return 'invalid';
+    || confirmation.details?.confirmationVersion !== fact.confirmationVersion
+    || confirmationHasLifecycleBinding && (confirmation.details?.toStatus !== 'confirmed'
+      || confirmation.details?.lifecycleRevision !== confirmation.subjectVersion
+      || confirmation.details?.lifecycleProjectId !== (fact.confirmationProjectId ?? fact.projectId))
+    ) return 'invalid';
   const revocation = fact.confirmationRevocationEventId
     ? trust.events.find(event => event.id === fact.confirmationRevocationEventId)
     : trust.events.find(event => event.eventType === 'claim.confirmation-revoked'
       && event.details?.confirmationEventId === confirmation.id);
   if (revocation) {
+    const revocationHasLifecycleBinding = revocation.details?.toStatus !== undefined
+      || revocation.details?.lifecycleRevision !== undefined || revocation.details?.lifecycleProjectId !== undefined;
     if (revocation.eventType !== 'claim.confirmation-revoked' || revocation.subjectId !== confirmation.subjectId
       || revocation.subjectVersion !== confirmation.subjectVersion || revocation.subjectFingerprint !== confirmation.subjectFingerprint
       || revocation.details?.confirmationEventId !== confirmation.id
       || JSON.stringify([...revocation.evidenceFingerprints].sort()) !== JSON.stringify([...confirmation.evidenceFingerprints].sort())
-      || fact.confirmationRevocationEventId !== undefined && fact.confirmationRevocationEventId !== revocation.id) return 'invalid';
+      || fact.confirmationRevocationEventId !== undefined && fact.confirmationRevocationEventId !== revocation.id
+      || revocationHasLifecycleBinding && (revocation.details?.toStatus !== fact.status
+        || revocation.details?.lifecycleRevision !== fact.revision
+        || revocation.details?.lifecycleProjectId !== (fact.lifecycleProjectId ?? fact.projectId)
+        || fact.statusHistory?.at(-1)?.trustEventId !== revocation.id
+        || fact.statusHistory?.at(-1)?.trustEventHash !== revocation.eventHash
+        || fact.statusHistory?.at(-1)?.trustKeyId !== revocation.actorKeyId)) return 'invalid';
     return 'revoked';
   }
   if (fact.status !== 'confirmed') return 'inactive';
   if (confirmation.subjectVersion !== fact.revision) return 'invalid';
+  if (confirmation.details?.expiresAt !== undefined && confirmation.details.expiresAt !== (fact.expiresAt ?? null)
+    || fact.expiresAt !== undefined && confirmation.details?.expiresAt !== fact.expiresAt) return 'invalid';
   const material = await factConfirmationMaterial(fact);
   if (confirmation.subjectFingerprint !== material.subjectFingerprint
     || JSON.stringify([...confirmation.evidenceFingerprints].sort()) !== JSON.stringify(material.evidenceFingerprints)) return 'invalid';
   return 'authenticated';
 }
 
+async function factLifecycleTrust(fact: ProjectMemoryFact, trust: ProjectTrustSummary): Promise<ProjectMemoryFact['lifecycleTrust']> {
+  if (!isTerminalMemoryStatus(fact.status)) return 'inactive';
+  const transition = fact.statusHistory?.at(-1);
+  if (!transition || transition.status !== fact.status || !transition.trustEventId) return 'legacy-unverified';
+  if (trust.issue && trust.issue !== 'active-local-signing-key-missing') return 'invalid';
+  if (!trust.trusted || !trust.verification) return 'legacy-unverified';
+  const event = trust.events.find(item => item.id === transition.trustEventId);
+  if (!event || event.eventHash !== transition.trustEventHash || event.actorKeyId !== transition.trustKeyId
+    || event.subjectId !== fact.id) return 'invalid';
+
+  const revocationReason = fact.status === 'rejected' ? 'rejected'
+    : fact.status === 'revoked' ? 'revoked'
+      : fact.status === 'expired' ? 'expired' : fact.status === 'superseded' ? 'superseded' : undefined;
+  if (event.eventType === 'claim.confirmation-revoked') {
+    if (!revocationReason || fact.confirmationRevocationEventId !== event.id
+      || event.details?.reason !== revocationReason || fact.confirmationTrust !== 'revoked'
+      || event.details?.toStatus !== fact.status || event.details?.lifecycleRevision !== fact.revision
+      || event.details?.lifecycleProjectId !== (fact.lifecycleProjectId ?? fact.projectId)
+      || event.actorKeyId !== transition.trustKeyId) return 'invalid';
+    return 'authenticated';
+  }
+  const expectedEventType = fact.status === 'rejected' ? 'claim.rejected'
+    : fact.status === 'revoked' ? 'claim.revoked'
+      : fact.status === 'expired' ? 'claim.expired'
+        : fact.status === 'superseded' ? 'claim.superseded' : undefined;
+  const expectedReason = fact.status === 'rejected' ? 'user-rejected'
+    : fact.status === 'revoked' ? 'user-revoked'
+      : fact.status === 'expired' ? 'expires-at-reached'
+        : fact.status === 'superseded' ? 'replaced-by-new-fact' : undefined;
+  if (!expectedEventType || event.eventType !== expectedEventType
+    || event.details?.toStatus !== fact.status || event.details?.reason !== expectedReason
+    || event.details?.fromStatus !== fact.statusHistory?.at(-2)?.status
+    || event.details?.lifecycleRevision !== fact.revision
+    || event.details?.lifecycleProjectId !== (fact.lifecycleProjectId ?? fact.projectId)
+    || event.subjectVersion !== fact.revision) return 'invalid';
+  const material = await factLifecycleMaterial(fact);
+  if (event.subjectFingerprint !== material.subjectFingerprint
+    || JSON.stringify([...event.evidenceFingerprints].sort()) !== JSON.stringify(material.evidenceFingerprints)) return 'invalid';
+  return 'authenticated';
+}
+
+async function expireProjectMemoryFacts(projectId: string, observedAt = Date.now()): Promise<void> {
+  const changes = await withTransaction(['projects', 'memory', 'updates'], 'readwrite', async transaction => {
+    const projects = transaction.objectStore('projects');
+    const memory = transaction.objectStore('memory');
+    const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+    if (!project || project.restoringSince) return [];
+    const facts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
+    const expired: { before: ProjectMemoryFact; after: ProjectMemoryFact }[] = [];
+    for (const fact of facts) {
+      if (isTerminalMemoryStatus(fact.status) || fact.expiresAt === undefined || fact.expiresAt > observedAt) continue;
+      const before = { ...fact, evidence: fact.evidence.map(item => ({ ...item })) };
+      const changedAt = Math.max(observedAt, fact.updatedAt + 1);
+      fact.status = 'expired';
+      fact.expiredAt = fact.expiresAt;
+      appendStatusChange(fact, 'expired', changedAt);
+      fact.conflictsWith = [];
+      delete fact.reviewStateBeforeConflict;
+      fact.updatedAt = changedAt;
+      fact.revision = (fact.revision ?? 0) + 1;
+      for (const conflictId of before.conflictsWith) {
+        const other = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
+        if (!other) continue;
+        other.conflictsWith = other.conflictsWith.filter(id => id !== fact.id);
+        if (!other.conflictsWith.length && other.status === 'needs-review' && other.reviewStateBeforeConflict) {
+          const restoredStatus = other.reviewStateBeforeConflict === 'proposed' ? 'proposed' : 'needs-review';
+          other.status = restoredStatus;
+          appendStatusChange(other, restoredStatus, changedAt);
+          delete other.reviewStateBeforeConflict;
+        }
+        other.updatedAt = changedAt;
+        other.revision = (other.revision ?? 0) + 1;
+        memory.put(other);
+      }
+      await revokeAcceptedProposals(transaction, projectId, fact.id, changedAt);
+      memory.put(fact);
+      expired.push({ before, after: { ...fact, evidence: fact.evidence.map(item => ({ ...item })) } });
+    }
+    if (expired.length) {
+      touchProject(project, observedAt);
+      projects.put(project);
+    }
+    return expired;
+  });
+  if (!changes.length) return;
+  const trust = await getProjectTrustSummary(projectId);
+  if (!trust.readyForConfirmations) return;
+  for (const change of changes) {
+    if (change.before.status === 'confirmed' && change.before.confirmationEventId) {
+      await recordFactConfirmationRevocation(projectId, change.before, change.after, 'expired');
+    } else {
+      await recordFactLifecycleEvent(projectId, change.after, 'claim.expired', 'expires-at-reached');
+    }
+  }
+}
+
 export async function listProjectMemory(projectId: string): Promise<ProjectMemoryFact[]> {
   if (typeof projectId !== 'string' || projectId.length > 200) throw new Error('This project is unavailable.');
+  await expireProjectMemoryFacts(projectId);
   const facts = await withTransaction(['memory'], 'readonly', transaction =>
     idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))));
   const trust = await getProjectTrustSummary(projectId);
@@ -1139,6 +1269,7 @@ export async function listProjectMemory(projectId: string): Promise<ProjectMemor
     for (const citation of fact.evidence) evidence.push(await assess(citation, fact));
     fact.evidence = evidence;
     fact.confirmationTrust = await factConfirmationTrust(fact, trust);
+    fact.lifecycleTrust = await factLifecycleTrust(fact, trust);
   }
   return facts.sort((a, b) => b.updatedAt - a.updatedAt);
 }
@@ -1146,13 +1277,14 @@ export async function listProjectMemory(projectId: string): Promise<ProjectMemor
 export async function updateProjectMemoryEvidenceRelation(
   projectId: string, factId: string, evidenceId: string, relation: EvidenceRelation,
 ): Promise<ProjectMemoryFact> {
+  await expireProjectMemoryFacts(projectId);
   if (!['supports', 'contradicts', 'context_only', 'insufficient', 'unverified'].includes(relation)) {
     throw new Error('Choose a valid evidence relationship.');
   }
   const before = await withTransaction(['projects', 'memory'], 'readonly', async transaction => {
     const project = await idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId));
     const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + factId));
-    if (!project || project.restoringSince || !fact || fact.status === 'rejected' || fact.status === 'superseded') {
+    if (!project || project.restoringSince || !fact || isTerminalMemoryStatus(fact.status)) {
       throw new Error('This project memory entry is unavailable for evidence review.');
     }
     const evidence = fact.evidence.find(item => item.id === evidenceId);
@@ -1217,7 +1349,7 @@ export async function updateProjectMemoryEvidenceRelation(
       const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
       const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + factId));
       if (!project || project.restoringSince || !fact || fact.updatedAt !== before.fact.updatedAt
-        || fact.revision !== before.fact.revision || fact.status === 'rejected' || fact.status === 'superseded') {
+        || fact.revision !== before.fact.revision || isTerminalMemoryStatus(fact.status)) {
         throw new Error('This project memory entry changed during evidence review. Reopen it and try again.');
       }
       applyRelationChange(fact);
@@ -1238,6 +1370,8 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
     || !MEMORY_STATUSES.includes(input.status) || typeof input.topic !== 'string' || !input.topic.trim()
     || input.topic.length > 160 || typeof input.statement !== 'string' || !input.statement.trim()
     || input.statement.length > 4000 || !Array.isArray(input.evidence) || input.evidence.length > 5
+    || input.expiresAt !== undefined && (!Number.isSafeInteger(input.expiresAt) || input.expiresAt <= Date.now())
+    || input.reconsiders !== undefined && (typeof input.reconsiders !== 'string' || !input.reconsiders || input.reconsiders.length > 200)
     || input.taskState !== undefined && !TASK_STATES.includes(input.taskState)
     || input.category !== 'task' && input.taskState !== undefined) {
     throw new Error('Enter a category, topic, statement, and up to five evidence entries.');
@@ -1248,6 +1382,10 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
   if (input.origin === 'user' && !['confirmed', 'needs-review'].includes(input.status)) {
     throw new Error('User-authored facts must be confirmed or marked for review.');
   }
+  if (input.reconsiders && (input.origin !== 'user' || input.status !== 'needs-review' || input.supersedes)) {
+    throw new Error('Only a user-authored review candidate can reconsider a prior terminal record.');
+  }
+  if (input.expiresAt !== undefined && input.expiresAt <= Date.now()) throw new Error('A new fact expiration must be in the future.');
   const topic = input.topic.trim();
   const normalizedTopic = normalizeMemoryTopic(topic);
   const evidenceInputs = input.evidence.length ? input.evidence : [{ kind: 'user' as const, reference: 'No source attached' }];
@@ -1266,14 +1404,34 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
       key: `${projectId}\0${id}`, id, projectId, category: input.category, topic, normalizedTopic,
       statement: input.statement.trim(), revision: 1, origin: input.origin, status: input.status,
       statusHistory: [{ status: input.status, changedAt: now }],
+      ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+      ...(input.reconsiders ? { reconsiders: input.reconsiders } : {}),
       ...(input.category === 'task' ? { taskState: input.taskState ?? 'unclear' } : {}),
       evidence, conflictsWith: [], createdAt: now, updatedAt: now,
     };
     let matching: ProjectMemoryFact[] = [];
+    const projectFacts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
+    let reconsideredFact: ProjectMemoryFact | undefined;
+    if (input.reconsiders) {
+      reconsideredFact = projectFacts.find(previous => previous.id === input.reconsiders);
+      if (!reconsideredFact || !isTerminalMemoryStatus(reconsideredFact.status)) {
+        throw new Error('The selected historical fact is not available for reconsideration.');
+      }
+    }
+    const normalizedClaim = normalizeMemoryClaimText(fact.statement);
+    const explicitlyReconsidersThisClaim = !!reconsideredFact
+      && normalizeMemoryClaimText(reconsideredFact.statement) === normalizedClaim
+      && (reconsideredFact.taskState ?? 'unclear') === (fact.taskState ?? 'unclear');
+    const blockedDuplicate = !explicitlyReconsidersThisClaim && projectFacts.find(previous => isTerminalMemoryStatus(previous.status)
+      && normalizeMemoryClaimText(previous.statement) === normalizedClaim
+      && (previous.taskState ?? 'unclear') === (fact.taskState ?? 'unclear'));
+    if (blockedDuplicate) {
+      throw new Error(`This claim has a rejected or inactive terminal record in this project. Review that record or explicitly reconsider it (${blockedDuplicate.id}).`);
+    }
     if (input.supersedes) {
       if (typeof input.supersedes !== 'string' || input.supersedes.length > 200) throw new Error('The fact to supersede is invalid.');
       const previous = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${input.supersedes}`));
-      if (!previous || previous.status === 'rejected' || previous.status === 'superseded') throw new Error('The selected previous fact is unavailable.');
+      if (!previous || isTerminalMemoryStatus(previous.status)) throw new Error('The selected previous fact is unavailable.');
       previous.status = 'superseded';
       appendStatusChange(previous, 'superseded', now);
       previous.supersededBy = fact.id;
@@ -1304,9 +1462,9 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
       matching = await idbRequest<ProjectMemoryFact[]>(memory.index('projectTopic').getAll(
         IDBKeyRange.only([projectId, fact.category, fact.normalizedTopic])));
       const sameUserFact = input.origin === 'user' && matching.find(previous => previous.origin === 'user'
-        && previous.status !== 'rejected' && previous.status !== 'superseded'
+        && !isTerminalMemoryStatus(previous.status)
         && previous.statement.trim().normalize('NFKC').toLocaleLowerCase() === fact.statement.normalize('NFKC').toLocaleLowerCase()
-        && previous.taskState === fact.taskState);
+        && previous.taskState === fact.taskState && previous.reconsiders === fact.reconsiders);
       if (sameUserFact) {
         if (input.status === 'confirmed' && sameUserFact.conflictsWith.length) throw new Error('Resolve the listed conflicts before confirming this fact.');
         const evidenceKey = (item: MemoryEvidence) => item.kind === 'conversation'
@@ -1318,6 +1476,10 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         sameUserFact.evidence.push(...additions);
         if (sameUserFact.status !== input.status) appendStatusChange(sameUserFact, input.status, now);
         sameUserFact.status = input.status;
+        if (input.expiresAt !== undefined && sameUserFact.expiresAt !== input.expiresAt) {
+          sameUserFact.expiresAt = input.expiresAt;
+          delete sameUserFact.expiredAt;
+        }
         sameUserFact.updatedAt = now;
         sameUserFact.revision = (sameUserFact.revision ?? 1) + 1;
         memory.put(sameUserFact);
@@ -1325,8 +1487,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         projects.put(project);
         return sameUserFact;
       }
-      const duplicateAIFact = input.origin === 'ai' && matching.find(previous => previous.status !== 'rejected'
-        && previous.status !== 'superseded'
+      const duplicateAIFact = input.origin === 'ai' && matching.find(previous => !isTerminalMemoryStatus(previous.status)
         && previous.statement.trim().normalize('NFKC').toLocaleLowerCase() === fact.statement.normalize('NFKC').toLocaleLowerCase()
         && previous.taskState === fact.taskState);
       if (duplicateAIFact) {
@@ -1346,7 +1507,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
       }
     }
     const conflicts = matching.filter(previous => previous.id !== input.supersedes
-      && previous.status !== 'rejected' && previous.status !== 'superseded'
+      && !isTerminalMemoryStatus(previous.status)
       && (previous.statement.trim().normalize('NFKC').toLocaleLowerCase() !== fact.statement.normalize('NFKC').toLocaleLowerCase()
         || fact.category === 'task' && previous.taskState !== fact.taskState));
     if (conflicts.length) {
@@ -1391,6 +1552,16 @@ async function factConfirmationMaterial(fact: ProjectMemoryFact): Promise<{ subj
   return { subjectFingerprint, evidenceFingerprints };
 }
 
+async function factLifecycleMaterial(fact: ProjectMemoryFact): Promise<{ subjectFingerprint: string; evidenceFingerprints: string[] }> {
+  const lifecycleProjectId = fact.lifecycleProjectId ?? fact.confirmationProjectId ?? fact.projectId;
+  const confirmedMaterial = await factConfirmationMaterial({ ...fact, confirmationProjectId: lifecycleProjectId });
+  const subjectFingerprint = await sha256Fingerprint(JSON.stringify([
+    'threadpack-fact-lifecycle-v1', lifecycleProjectId, confirmedMaterial.subjectFingerprint, fact.status,
+    fact.expiresAt ?? null, fact.expiredAt ?? null, fact.supersedes ?? null, fact.reconsiders ?? null,
+  ]));
+  return { subjectFingerprint, evidenceFingerprints: confirmedMaterial.evidenceFingerprints };
+}
+
 async function ensureProjectTrustReady(projectId: string): Promise<void> {
   const trust = await getProjectTrustSummary(projectId);
   if (!trust.state) throw new Error('Set up a local trust identity and recovery kit before confirming project facts.');
@@ -1409,7 +1580,10 @@ async function recordFactConfirmation(projectId: string, fact: ProjectMemoryFact
   await appendProjectTrustEvent(projectId, {
     eventType: 'claim.confirmed', subjectId: fact.id, subjectFingerprint: material.subjectFingerprint,
     subjectVersion: candidate.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints, changedAt: Date.now(),
-    details: { confirmationVersion },
+    details: {
+      confirmationVersion, expiresAt: candidate.expiresAt ?? null, toStatus: 'confirmed',
+      lifecycleRevision: candidate.revision ?? 1, lifecycleProjectId: candidate.confirmationProjectId,
+    },
   }, { factMutation: {
     factId: fact.id, expectedUpdatedAt: fact.updatedAt, expectedRevision: fact.revision ?? 1,
     apply(current, event, changedAt) {
@@ -1426,21 +1600,70 @@ async function recordFactConfirmation(projectId: string, fact: ProjectMemoryFact
   return confirmed;
 }
 
+async function recordFactLifecycleEvent(
+  projectId: string, fact: ProjectMemoryFact,
+  eventType: 'claim.rejected' | 'claim.revoked' | 'claim.expired' | 'claim.superseded',
+  reason: 'user-rejected' | 'user-revoked' | 'expires-at-reached' | 'replaced-by-new-fact',
+): Promise<ProjectMemoryFact> {
+  const trust = await getProjectTrustSummary(projectId);
+  if (!trust.readyForConfirmations) return fact;
+  const lifecycleProjectId = trust.state?.sourceProjectId ?? projectId;
+  const signedFact = { ...fact, lifecycleProjectId };
+  const material = await factLifecycleMaterial(signedFact);
+  const previousStatus = fact.statusHistory?.at(-2)?.status ?? fact.status;
+  await appendProjectTrustEvent(projectId, {
+    eventType, subjectId: fact.id, subjectFingerprint: material.subjectFingerprint,
+    subjectVersion: fact.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints,
+    changedAt: Date.now(), details: {
+      fromStatus: previousStatus, toStatus: fact.status, reason,
+      lifecycleRevision: fact.revision ?? 1, lifecycleProjectId,
+      ...(fact.expiresAt !== undefined ? { expiresAt: fact.expiresAt } : {}),
+    },
+  }, { factMutation: {
+    factId: fact.id, expectedUpdatedAt: fact.updatedAt, expectedRevision: fact.revision ?? 1,
+    apply(current, event, changedAt) {
+      const statusChange = current.statusHistory?.at(-1);
+      if (!statusChange || statusChange.status !== current.status || statusChange.status !== fact.status) {
+        throw new Error('The project fact lifecycle changed before its signed event could be committed.');
+      }
+      statusChange.trustEventId = event.id;
+      statusChange.trustEventHash = event.eventHash;
+      statusChange.trustKeyId = event.actorKeyId;
+      current.lifecycleProjectId = lifecycleProjectId;
+      current.updatedAt = changedAt;
+    },
+  } });
+  return (await listProjectMemory(projectId)).find(item => item.id === fact.id) ?? fact;
+}
+
 async function recordFactConfirmationRevocation(
-  projectId: string, before: ProjectMemoryFact, current: ProjectMemoryFact, reason: 'needs-review' | 'rejected' | 'superseded' | 'superseded-by-new-confirmation',
+  projectId: string, before: ProjectMemoryFact, current: ProjectMemoryFact,
+  reason: 'needs-review' | 'rejected' | 'revoked' | 'expired' | 'superseded' | 'superseded-by-new-confirmation',
 ): Promise<ProjectMemoryFact> {
   if (!before.confirmationEventId || before.status !== 'confirmed') return current;
   await ensureProjectTrustReady(projectId);
   const material = await factConfirmationMaterial(before);
+  const trust = await getProjectTrustSummary(projectId);
+  const lifecycleProjectId = trust.state?.sourceProjectId ?? projectId;
   await appendProjectTrustEvent(projectId, {
     eventType: 'claim.confirmation-revoked', subjectId: before.id, subjectFingerprint: material.subjectFingerprint,
     subjectVersion: before.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints,
-    changedAt: Date.now(), details: { confirmationEventId: before.confirmationEventId, reason },
+    changedAt: Date.now(), details: {
+      confirmationEventId: before.confirmationEventId, reason, fromStatus: before.status,
+      toStatus: current.status, lifecycleRevision: current.revision ?? 1, lifecycleProjectId,
+    },
   }, { factMutation: {
     factId: before.id, expectedUpdatedAt: current.updatedAt, expectedRevision: current.revision ?? 1,
     apply(fact, event, changedAt) {
       fact.confirmationRevocationEventId = event.id;
       fact.confirmationTrust = 'revoked';
+      const statusChange = fact.statusHistory?.at(-1);
+      if (statusChange && statusChange.status === fact.status) {
+        statusChange.trustEventId = event.id;
+        statusChange.trustEventHash = event.eventHash;
+        statusChange.trustKeyId = event.actorKeyId;
+      }
+      fact.lifecycleProjectId = lifecycleProjectId;
       fact.updatedAt = changedAt;
     },
   } });
@@ -1455,12 +1678,22 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
   const fact = await createProjectMemoryFactInternal(projectId, input);
   const afterFacts = await listProjectMemory(projectId);
   const currentFacts = new Map(afterFacts.map(item => [item.id, item]));
+  const hasPriorAuthenticatedFact = beforeFacts.some(previous =>
+    previous.status === 'confirmed' && previous.confirmationTrust === 'authenticated' && !!previous.confirmationEventId);
+  const canSignLifecycle = !hasPriorAuthenticatedFact || (await getProjectTrustSummary(projectId)).readyForConfirmations;
   for (const previous of beforeFacts) {
-    if (previous.status !== 'confirmed' || previous.confirmationTrust !== 'authenticated' || !previous.confirmationEventId) continue;
     const current = currentFacts.get(previous.id);
     if (!current) continue;
     const changed = current.revision !== previous.revision;
-    if (current.status !== 'confirmed' || changed) {
+    if (current.status === 'superseded' && changed) {
+      if (previous.status === 'confirmed' && previous.confirmationTrust === 'authenticated' && previous.confirmationEventId) {
+        if (canSignLifecycle) await recordFactConfirmationRevocation(projectId, previous, current, 'superseded');
+      } else {
+        await recordFactLifecycleEvent(projectId, current, 'claim.superseded', 'replaced-by-new-fact');
+      }
+    } else if (previous.status === 'confirmed' && previous.confirmationTrust === 'authenticated'
+      && previous.confirmationEventId && (current.status !== 'confirmed' || changed)) {
+      if (!canSignLifecycle) continue;
       const reason = current.status === 'confirmed' ? 'superseded-by-new-confirmation'
         : current.status === 'superseded' ? 'superseded' : current.status === 'rejected' ? 'rejected' : 'needs-review';
       await recordFactConfirmationRevocation(projectId, previous, current, reason);
@@ -1470,7 +1703,9 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
   return (await listProjectMemory(projectId)).find(item => item.id === fact.id) ?? fact;
 }
 
-async function updateProjectMemoryStatusInternal(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
+async function updateProjectMemoryStatusInternal(
+  projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected' | 'revoked',
+): Promise<ProjectMemoryFact> {
   if (!MEMORY_STATUSES.includes(status)) throw new Error('Choose a valid memory review state.');
   return withTransaction(['projects', 'memory', 'updates'], 'readwrite', async transaction => {
     const projects = transaction.objectStore('projects');
@@ -1478,10 +1713,11 @@ async function updateProjectMemoryStatusInternal(projectId: string, factId: stri
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
     const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${factId}`));
     if (!project || project.restoringSince || !fact) throw new Error('This project memory entry is unavailable.');
-    if (fact.status === 'rejected' || fact.status === 'superseded') throw new Error('Rejected or superseded entries are read-only.');
+    if (isTerminalMemoryStatus(fact.status)) throw new Error('Rejected, superseded, expired, or revoked entries are read-only.');
+    if (!canReviewMemoryStatusTransition(fact.status, status)) throw new Error(`The fact cannot transition from ${fact.status} to ${status}.`);
     if (status === 'confirmed' && fact.conflictsWith.length) throw new Error('Resolve the listed conflicts before confirming this fact.');
     const now = Date.now();
-    if (status === 'rejected') {
+    if (status === 'rejected' || status === 'revoked') {
       for (const conflictId of fact.conflictsWith) {
         const conflict = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${conflictId}`));
         if (conflict) {
@@ -1493,6 +1729,7 @@ async function updateProjectMemoryStatusInternal(projectId: string, factId: stri
             delete conflict.reviewStateBeforeConflict;
           }
           conflict.updatedAt = now;
+          conflict.revision = (conflict.revision ?? 1) + 1;
           memory.put(conflict);
         }
       }
@@ -1503,7 +1740,7 @@ async function updateProjectMemoryStatusInternal(projectId: string, factId: stri
     appendStatusChange(fact, status, now);
     fact.updatedAt = now;
     fact.revision = (fact.revision ?? 0) + 1;
-    if (status === 'rejected') await revokeAcceptedProposals(transaction, projectId, fact.id, now);
+    if (status === 'rejected' || status === 'revoked') await revokeAcceptedProposals(transaction, projectId, fact.id, now);
     memory.put(fact);
     touchProject(project, fact.updatedAt);
     projects.put(project);
@@ -1511,7 +1748,10 @@ async function updateProjectMemoryStatusInternal(projectId: string, factId: stri
   });
 }
 
-export async function updateProjectMemoryStatus(projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected'): Promise<ProjectMemoryFact> {
+export async function updateProjectMemoryStatus(
+  projectId: string, factId: string, status: 'confirmed' | 'needs-review' | 'rejected' | 'revoked',
+): Promise<ProjectMemoryFact> {
+  await expireProjectMemoryFacts(projectId);
   const before = await withTransaction(['memory'], 'readonly', async transaction =>
     idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + factId)));
   if (!before) throw new Error('This project memory entry is unavailable.');
@@ -1520,11 +1760,13 @@ export async function updateProjectMemoryStatus(projectId: string, factId: strin
   const priorConfirmationTrust = trust ? await factConfirmationTrust(before, trust) : undefined;
   const shouldRevokeSignedConfirmation = status !== 'confirmed' && before.confirmationEventId
     && before.status === 'confirmed' && priorConfirmationTrust === 'authenticated';
-  if (shouldRevokeSignedConfirmation) await ensureProjectTrustReady(projectId);
+  const canSignRevocation = shouldRevokeSignedConfirmation && !!trust?.readyForConfirmations;
   const updated = await updateProjectMemoryStatusInternal(projectId, factId, status);
   if (status === 'confirmed' && updated.status === 'confirmed') return recordFactConfirmation(projectId, updated);
-  if (shouldRevokeSignedConfirmation) return recordFactConfirmationRevocation(projectId, before, updated, status);
-  return updated;
+  if (shouldRevokeSignedConfirmation && canSignRevocation) return recordFactConfirmationRevocation(projectId, before, updated, status);
+  if (status === 'rejected') return recordFactLifecycleEvent(projectId, updated, 'claim.rejected', 'user-rejected');
+  if (status === 'revoked') return recordFactLifecycleEvent(projectId, updated, 'claim.revoked', 'user-revoked');
+  return (await listProjectMemory(projectId)).find(item => item.id === factId) ?? updated;
 }
 
 
@@ -1569,7 +1811,7 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
     }
   }
   for (const fact of facts) {
-    const { key: _key, projectId: _projectId, confirmationTrust: _confirmationTrust, ...data } = fact;
+    const { key: _key, projectId: _projectId, confirmationTrust: _confirmationTrust, lifecycleTrust: _lifecycleTrust, ...data } = fact;
     yield JSON.stringify({ type: 'memory', fingerprint: await memoryBackupFingerprint(data), data }) + '\n';
   }
   for (const update of updates) {
@@ -1578,7 +1820,7 @@ async function* backupLines(projectId: string): AsyncGenerator<string> {
     let data = exportRecord;
     if (exportRecord.status === 'reviewing') {
       const acceptedFact = facts.find(fact => matchesAcceptedProposalFact(fact, exportRecord));
-      const status = !acceptedFact ? 'pending' : acceptedFact.status === 'rejected' || acceptedFact.status === 'superseded' ? 'revoked' : 'accepted';
+      const status = !acceptedFact ? 'pending' : isTerminalMemoryStatus(acceptedFact.status) ? 'revoked' : 'accepted';
       const changedAt = Math.max(Date.now(), exportRecord.statusHistory.at(-1)?.changedAt ?? 0);
       const action = status === 'pending' ? 'review-reopened' : status;
       data = { ...exportRecord, status, ...(acceptedFact ? { acceptedFactId: acceptedFact.id } : {}),
@@ -1736,6 +1978,7 @@ function validateTaskClaimTransition(event: ProjectTaskClaimEvent, events: Proje
 }
 
 export async function listProjectTaskClaims(projectId: string): Promise<ProjectTaskClaim[]> {
+  await expireProjectMemoryFacts(projectId);
   const [events, facts] = await withTransaction(['claims', 'memory'], 'readonly', async transaction => Promise.all([
     idbRequest<ProjectTaskClaimEvent[]>(transaction.objectStore('claims').index('projectId').getAll(IDBKeyRange.only(projectId))),
     idbRequest<ProjectMemoryFact[]>(transaction.objectStore('memory').index('projectId').getAll(IDBKeyRange.only(projectId))),
@@ -1769,7 +2012,7 @@ function matchesAcceptedProposalFact(fact: ProjectMemoryFact,
 function recoverInterruptedProposal(proposal: ProjectUpdateProposal, facts: ProjectMemoryFact[], changedAt: number): void {
   const acceptedFact = facts.find(fact => matchesAcceptedProposalFact(fact, proposal));
   proposal.status = !acceptedFact ? 'pending'
-    : acceptedFact.status === 'rejected' || acceptedFact.status === 'superseded' ? 'revoked' : 'accepted';
+    : isTerminalMemoryStatus(acceptedFact.status) ? 'revoked' : 'accepted';
   if (acceptedFact) proposal.acceptedFactId = acceptedFact.id;
   delete proposal.reviewingSince;
   proposal.reviewedAt = acceptedFact ? changedAt : undefined;
@@ -1835,6 +2078,7 @@ export async function listProjectUpdateProposals(projectId: string): Promise<Pro
 }
 
 export async function importSharedProjectUpdates(projectId: string): Promise<ProjectUpdateImportResult> {
+  await expireProjectMemoryFacts(projectId);
   const { project, shared } = await sharedProjectStatus(projectId);
   if (!project || !shared?.inboxHandle) return { imported: 0, pending: 0, changed: false };
   const inbox = await readSharedInbox(shared.inboxHandle, shared.inboxReadOffset ?? 0);
@@ -1972,6 +2216,7 @@ export async function connectSharedProjectInbox(projectId: string, handle: Share
 }
 
 export async function reviewProjectUpdateProposal(projectId: string, proposalId: string, decision: 'accepted' | 'rejected'): Promise<MemoryStatus | undefined> {
+  await expireProjectMemoryFacts(projectId);
   const now = Date.now();
   const proposal = await withTransaction(['updates'], 'readwrite', async transaction => {
     const updates = transaction.objectStore('updates');
@@ -2075,16 +2320,17 @@ export async function editProjectUpdateProposal(projectId: string, proposalId: s
 }
 
 export async function revokeAcceptedProjectUpdate(projectId: string, proposalId: string): Promise<void> {
+  await expireProjectMemoryFacts(projectId);
   const before = await withTransaction(['updates', 'memory'], 'readonly', async transaction => {
     const proposal = await idbRequest<ProjectUpdateProposal | undefined>(transaction.objectStore('updates').get(projectId + String.fromCharCode(0) + proposalId));
     if (!proposal || proposal.status !== 'accepted' || !proposal.acceptedFactId) throw new Error('This accepted project update cannot be revoked.');
     const fact = await idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + proposal.acceptedFactId));
-    if (!fact || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact is unavailable for revocation.');
+    if (!fact || isTerminalMemoryStatus(fact.status)) throw new Error('The accepted project fact is unavailable for revocation.');
     return fact;
   });
   const trust = await getProjectTrustSummary(projectId);
   const hasAuthenticatedConfirmation = await factConfirmationTrust(before, trust) === 'authenticated';
-  if (hasAuthenticatedConfirmation) await ensureProjectTrustReady(projectId);
+  const canSignRevocation = hasAuthenticatedConfirmation && trust.readyForConfirmations;
   const now = Date.now();
   await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
     const updates = transaction.objectStore('updates');
@@ -2095,13 +2341,13 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
     const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + current.acceptedFactId));
     if (!project || project.restoringSince || !fact || fact.updatedAt !== before.updatedAt
-      || fact.status === 'rejected' || fact.status === 'superseded') throw new Error('The accepted project fact changed or is unavailable for revocation.');
+      || isTerminalMemoryStatus(fact.status)) throw new Error('The accepted project fact changed or is unavailable for revocation.');
     current.status = 'reviewing';
     current.reviewingSince = now;
     current.statusHistory.push({ status: 'reviewing', changedAt: now });
     appendProposalAudit(current, 'review-started', 'user', now);
-    fact.status = 'rejected';
-    appendStatusChange(fact, 'rejected', now);
+    fact.status = 'revoked';
+    appendStatusChange(fact, 'revoked', now);
     fact.updatedAt = now;
     fact.revision = (fact.revision ?? 1) + 1;
     if (fact.conflictsWith.length) {
@@ -2110,7 +2356,7 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
         if (conflict) {
           conflict.conflictsWith = conflict.conflictsWith.filter(id => id !== fact.id);
           if (!conflict.conflictsWith.length && conflict.status === 'needs-review' && conflict.reviewStateBeforeConflict) {
-            const restoredStatus = conflict.reviewStateBeforeConflict;
+            const restoredStatus = conflict.reviewStateBeforeConflict === 'proposed' ? 'proposed' : 'needs-review';
             conflict.status = restoredStatus;
             appendStatusChange(conflict, restoredStatus, now);
             delete conflict.reviewStateBeforeConflict;
@@ -2134,11 +2380,10 @@ export async function revokeAcceptedProjectUpdate(projectId: string, proposalId:
     appendProposalAudit(current, 'revoked', 'user', now);
     updates.put(current);
   });
-  if (hasAuthenticatedConfirmation) {
-    const current = await withTransaction(['memory'], 'readonly', transaction =>
-      idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + before.id)));
-    if (current) await recordFactConfirmationRevocation(projectId, before, current, 'rejected');
-  }
+  const current = await withTransaction(['memory'], 'readonly', transaction =>
+    idbRequest<ProjectMemoryFact | undefined>(transaction.objectStore('memory').get(projectId + String.fromCharCode(0) + before.id)));
+  if (current && canSignRevocation) await recordFactConfirmationRevocation(projectId, before, current, 'revoked');
+  else if (current) await recordFactLifecycleEvent(projectId, current, 'claim.revoked', 'user-revoked');
 }
 function publicSharedStatus(project: ProjectRecord | undefined, shared: SharedProjectBackupRecord | undefined,
   state?: SharedProjectBackupStatus['state']): SharedProjectBackupStatus {
@@ -2197,7 +2442,11 @@ async function syncSharedProjectBackupOnce(projectId: string): Promise<SharedPro
       await withTransaction(['shared'], 'readwrite', async transaction => {
         transaction.objectStore('shared').put(synced);
       });
-      return publicSharedStatus(afterWrite, synced);
+      const latestProject = await withTransaction(['projects'], 'readonly', transaction =>
+        idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId)));
+      if (!latestProject || latestProject.restoringSince) return { connected: false, state: 'disconnected' };
+      if (latestProject.updatedAt !== synced.syncedProjectUpdatedAt) continue;
+      return publicSharedStatus(latestProject, synced);
     }
     return publicSharedStatus(await withTransaction(['projects'], 'readonly', transaction =>
       idbRequest<ProjectRecord | undefined>(transaction.objectStore('projects').get(projectId))), shared, 'out-of-date');
@@ -2384,9 +2633,14 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     || value.confirmationProjectId !== undefined && (typeof value.confirmationProjectId !== 'string' || !value.confirmationProjectId || value.confirmationProjectId.length > 200)
     || value.confirmationVersion !== undefined && (!Number.isSafeInteger(value.confirmationVersion) || (value.confirmationVersion as number) < 1)
     || value.confirmationRevocationEventId !== undefined && (typeof value.confirmationRevocationEventId !== 'string' || !value.confirmationRevocationEventId || value.confirmationRevocationEventId.length > 200)
+    || value.lifecycleProjectId !== undefined && (typeof value.lifecycleProjectId !== 'string' || !value.lifecycleProjectId || value.lifecycleProjectId.length > 200)
+    || value.expiresAt !== undefined && (!Number.isSafeInteger(value.expiresAt) || (value.expiresAt as number) < (value.createdAt as number))
+    || value.expiredAt !== undefined && (!Number.isSafeInteger(value.expiredAt) || (value.expiredAt as number) < (value.createdAt as number))
+    || value.status === 'expired' && value.expiresAt === undefined
+    || value.reconsiders !== undefined && (typeof value.reconsiders !== 'string' || !value.reconsiders || value.reconsiders.length > 200 || value.reconsiders === value.id)
     || value.taskState !== undefined && !TASK_STATES.includes(value.taskState as TaskState)
     || value.category !== 'task' && value.taskState !== undefined
-    || value.statusHistory !== undefined && (!Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 100)
+    || value.statusHistory !== undefined && (!Array.isArray(value.statusHistory) || value.statusHistory.length < 1 || value.statusHistory.length > 10_000)
     || !Array.isArray(value.evidence) || value.evidence.length < 1 || value.evidence.length > 20
     || !Array.isArray(value.conflictsWith) || value.conflictsWith.some(id => typeof id !== 'string' || id.length > 200)
     || value.supersedes !== undefined && (typeof value.supersedes !== 'string' || value.supersedes.length > 200)
@@ -2432,12 +2686,17 @@ async function validateBackupMemory(value: unknown, projectId: string, factIds: 
     ...(typeof value.confirmationProjectId === 'string' ? { confirmationProjectId: value.confirmationProjectId } : {}),
     ...(typeof value.confirmationVersion === 'number' ? { confirmationVersion: value.confirmationVersion } : {}),
     ...(typeof value.confirmationRevocationEventId === 'string' ? { confirmationRevocationEventId: value.confirmationRevocationEventId } : {}),
+    ...(typeof value.lifecycleProjectId === 'string' ? { lifecycleProjectId: value.lifecycleProjectId } : {}),
     confirmationTrust: value.status === 'confirmed' ? 'legacy-unverified' : 'inactive',
+    lifecycleTrust: isTerminalMemoryStatus(value.status as MemoryStatus) ? 'legacy-unverified' : 'inactive',
     ...(typeof value.taskState === 'string' ? { taskState: value.taskState as TaskState } : {}),
     ...(value.reviewStateBeforeConflict === 'confirmed' || value.reviewStateBeforeConflict === 'proposed'
       ? { reviewStateBeforeConflict: value.reviewStateBeforeConflict } : {}),
     ...(typeof value.supersedes === 'string' ? { supersedes: value.supersedes } : {}),
     ...(typeof value.supersededBy === 'string' ? { supersededBy: value.supersededBy } : {}),
+    ...(typeof value.expiresAt === 'number' ? { expiresAt: value.expiresAt } : {}),
+    ...(typeof value.expiredAt === 'number' ? { expiredAt: value.expiredAt } : {}),
+    ...(typeof value.reconsiders === 'string' ? { reconsiders: value.reconsiders } : {}),
     createdAt: value.createdAt as number, updatedAt: value.updatedAt as number,
   };
 }
@@ -2736,13 +2995,15 @@ export async function restoreProjectBackup(file: Blob): Promise<ProjectRecord> {
     for (const fact of facts) {
       if (fact.conflictsWith.some(id => !factsById.get(id)?.conflictsWith.includes(fact.id))
         || fact.supersedes && factsById.get(fact.supersedes)?.supersededBy !== fact.id
-        || fact.supersededBy && factsById.get(fact.supersededBy)?.supersedes !== fact.id) {
+        || fact.supersededBy && factsById.get(fact.supersededBy)?.supersedes !== fact.id
+        || fact.reconsiders && (!factsById.get(fact.reconsiders)
+          || !isTerminalMemoryStatus(factsById.get(fact.reconsiders)!.status))) {
         throw new Error('The project backup contains inconsistent memory relationships.');
       }
     }
     for (const update of updates) if (update.status === 'accepted' || update.status === 'revoked') {
       const fact = update.acceptedFactId ? factsById.get(update.acceptedFactId) : undefined;
-      if (!fact || update.status === 'revoked' && fact.status !== 'rejected' && fact.status !== 'superseded'
+      if (!fact || update.status === 'revoked' && !['rejected', 'superseded', 'expired', 'revoked'].includes(fact.status)
         || update.status === 'accepted' && !['confirmed', 'needs-review'].includes(fact.status)) {
         throw new Error('A candidate update status does not match its project fact.');
       }

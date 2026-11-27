@@ -11,6 +11,7 @@ import {
 } from './store';
 import type { EvidenceRelation, MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
 import { canAttestEvidenceRelation } from './evidence-binding';
+import { isTerminalMemoryStatus } from './memory-lifecycle';
 import { publicKeyFingerprint } from './trust-crypto';
 import type { RecoveryBundle } from './trust-crypto';
 import { generateProjectContext, memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
@@ -46,7 +47,7 @@ function roleLabel(role: string, t: Record<TranslationKey, string>): string {
 
 function memoryCategoryLabel(category: MemoryCategory, t: Record<TranslationKey, string>): string {
   const labels: Record<MemoryCategory, TranslationKey> = {
-    goal: 'goal', decision: 'decisions', constraint: 'constraints', task: 'nextSteps',
+    goal: 'goal', decision: 'decisions', preference: 'memoryPreference', constraint: 'constraints', task: 'nextSteps',
     risk: 'memoryRisk', 'open-question': 'memoryOpenQuestion',
   };
   return t[labels[category]];
@@ -55,7 +56,7 @@ function memoryCategoryLabel(category: MemoryCategory, t: Record<TranslationKey,
 function memoryStatusLabel(status: MemoryStatus, t: Record<TranslationKey, string>): string {
   const labels: Record<MemoryStatus, TranslationKey> = {
     confirmed: 'memoryStatusConfirmed', proposed: 'memoryStatusProposed', 'needs-review': 'memoryStatusNeedsReview',
-    rejected: 'memoryStatusRejected', superseded: 'memoryStatusSuperseded',
+    rejected: 'memoryStatusRejected', superseded: 'memoryStatusSuperseded', expired: 'memoryStatusExpired', revoked: 'memoryStatusRevoked',
   };
   return t[labels[status]];
 }
@@ -70,6 +71,11 @@ function confirmationTrustLabel(fact: ProjectMemoryFact, t: Record<TranslationKe
       : fact.confirmationTrust === 'revoked' ? labels.revoked
         : fact.confirmationTrust === 'inactive' ? labels.inactive : labels.legacy;
   return t[key];
+}
+
+function lifecycleTrustLabel(fact: ProjectMemoryFact, t: Record<TranslationKey, string>): string {
+  return fact.lifecycleTrust === 'authenticated' ? t.memoryLifecycleSigned
+    : fact.lifecycleTrust === 'invalid' ? t.memoryLifecycleInvalid : t.memoryLifecycleUnverified;
 }
 
 function safeEvidenceMessages(content: string): Message[] {
@@ -132,6 +138,8 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [evidenceCommit, setEvidenceCommit] = useState('');
   const [evidenceCommand, setEvidenceCommand] = useState('');
   const [replacesId, setReplacesId] = useState('');
+  const [expiresAtDate, setExpiresAtDate] = useState('');
+  const [reconsidersId, setReconsidersId] = useState('');
   const [working, setWorking] = useState('');
   const [query, setQuery] = useState('');
   const [budget, setBudget] = useState(12000);
@@ -144,7 +152,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [aiBusy, setAiBusy] = useState(false);
   const aiController = useRef<AbortController | null>(null);
   const aiUserCancelled = useRef(false);
-  const categoryOptions: MemoryCategory[] = ['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'];
+  const categoryOptions: MemoryCategory[] = ['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'];
   const sessionChoices = useMemo(() => {
     const byId = new Map<string, SessionState>(sessions.map(session => [session.id, {
       id: session.id, title: session.title, currentVersion: session.currentVersion,
@@ -299,11 +307,12 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const evidenceMessage = evidenceMessages.find(message => message.id === evidenceMessageId);
   const matchingMessages = evidenceMessages.filter(message => !messageSearch
     || `${message.role} ${message.content}`.toLocaleLowerCase().includes(messageSearch.toLocaleLowerCase())).slice(0, 100);
-  const selectableReplacements = facts.filter(fact => !['rejected', 'superseded'].includes(fact.status));
+  const selectableReplacements = facts.filter(fact => !isTerminalMemoryStatus(fact.status));
 
   function resetFactForm() {
     setTopic(''); setStatement(''); setEvidenceQuote(''); setEvidenceReference(''); setEvidenceCommit('');
-    setEvidenceCommand(''); setTaskState('unclear'); setReplacesId(''); setMessageSearch(''); setCreateOpen(false);
+    setEvidenceCommand(''); setTaskState('unclear'); setReplacesId(''); setExpiresAtDate('');
+    setReconsidersId(''); setMessageSearch(''); setCreateOpen(false);
   }
 
   async function saveFact(status: 'confirmed' | 'needs-review') {
@@ -319,10 +328,14 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         evidence = [{ kind: evidenceKind, reference: evidenceReference, commit: evidenceCommit,
           command: evidenceKind === 'test' ? evidenceCommand : undefined, quote: evidenceQuote }];
       }
+      const expiresAt = expiresAtDate ? new Date(`${expiresAtDate}T23:59:59`).getTime() : undefined;
+      if (expiresAt !== undefined && !Number.isSafeInteger(expiresAt)) throw new Error(t.memoryExpiresAt);
       await createProjectMemoryFact(project.id, {
         category, topic, statement, origin: 'user', status,
         ...(category === 'task' ? { taskState } : {}), evidence,
         ...(replacesId ? { supersedes: replacesId } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+        ...(reconsidersId ? { reconsiders: reconsidersId } : {}),
       });
       resetFactForm();
       await refreshMemory();
@@ -332,14 +345,15 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     finally { setWorking(''); }
   }
 
-  async function reviewFact(fact: ProjectMemoryFact, status: 'confirmed' | 'needs-review' | 'rejected') {
+  async function reviewFact(fact: ProjectMemoryFact, status: 'confirmed' | 'needs-review' | 'rejected' | 'revoked') {
     setWorking(fact.id); setError('');
     try {
       await updateProjectMemoryStatus(project.id, fact.id, status);
       setGenerated(null);
       await refreshMemory();
       await onChanged();
-      notify(status === 'confirmed' ? t.memoryFactConfirmed : status === 'rejected' ? t.memoryFactRejected : t.memoryFactNeedsReview);
+      notify(status === 'confirmed' ? t.memoryFactConfirmed : status === 'rejected' ? t.memoryFactRejected
+        : status === 'revoked' ? t.memoryStatusRevoked : t.memoryFactNeedsReview);
     } catch (value) { setError(value instanceof Error ? value.message : t.memorySaveFailed); }
     finally { setWorking(''); }
   }
@@ -362,7 +376,18 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     setTaskState(fact.taskState ?? 'unclear');
     setEvidenceKind('conversation'); setEvidenceSessionId(fact.evidence.find(item => item.kind === 'conversation')?.sessionId ?? sessionChoices[0]?.id ?? '');
     setEvidenceVersion(fact.evidence.find(item => item.kind === 'conversation')?.version ?? 1);
-    setReplacesId(fact.id); setCreateOpen(true);
+    setReplacesId(fact.status === 'confirmed' ? fact.id : '');
+    setExpiresAtDate(fact.expiresAt ? new Date(fact.expiresAt).toISOString().slice(0, 10) : '');
+    setReconsidersId(''); setCreateOpen(true);
+  }
+
+  function startReconsideration(fact: ProjectMemoryFact) {
+    setCategory(fact.category); setTopic(fact.topic); setStatement(fact.statement);
+    setTaskState(fact.taskState ?? 'unclear');
+    setEvidenceKind('conversation'); setEvidenceSessionId(fact.evidence.find(item => item.kind === 'conversation')?.sessionId ?? sessionChoices[0]?.id ?? '');
+    setEvidenceVersion(fact.evidence.find(item => item.kind === 'conversation')?.version ?? 1);
+    setReplacesId(''); setExpiresAtDate('');
+    setReconsidersId(fact.id); setCreateOpen(true);
   }
 
   function generateContext() {
@@ -443,7 +468,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
       }
       if (!sources.length) throw new Error(t.memoryAIEmptyEvidence);
       const prompt = buildAIExtractionPrompt({ projectName: project.name, projectStatus: project.summary,
-        selectedFacts: facts.filter(fact => fact.status === 'confirmed').slice(0, 20).map(fact => ({
+        selectedFacts: facts.filter(fact => fact.status === 'confirmed' && (fact.expiresAt === undefined || fact.expiresAt > Date.now())).slice(0, 20).map(fact => ({
           category: fact.category, topic: fact.topic, statement: fact.statement, status: fact.status,
         })), messages: sources });
       const request = await fetch(endpoint, {
@@ -492,7 +517,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     <div className="project-memory-heading"><div><h3 id="project-memory-heading"><Sparkles size={15} />{t.projectMemoryTitle}<span>{facts.length}</span></h3><p>{t.projectMemoryHint}</p></div><button className="button secondary small" disabled={!!working || refreshing} onClick={() => { setCreateOpen(value => !value); setError(''); }}><Plus size={14} />{t.projectMemoryAdd}</button></div>
     {error && <p className="project-error" role="alert"><AlertCircle size={14} />{error}</p>}
     {refreshing && <p className="project-memory-loading" role="status"><LoaderCircle size={14} className="spin" />{t.projectWorking}</p>}
-    {facts.some(fact => !['rejected', 'superseded'].includes(fact.status) && fact.conflictsWith.length > 0) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
+    {facts.some(fact => !isTerminalMemoryStatus(fact.status) && fact.conflictsWith.length > 0) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
     <section className="memory-trust-panel" aria-label={t.memoryTrustTitle}>
       <div className="memory-trust-heading"><KeyRound size={15} /><strong>{t.memoryTrustTitle}</strong></div>
       {!trust.state ? <>
@@ -545,13 +570,15 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         <label className="memory-wide"><span>{t.memoryEvidenceExcerpt}</span><textarea rows={2} maxLength={1000} value={evidenceQuote} onChange={event => setEvidenceQuote(event.target.value)} /></label>
         <p className="memory-unverified-note memory-wide"><ShieldAlert size={13} />{t.memoryUserRecordedDisclaimer}</p>
       </>}
-      <label><span>{t.memoryReplaces}</span><select value={replacesId} onChange={event => setReplacesId(event.target.value)}><option value="">{t.memoryNoReplacement}</option>{selectableReplacements.map(fact => <option key={fact.id} value={fact.id}>{memoryCategoryLabel(fact.category, t)} · {fact.topic}</option>)}</select></label>
-      <div className="memory-form-actions memory-wide"><button className="button secondary small" disabled={!!working} onClick={resetFactForm}><X size={13} />{t.cancel}</button><button className="button secondary small" disabled={!!working || !topic.trim() || !statement.trim()} onClick={() => void saveFact('needs-review')}>{t.memorySaveReview}</button><button className="button primary small" disabled={!!working || !trust.readyForConfirmations || !topic.trim() || !statement.trim()} onClick={() => void saveFact('confirmed')}>{working === 'save' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t.memorySaveConfirmed}</button></div>
+      <label><span>{t.memoryExpiresAt}</span><input type="date" value={expiresAtDate} min={new Date().toISOString().slice(0, 10)} onChange={event => setExpiresAtDate(event.target.value)} /></label>
+      <label><span>{t.memoryReplaces}</span><select value={replacesId} disabled={!!reconsidersId} onChange={event => setReplacesId(event.target.value)}><option value="">{t.memoryNoReplacement}</option>{selectableReplacements.map(fact => <option key={fact.id} value={fact.id}>{memoryCategoryLabel(fact.category, t)} · {fact.topic}</option>)}</select></label>
+      {reconsidersId && <p className="memory-unverified-note memory-wide">{t.memoryReconsideredFrom} · {reconsidersId}</p>}
+      <div className="memory-form-actions memory-wide"><button className="button secondary small" disabled={!!working} onClick={resetFactForm}><X size={13} />{t.cancel}</button><button className="button secondary small" disabled={!!working || !topic.trim() || !statement.trim()} onClick={() => void saveFact('needs-review')}>{t.memorySaveReview}</button><button className="button primary small" disabled={!!working || !!reconsidersId || !trust.readyForConfirmations || !topic.trim() || !statement.trim()} onClick={() => void saveFact('confirmed')}>{working === 'save' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t.memorySaveConfirmed}</button></div>
     </div>}
 
     {!facts.length && !refreshing && <p className="project-empty">{t.projectMemoryEmpty}</p>}
     <div className="memory-fact-list">{facts.map(fact => <article className={`memory-fact ${fact.status}`} key={fact.id}>
-      <div className="memory-fact-heading"><span className={`memory-status ${fact.status}`}>{memoryStatusLabel(fact.status, t)}</span>{(fact.status === 'confirmed' || fact.confirmationTrust === 'revoked') && <span className="memory-confirmation-trust">{confirmationTrustLabel(fact, t)}</span>}<span>{memoryCategoryLabel(fact.category, t)}</span><span>{fact.origin === 'ai' ? t.memoryOriginAI : t.memoryOriginUser}</span>{staleCount(fact) && <span className="memory-stale"><ShieldAlert size={12} />{t.memoryStaleEvidence}</span>}</div>
+      <div className="memory-fact-heading"><span className={`memory-status ${fact.status}`}>{memoryStatusLabel(fact.status, t)}</span>{(fact.status === 'confirmed' || fact.confirmationTrust === 'revoked') && <span className="memory-confirmation-trust">{confirmationTrustLabel(fact, t)}</span>}{isTerminalMemoryStatus(fact.status) && <span className="memory-confirmation-trust">{lifecycleTrustLabel(fact, t)}</span>}<span>{memoryCategoryLabel(fact.category, t)}</span><span>{fact.origin === 'ai' ? t.memoryOriginAI : t.memoryOriginUser}</span>{staleCount(fact) && <span className="memory-stale"><ShieldAlert size={12} />{t.memoryStaleEvidence}</span>}</div>
       <strong>{fact.topic}</strong><p>{fact.statement}</p>
       {fact.conflictsWith.length > 0 && <small className="memory-conflict-note">{t.memoryPotentialConflict} · {fact.conflictsWith.length}</small>}
       {fact.supersedes && <small>{t.memorySupersedes} · {fact.supersedes}</small>}
@@ -567,12 +594,18 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         {!!evidence.legacyRelationHistory?.length && <small>{t.memoryRelationHistoryUntrusted}</small>}
         {!!evidence.relationHistory?.length && evidence.relationBasis !== 'user_attestation' && <small>{t.memoryRelationHistoryUntrusted}</small>}
       </div>)}</div>
-      {fact.status !== 'rejected' && fact.status !== 'superseded' && <div className="memory-fact-actions">
+      {!isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
         {fact.status !== 'confirmed' && <button className="text-button" disabled={!!working || !trust.readyForConfirmations} onClick={() => void reviewFact(fact, 'confirmed')}>{t.memoryConfirmFact}</button>}
+        {fact.status === 'confirmed' && <button className="text-button danger-text" disabled={!!working} onClick={() => void reviewFact(fact, 'revoked')}>{t.memoryRevokeFact}</button>}
         <button className="text-button" disabled={!!working} onClick={() => void startCorrection(fact)}>{t.memoryCorrectFact}</button>
         {fact.status !== 'needs-review' && <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'needs-review')}>{t.memoryMarkReview}</button>}
         <button className="text-button danger-text" disabled={!!working} onClick={() => void reviewFact(fact, 'rejected')}>{t.memoryRejectFact}</button>
       </div>}
+      {isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
+        <button className="text-button" disabled={!!working} onClick={() => startReconsideration(fact)}>{t.memoryReconsiderFact}</button>
+      </div>}
+      {fact.reconsiders && <small>{t.memoryReconsideredFrom} · {fact.reconsiders}</small>}
+      {fact.expiresAt && <small>{t.memoryExpiresAt} · {new Date(fact.expiresAt).toLocaleDateString()}</small>}
     </article>)}</div>
 
     <details className="memory-ai-panel" open={aiEnabled}>

@@ -59,6 +59,47 @@ test('project context never truncates a fact and reports budget omissions', () =
   assert.equal(result.text.includes('A'.repeat(1400)), false);
 });
 
+test('terminal facts stay out of current context and remain labeled in package history', () => {
+  const rejected = fact({
+    id: 'rejected-runtime', topic: 'Runtime', statement: 'Use an undocumented remote service.',
+    status: 'rejected', lifecycleTrust: 'legacy-unverified',
+    statusHistory: [{ status: 'needs-review', changedAt: 1 }, { status: 'rejected', changedAt: 2 }],
+  });
+  const superseded = fact({
+    id: 'superseded-runtime', topic: 'Runtime', statement: 'Use the old transport.', status: 'superseded',
+    statusHistory: [{ status: 'confirmed', changedAt: 1 }, { status: 'superseded', changedAt: 2 }],
+  });
+  const expired = fact({
+    id: 'expired-runtime', topic: 'Runtime', statement: 'Use the dated rollout approval.', status: 'expired',
+    expiresAt: 1, expiredAt: 2, statusHistory: [{ status: 'needs-review', changedAt: 1 }, { status: 'expired', changedAt: 2 }],
+  });
+  const revoked = fact({
+    id: 'revoked-runtime', topic: 'Runtime', statement: 'Use the revoked approval.', status: 'revoked',
+    statusHistory: [{ status: 'confirmed', changedAt: 1 }, { status: 'revoked', changedAt: 2 }],
+  });
+  const terminalFacts = [rejected, superseded, expired, revoked];
+  const project = { name: 'Lifecycle', summary: '', importantNotes: '' };
+  const generated = generateProjectContext({ project, facts: terminalFacts, sessions: [], query: 'remote service', budget: 2000 });
+  assert.equal(generated.includedFactIds.length, 0);
+  assert.deepEqual(generated.omissions.map(item => item.reason), Array(4).fill('terminal-status'));
+  assert.doesNotMatch(generated.text, /undocumented remote service/i);
+
+  const pack = buildProjectContextPackage({ project, facts: terminalFacts, sessions: [], generated });
+  const files = unzipSync(pack.bytes);
+  const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!)) as {
+    facts: unknown[];
+    terminalHistory: { id: string; status: string; trust: string; lifecycleTrust?: string }[];
+    reviewSignals: { authenticatedRejections: number };
+  };
+  assert.equal(memory.facts.length, 0);
+  assert.deepEqual(memory.terminalHistory.map(item => item.status), ['rejected', 'superseded', 'expired', 'revoked']);
+  assert.match(JSON.stringify(memory.terminalHistory), /"status":"rejected"/);
+  assert.match(JSON.stringify(memory.terminalHistory), /"trust":"historical-only"/);
+  assert.match(JSON.stringify(memory.terminalHistory), /"lifecycleTrust":"legacy-unverified"/);
+  assert.match(JSON.stringify(memory.terminalHistory), /Use an undocumented remote service/);
+  assert.equal(memory.reviewSignals.authenticatedRejections, 0);
+});
+
 test('AI endpoints reject credential-bearing and insecure remote URLs', () => {
   assert.equal(validateAIEndpoint('https://api.example.test/v1/chat/completions'), 'https://api.example.test/v1/chat/completions');
   assert.equal(validateAIEndpoint('http://localhost:8080/v1/chat/completions'), 'http://localhost:8080/v1/chat/completions');
@@ -79,6 +120,17 @@ test('AI suggestions must cite exact excerpts from the explicitly selected evide
     evidence: [{ sessionId: 'other', version: 1, messageId: 'message-1', quote: 'invented quote' }],
   }] }) } }] }, sources), /outside the selected evidence/);
   assert.throws(() => parseAISuggestionResponse({ choices: [{ message: { content: 'not JSON' } }] }, sources), /structured data/);
+});
+
+test('user preferences are a first-class fact category in extracted candidate schemas', () => {
+  const sources = [{ sessionId: 'preference-session', version: 1, title: 'Synthetic preference',
+    messageId: 'preference-message', role: 'user', content: 'Please keep replies concise.' }];
+  const suggestions = parseAISuggestionResponse({ choices: [{ message: { content: JSON.stringify({ facts: [{
+    category: 'preference', topic: 'Response style', statement: 'Keep replies concise.',
+    evidence: [{ sessionId: 'preference-session', version: 1, messageId: 'preference-message', quote: 'keep replies concise' }],
+  }] }) } }] }, sources);
+  assert.equal(suggestions[0]?.category, 'preference');
+  assert.equal(suggestions[0]?.statement, 'Keep replies concise.');
 });
 
 test('AI extraction prompt names its limits and sends only supplied evidence', () => {

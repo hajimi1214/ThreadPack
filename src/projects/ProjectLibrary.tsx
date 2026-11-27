@@ -26,6 +26,7 @@ interface Props {
 
 export default function ProjectLibrary({ activeSession, t, lang, close, readActiveSession, openSession, notify }: Props) {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [projectReload, setProjectReload] = useState(0);
   const [sessions, setSessions] = useState<ProjectSessionSummary[]>([]);
@@ -88,7 +89,8 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   useEffect(() => {
     let active = true;
     void listProjects().then(value => { if (active) { setProjects(value); setSelectedProjectId(value[0]?.id ?? ''); } })
-      .catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); });
+      .catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); })
+      .finally(() => { if (active) setProjectsLoading(false); });
     return () => { active = false; };
   }, [t.projectStorageError]);
 
@@ -172,6 +174,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   }
 
   function create() {
+    if (projectsLoading) return;
     void run('create', async () => {
       const project = await createProject(newName);
       setNewName('');
@@ -372,10 +375,11 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     <div className="project-library-heading"><div><h2>{t.projectsTitle}</h2><p className="dialog-subtitle">{t.projectsHint}</p></div><button className="button secondary small" disabled={!!busy} onClick={() => backupInput.current?.click()}><Upload size={14} />{t.projectBackupImport}</button></div>
     <input ref={backupInput} className="file-input" type="file" accept=".jsonl,application/x-ndjson,application/json" aria-label={t.projectBackupImport} onChange={event => restoreBackup(event.target.files?.[0])} />
     {error && <p className="project-error" role="alert">{error}</p>}
-    <div className="project-create-row"><label><span>{t.projectName}</span><input value={newName} maxLength={100} onChange={event => setNewName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && newName.trim()) create(); }} /></label><button className="button primary small" disabled={!!busy || !newName.trim()} onClick={create}><FolderPlus size={14} />{t.projectCreate}</button></div>
+    <div className="project-create-row"><label><span>{t.projectName}</span><input value={newName} maxLength={100} onChange={event => setNewName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && newName.trim()) create(); }} /></label><button className="button primary small" disabled={projectsLoading || !!busy || !newName.trim()} onClick={create}><FolderPlus size={14} />{t.projectCreate}</button></div>
     <div className="project-library-grid">
-      <section className="project-list" aria-label={t.projects}>
-        {!projects.length && <p className="project-empty">{t.projectEmpty}</p>}
+      <section className="project-list" aria-label={t.projects} aria-busy={projectsLoading}>
+        {projectsLoading && <p className="project-empty">{t.projectLoading}</p>}
+        {!projectsLoading && !projects.length && <p className="project-empty">{t.projectEmpty}</p>}
         {projects.map(project => <button key={project.id} data-project-id={project.id} className={`project-list-item ${selectedProjectId === project.id ? 'active' : ''}`} aria-pressed={selectedProjectId === project.id} onClick={() => setSelectedProjectId(project.id)}><strong>{project.name}</strong><small>{formatDate(project.updatedAt)}</small></button>)}
       </section>
       {selectedProject && <section className="project-detail">
@@ -407,7 +411,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
           {proposals.filter(proposal => proposal.status === 'pending').map(proposal => <article className="project-update-item" key={proposal.id}>
             <div>
               {editingProposalId === proposal.id ? <div className="project-update-edit">
-                <label><span>{t.memoryCategory}</span><select value={editingProposalCategory} onChange={event => setEditingProposalCategory(event.target.value as ProjectUpdateProposal['category'])}>{['goal', 'decision', 'constraint', 'task', 'risk', 'open-question'].map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+                <label><span>{t.memoryCategory}</span><select value={editingProposalCategory} onChange={event => setEditingProposalCategory(event.target.value as ProjectUpdateProposal['category'])}>{['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'].map(category => <option key={category} value={category}>{category}</option>)}</select></label>
                 <label><span>{t.projectUpdateTopic}</span><input maxLength={160} value={editingProposalTopic} onChange={event => setEditingProposalTopic(event.target.value)} /></label>
                 <label><span>{t.projectUpdateStatement}</span><textarea maxLength={4000} value={editingProposalStatement} onChange={event => setEditingProposalStatement(event.target.value)} /></label>
                 {editingProposalCategory === 'task' && <label><span>{t.memoryTaskProgress}</span><select value={editingProposalTaskState} onChange={event => setEditingProposalTaskState(event.target.value as NonNullable<ProjectUpdateProposal['taskState']>)}>{[['not-started', t.memoryTaskNotStarted], ['in-progress', t.memoryTaskInProgress], ['done', t.memoryTaskDone], ['blocked', t.memoryTaskBlocked], ['unclear', t.memoryTaskUnclear]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}

@@ -3,7 +3,7 @@ export const TRUST_CHAIN_ORIGIN = '0'.repeat(64);
 export const TRUST_KEY_ALGORITHM = 'ECDSA-P256-SHA256' as const;
 
 export type TrustEventType =
-  | 'claim.confirmed' | 'claim.rejected' | 'claim.confirmation-revoked'
+  | 'claim.confirmed' | 'claim.rejected' | 'claim.revoked' | 'claim.expired' | 'claim.superseded' | 'claim.confirmation-revoked'
   | 'evidence.relation-attested' | 'evidence.relation-revoked'
   | 'identity.key-rotated' | 'identity.key-revoked' | 'identity.device-retrusted';
 
@@ -145,7 +145,7 @@ export async function verifyTrustEventSignature(event: SignedTrustEvent, publicK
 }
 
 function isTrustEventType(value: unknown): value is TrustEventType {
-  return ['claim.confirmed', 'claim.rejected', 'claim.confirmation-revoked', 'evidence.relation-attested',
+  return ['claim.confirmed', 'claim.rejected', 'claim.revoked', 'claim.expired', 'claim.superseded', 'claim.confirmation-revoked', 'evidence.relation-attested',
     'evidence.relation-revoked', 'identity.key-rotated', 'identity.key-revoked', 'identity.device-retrusted'].includes(value as string);
 }
 
