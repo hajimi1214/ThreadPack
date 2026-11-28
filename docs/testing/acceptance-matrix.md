@@ -26,3 +26,9 @@ After the Stage 4 export-boundary regression fixes, the context generation, incr
 ## Stage 5 collaboration addendum
 
 The current candidate adds least-privilege MCP instance settings. Read and task-list tools are available by default. Candidate submission and task coordination require separate opt-ins plus a fixed client label and exact project ID. The model cannot provide or override the client label in tool arguments. This is local operator configuration, not external-client authentication. See `docs/release/ultimate-stage5-collaboration-report.md` and logs in `docs/release/evidence/ultimate-stage5/`.
+
+## Stage 6 client ecosystem checkpoint
+
+The project-library suite passed 7/7 in Chromium. It verifies existing project isolation and backup flows, plus the new archive/reload/restore flow preserving the project ID and saved history. The MCP diagnostic test verifies that `threadpack mcp --check` reports an absent inbox without creating it, reports a present empty inbox as valid, enforces project scope and leaves files unchanged. Full Node tests passed 254/254, TypeScript checking and web/CLI production builds passed. Detailed logs and the incomplete-stage report are in `docs/release/evidence/ultimate-stage6/` and `docs/release/phase-reports/ultimate-stage6-client-ecosystem.md`.
+
+The checkpoint does not verify or implement authenticated client identity, a product MCP setup wizard, external-client capability detection or durable connection logs. Real WorkBuddy, Codex, Claude Code, Linux, Firefox and WebKit behavior remains NOT VERIFIED for this checkpoint. Stage 6 remains IN PROGRESS.
