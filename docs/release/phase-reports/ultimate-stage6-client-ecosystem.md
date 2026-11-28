@@ -148,3 +148,9 @@
 | 远程推送 | 实现和报告提交完成后仅推送候选分支，不触及 `main` |
 
 下一步优先处理本地客户端身份/授权管理并取得真实客户端验证证据。后续阶段不得把本报告列出的 NOT VERIFIED 项改写成已支持能力，除非补充新的可复核证据。
+
+### WorkBuddy 真实只读接入补充
+
+2026-11-29 在 WorkBuddy 5.11.3 上完成了一次真实模型只读调用。WorkBuddy 从临时 stdio 配置发现两个 ThreadPack 工具，`tools/list` 成功，并实际调用 `threadpack_project_context` 两次及 `threadpack_project_tasks` 一次。合成项目事实和其未认证/未绑定证据状态在回复中得到正确区分。
+
+测试过程中 WorkBuddy 界面显示了内置“查看工作区根目录内容”动作，回复称默认工作区为空。该目录访问超出本次只读合成项目授权范围，是否实际执行无法独立验证，因此作为 P1 客户端安全边界问题记录。本地连接器已禁用，临时文件清理和应用内连接器记录删除状态见 [WorkBuddy 只读接入验证补充报告](ultimate-stage6-workbuddy-readonly-validation.md)。阶段 6 仍为 IN PROGRESS。真实写入、审核、跨项目隔离、Codex/Claude Code 真实连接以及恶意历史提示样本仍未验证。

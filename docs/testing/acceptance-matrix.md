@@ -33,6 +33,10 @@ The project-library suite passed 8/8 in Chromium with one worker. A separate 8-w
 
 The checkpoint does not implement authenticated client identity, client-specific configuration validation, external-client capability detection or durable connection logs. The in-product guide generates manual examples only. Real WorkBuddy, Codex, Claude Code, Linux, Firefox and WebKit behavior remains NOT VERIFIED for this checkpoint. Stage 6 remains IN PROGRESS.
 
+### Stage 6 WorkBuddy read-only follow-up
+
+WorkBuddy 5.11.3 accepted a temporary local stdio configuration, discovered 2/2 ThreadPack tools, and made three successful model-driven ThreadPack calls against a synthetic v8 snapshot. Its answer preserved the legacy-unverified confirmation and unattached evidence boundary. The same interaction showed a WorkBuddy built-in workspace-root action outside the test authorization. Whether that local listing completed is NOT VERIFIED. Candidate writing, human review, two-project isolation, injection testing, Codex and Claude Code remain NOT VERIFIED. See `docs/release/phase-reports/ultimate-stage6-workbuddy-readonly-validation.md` and `docs/release/evidence/ultimate-stage6/workbuddy-stage6-real-connection-log.jsonl`.
+
 ## Stage 2 lifecycle hardening follow-up
 
 On the current candidate, TypeScript checking, 261 Node tests, and the production web/CLI build pass. The Chromium project-memory/shared-state regression passes 24/24 serially. The replacement lifecycle tests pass 2/2 on Chromium, Firefox and WebKit after the final ordering change. Full Firefox and WebKit project suites passed 23 tests with one capability skip each on the preceding code state. An 8-worker Chromium attempt had four failures, while the serial rerun passed, so parallel stability remains P2 and the test logs are retained. Linux and fault-injected interruption/recovery are NOT VERIFIED. See `docs/release/phase-reports/ultimate-stage2-lifecycle-hardening.md` and `docs/release/evidence/ultimate-stage2/`.
