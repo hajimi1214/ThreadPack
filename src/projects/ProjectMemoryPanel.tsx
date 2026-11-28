@@ -349,7 +349,8 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const evidenceMessage = evidenceMessages.find(message => message.id === evidenceMessageId);
   const matchingMessages = evidenceMessages.filter(message => !messageSearch
     || `${message.role} ${message.content}`.toLocaleLowerCase().includes(messageSearch.toLocaleLowerCase())).slice(0, 100);
-  const selectableReplacements = projection.currentFacts;
+  const selectableReplacements = projection.currentFacts.filter(fact => fact.status === 'confirmed'
+    && fact.confirmationTrust === 'authenticated' && !!fact.confirmationEventId && !fact.conflictsWith.length);
 
   function resetFactForm() {
     setTopic(''); setStatement(''); setEvidenceQuote(''); setEvidenceReference(''); setEvidenceCommit('');
@@ -375,7 +376,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
       await createProjectMemoryFact(project.id, {
         category, topic, statement, origin: 'user', status,
         ...(category === 'task' ? { taskState } : {}), evidence,
-        ...(replacesId ? { supersedes: replacesId } : {}),
+        ...(replacesId && status === 'confirmed' ? { supersedes: replacesId } : {}),
         ...(expiresAt !== undefined ? { expiresAt } : {}),
         ...(reconsidersId ? { reconsiders: reconsidersId } : {}),
       });
@@ -418,7 +419,8 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     setTaskState(fact.taskState ?? 'unclear');
     setEvidenceKind('conversation'); setEvidenceSessionId(fact.evidence.find(item => item.kind === 'conversation')?.sessionId ?? sessionChoices[0]?.id ?? '');
     setEvidenceVersion(fact.evidence.find(item => item.kind === 'conversation')?.version ?? 1);
-    setReplacesId(fact.status === 'confirmed' ? fact.id : '');
+    setReplacesId(fact.status === 'confirmed' && fact.confirmationTrust === 'authenticated'
+      && !!fact.confirmationEventId && !fact.conflictsWith.length ? fact.id : '');
     setExpiresAtDate(fact.expiresAt ? new Date(fact.expiresAt).toISOString().slice(0, 10) : '');
     setReconsidersId(''); setCreateOpen(true);
   }

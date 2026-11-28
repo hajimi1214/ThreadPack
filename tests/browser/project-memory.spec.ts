@@ -421,6 +421,33 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
   await importConversation(page, 'ai-evidence.json', 'The service must never send conversation text over the network.');
   const dialog = await openProjectMemory(page);
   await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  const userForm = dialog.locator('.memory-form');
+  await userForm.locator('select').nth(0).selectOption('constraint');
+  await userForm.locator('input').nth(0).fill('Network privacy');
+  await userForm.locator('textarea').nth(0).fill('Conversation text must stay offline.');
+  await userForm.locator('select').nth(1).selectOption('user');
+  await userForm.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const userFact = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'Conversation text must stay offline.' });
+  await expect(userFact).toContainText('Signed by this project’s local trusted key');
+  const targetFactId = await page.evaluate(async () => {
+    const request = indexedDB.open('threadpack-project-library');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction('memory', 'readonly');
+    const records = await new Promise<{ id: string; statement: string }[]>((resolve, reject) => {
+      const read = transaction.objectStore('memory').getAll();
+      read.onsuccess = () => resolve(read.result);
+      read.onerror = () => reject(read.error);
+    });
+    db.close();
+    const fact = records.find(record => record.statement === 'Conversation text must stay offline.');
+    if (!fact) throw new Error('The confirmed target fact is unavailable.');
+    return fact.id;
+  });
   const secret = 'synthetic-api-key-do-not-store';
   const endpoint = new URL('/v1/chat/completions', page.url()).toString();
   let capturedAuthorization = '';
@@ -439,6 +466,7 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
       capturedEvidence = source.content;
       await route.fulfill({ json: { choices: [{ message: { content: JSON.stringify({ facts: [{
         category: 'constraint', topic: 'Network privacy', statement: 'Conversation text must stay offline.',
+        supersedes: targetFactId, status: 'confirmed',
         evidence: [{ sessionId: source.sessionId, version: source.version, messageId: source.messageId, quote: 'never send conversation text over the network' }],
       }] }) } }] } });
     } catch (error) {
@@ -456,19 +484,22 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
   await ai.locator('.memory-ai-sessions label').filter({ hasText: 'Runtime decisions' }).getByRole('checkbox').check();
   await ai.getByRole('button', { name: 'Extract suggestions', exact: true }).click();
 
-  const proposal = dialog.locator('.memory-fact').filter({ hasText: 'Conversation text must stay offline.' });
+  const proposal = dialog.locator('.memory-fact.proposed').filter({ hasText: 'Conversation text must stay offline.' });
   await expect(proposal).toContainText('AI proposal · not confirmed');
   await expect(proposal).toContainText('Excerpt matched to the saved message');
+  await expect(dialog.locator('.memory-fact')).toHaveCount(2);
+  await expect(userFact).toContainText('Signed by this project’s local trusted key');
   expect(capturedAuthorization).toBe(`Bearer ${secret}`);
   expect(capturedEvidence).toContain('The service must never send conversation text over the network.');
   expect(routeError).toBe('');
 
-  await setupLocalProjectTrust(page, dialog);
-  await proposal.getByRole('button', { name: 'Confirm', exact: true }).click();
-  await expect(proposal).toContainText('Confirmed by user');
   await ai.getByRole('button', { name: 'Extract suggestions', exact: true }).click();
-  await expect(dialog.locator('.memory-fact')).toHaveCount(1);
-  await expect(dialog.locator('.memory-fact')).toContainText('Confirmed by user');
+  await expect(dialog.locator('.memory-fact')).toHaveCount(2);
+  await expect(userFact).toContainText('Signed by this project’s local trusted key');
+  await proposal.getByRole('button', { name: 'Confirm', exact: true }).click();
+  const confirmedProposal = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'AI suggested' });
+  await expect(confirmedProposal.locator('p')).toHaveText('Conversation text must stay offline.');
+  await expect(confirmedProposal).toContainText('Confirmed by user');
   const download = page.waitForEvent('download');
   await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
   const backupPath = await (await download).path();
@@ -476,10 +507,28 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
   const backupText = await readFile(backupPath!, 'utf8');
   expect(backupText).toContain('Conversation text must stay offline.');
   expect(backupText).not.toContain(secret);
+  const backupRecords = backupText.trim().split(/\r?\n/).map(line => JSON.parse(line) as {
+    type: string;
+    data?: { origin?: string; status?: string; revision?: number; confirmationEventId?: string; evidence?: { kind?: string }[]; event?: { id?: string } };
+  });
+  const backupMemories = backupRecords.filter(record => record.type === 'memory').map(record => record.data!);
+  const savedUserFact = backupMemories.find(fact => fact.origin === 'user');
+  const savedAIProposal = backupMemories.find(fact => fact.origin === 'ai');
+  expect(savedUserFact).toMatchObject({ status: 'confirmed', revision: 1 });
+  expect(savedUserFact?.confirmationEventId).toBeTruthy();
+  expect(savedUserFact?.evidence).toEqual([expect.objectContaining({ kind: 'user' })]);
+  expect(savedAIProposal).toMatchObject({ status: 'confirmed' });
+  expect(backupRecords.filter(record => record.type === 'trust_event').map(record => record.data?.event?.id))
+    .toContain(savedAIProposal?.confirmationEventId);
   await restoreBackup(page, dialog, 'memory-project-backup.jsonl', backupText);
   await expect(dialog.locator('.project-list-item')).toHaveCount(2);
-  await expect(dialog.locator('.memory-fact')).toContainText('Conversation text must stay offline.');
-  await expect(dialog.locator('.memory-fact')).toContainText('Excerpt matched to the saved message');
+  const restoredAIProposal = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'AI suggested' });
+  const restoredUserFact = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'User entered' });
+  await expect(restoredAIProposal).toContainText('Legacy AI record claimed confirmation. Review is required.');
+  await expect(restoredUserFact).toContainText('Confirmed status · no authenticated confirmation event');
+  await expect(dialog.getByLabel('Verifiable project confirmations'))
+    .toContainText('Imported trust events are not authenticated on this device.');
+  await expect(restoredAIProposal).toContainText('Excerpt matched to the saved message');
 });
 
 test('user preferences are categorized, reviewed, and included with their lifecycle status', async ({ page }) => {
@@ -703,6 +752,53 @@ test('superseded facts retain signed history and can only return through an expl
   expect(oldRecord?.statusHistory).toMatchObject([{ status: 'confirmed' }, { status: 'superseded' }]);
   expect((oldRecord?.statusHistory as { trustEventId?: string }[]).at(-1)?.trustEventId).toBeTruthy();
   expect(reconsiderRecord?.status).toBe('needs-review');
+});
+
+test('saving a replacement for review keeps the earlier fact in nonterminal conflict review', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await importConversation(page, 'memory-replacement-review.json', 'The service must use the internal network.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  let form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Network boundary');
+  await form.locator('textarea').nth(0).fill('The service must use the internal network.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  const original = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'The service must use the internal network.' });
+  await expect(original).toContainText('Signed by this project’s local trusted key');
+
+  await original.getByRole('button', { name: 'Correct or replace', exact: true }).click();
+  form = dialog.locator('.memory-form');
+  await form.locator('textarea').nth(0).fill('The service must use the isolated internal network.');
+  await form.getByRole('button', { name: 'Save for review', exact: true }).click();
+
+  const reviewedOriginal = dialog.locator('.memory-fact.needs-review p')
+    .getByText('The service must use the internal network.', { exact: true }).locator('..');
+  const replacementCandidate = dialog.locator('.memory-fact.needs-review p')
+    .getByText('The service must use the isolated internal network.', { exact: true }).locator('..');
+  await expect(reviewedOriginal).toHaveClass(/memory-fact needs-review/);
+  await expect(replacementCandidate).toHaveClass(/memory-fact needs-review/);
+  await expect(reviewedOriginal).toContainText('Needs review');
+  await expect(replacementCandidate).toContainText('Needs review');
+  await expect(dialog.locator('.memory-fact.superseded')).toHaveCount(0);
+
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download backup', exact: true }).click();
+  const backupPath = await (await download).path();
+  const memories = (await readFile(backupPath!, 'utf8')).trim().split(/\r?\n/).map(line => JSON.parse(line) as {
+    type: string; data?: { id?: string; statement?: string; status?: string; supersedes?: string; supersededBy?: string; conflictsWith?: string[] };
+  }).filter(record => record.type === 'memory').map(record => record.data!);
+  const savedOriginal = memories.find(fact => fact.statement === 'The service must use the internal network.');
+  const savedCandidate = memories.find(fact => fact.statement === 'The service must use the isolated internal network.');
+  expect(savedOriginal?.status).toBe('needs-review');
+  expect(savedOriginal?.supersededBy).toBeUndefined();
+  expect(savedCandidate?.supersedes).toBeUndefined();
+  expect(savedOriginal?.conflictsWith).toContain(savedCandidate?.id);
+  expect(savedCandidate?.conflictsWith).toContain(savedOriginal?.id);
 });
 
 test('version-one project backups restore after the IndexedDB schema migration', async ({ page }) => {

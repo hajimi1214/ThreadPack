@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { issueMcpClient } from '../../cli/mcp-client-registry';
 import {
   digestProjectBackupRecord, emptyBackupRecordCounts, extendProjectBackupRecordChain,
   incrementBackupRecordCount, PROJECT_BACKUP_CHAIN_SEED,
@@ -199,6 +200,9 @@ test('project changes update one authorized shared file and survive a reload', a
   const inboxBackupPath = testInfo.outputPath('shared-live.jsonl');
   await writeFile(inboxBackupPath, sharedText, 'utf8');
   const inboxPath = testInfo.outputPath('threadpack-project-updates.jsonl');
+  const registryPath = testInfo.outputPath('threadpack-mcp-client-registry.json');
+  let registeredClientToken: string | undefined;
+  let registeredProjectId: string | undefined;
   await unlink(inboxPath).catch(() => {});
   const inboxScript = `import { runMcpServer } from ${JSON.stringify(new URL('../../cli/mcp-server.ts', import.meta.url).href)}; await runMcpServer(process.argv.slice(1), 'test');`;
   async function submitCandidate(statement: string, topic: string) {
@@ -209,6 +213,13 @@ test('project changes update one authorized shared file and survive a reload', a
     });
     const projectId = backupRecords.find(record => record.type === 'threadpack_project')?.projectId;
     expect(projectId).toBeTruthy();
+    if (!registeredClientToken) {
+      const registration = await issueMcpClient({ registryPath, id: 'browser-test-client', projectId: projectId!,
+        allowCandidateUpdates: true, allowTaskCoordination: false });
+      registeredClientToken = registration.token;
+      registeredProjectId = projectId;
+    }
+    expect(projectId).toBe(registeredProjectId);
     const session = backupRecords.find(record => record.type === 'session')!.data!;
     const revision = backupRecords.find(record => record.type === 'revision' && record.data?.sessionId === session.id && record.data?.version === session.currentVersion)!.data!;
     const citedMessage = revision.content!.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as { id?: string; content?: string })
@@ -217,7 +228,11 @@ test('project changes update one authorized shared file and survive a reload', a
       name: 'threadpack_project_submit_update', arguments: { idempotencyKey: `browser:${topic}:${statement}`, sessionId: session.id, sessionVersion: session.currentVersion, messageId: citedMessage.id, evidenceQuote: 'UPDATED_SHARED_SESSION_MARKER', category: 'decision', topic, statement, evidenceReference: 'browser test' },
     } }) + '\n';
     const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', inboxScript, '--',
-      '--backup', inboxBackupPath, '--inbox', inboxPath, '--client-id', 'browser-test-client', '--project-id', projectId!, '--allow-candidate-updates'], { cwd: resolve('.'), encoding: 'utf8', input: request });
+      '--backup', inboxBackupPath, '--inbox', inboxPath, '--client-id', 'browser-test-client', '--project-id', projectId!,
+      '--client-registry', registryPath, '--client-token-env', 'THREADPACK_BROWSER_TEST_TOKEN', '--allow-candidate-updates'], {
+      cwd: resolve('.'), encoding: 'utf8', input: request,
+      env: { ...process.env, THREADPACK_BROWSER_TEST_TOKEN: registeredClientToken },
+    });
     expect(result.status, result.stderr).toBe(0);
     const rpcResponse = JSON.parse(result.stdout.trim()) as { error?: { message: string } };
     const rpcError = rpcResponse.error as { message: string } | undefined;

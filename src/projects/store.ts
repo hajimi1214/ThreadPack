@@ -529,7 +529,7 @@ async function appendProjectTrustEvent(
   projectId: string,
   draft: TrustEventDraft,
   options: { signer?: LocalSigningIdentity; replacementIdentity?: LocalSigningIdentity; discardReplacedPrivateKey?: boolean; trustAfterRecovery?: boolean;
-    factMutation?: TrustFactMutation } = {},
+    factMutation?: TrustFactMutation; factMutations?: TrustFactMutation[]; revokeAcceptedProposalFactIds?: string[] } = {},
 ): Promise<SignedTrustEvent> {
   const before = await getProjectTrustSummary(projectId);
   const state = before.state;
@@ -561,7 +561,12 @@ async function appendProjectTrustEvent(
     schema: TRUST_EVENT_SCHEMA, projectId: state.sourceProjectId ?? projectId, id: makeId(),
     sequence: state.sequence + 1, previousEventHash: state.headHash, actorKeyId: signer.keyId }, signer);
   const changedAt = Date.now();
-  await withTransaction(['projects', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors', ...(options.factMutation ? ['memory'] : [])], 'readwrite', async transaction => {
+  const factMutations = [...(options.factMutation ? [options.factMutation] : []), ...(options.factMutations ?? [])];
+  const mutationIds = new Set(factMutations.map(mutation => mutation.factId));
+  if (mutationIds.size !== factMutations.length) throw new Error('A signed trust event cannot mutate the same project fact more than once.');
+  const revokeAcceptedProposalFactIds = [...new Set(options.revokeAcceptedProposalFactIds ?? [])];
+  await withTransaction(['projects', 'projectTrust', 'deviceKeys', 'trustEvents', 'trustAnchors',
+    ...(factMutations.length ? ['memory'] : []), ...(revokeAcceptedProposalFactIds.length ? ['updates'] : [])], 'readwrite', async transaction => {
     const projects = transaction.objectStore('projects');
     const trustStore = transaction.objectStore('projectTrust');
     const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
@@ -617,16 +622,17 @@ async function appendProjectTrustEvent(
       delete localAnchor.deletedAt;
       anchors.put(localAnchor);
     }
-    if (options.factMutation) {
+    for (const mutation of factMutations) {
       const memory = transaction.objectStore('memory');
-      const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + options.factMutation.factId));
-      if (!fact || fact.updatedAt !== options.factMutation.expectedUpdatedAt
-        || (fact.revision ?? 1) !== options.factMutation.expectedRevision) {
+      const fact = await idbRequest<ProjectMemoryFact | undefined>(memory.get(projectId + String.fromCharCode(0) + mutation.factId));
+      if (!fact || fact.updatedAt !== mutation.expectedUpdatedAt
+        || (fact.revision ?? 1) !== mutation.expectedRevision) {
         throw new Error('Project fact changed before its signed trust event could be committed. Reopen the fact and try again.');
       }
-      options.factMutation.apply(fact, event, changedAt);
+      mutation.apply(fact, event, changedAt);
       memory.put(fact);
     }
+    for (const factId of revokeAcceptedProposalFactIds) await revokeAcceptedProposals(transaction, projectId, factId, changedAt);
     touchProject(project, changedAt);
     projects.put(project);
   });
@@ -1415,6 +1421,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
     || input.statement.length > 4000 || !Array.isArray(input.evidence) || input.evidence.length > 5
     || input.expiresAt !== undefined && (!Number.isSafeInteger(input.expiresAt) || input.expiresAt <= Date.now())
     || input.reconsiders !== undefined && (typeof input.reconsiders !== 'string' || !input.reconsiders || input.reconsiders.length > 200)
+    || input.supersedes !== undefined && (typeof input.supersedes !== 'string' || !input.supersedes || input.supersedes.length > 200)
     || input.taskState !== undefined && !TASK_STATES.includes(input.taskState)
     || input.category !== 'task' && input.taskState !== undefined) {
     throw new Error('Enter a category, topic, statement, and up to five evidence entries.');
@@ -1427,6 +1434,9 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
   }
   if (input.reconsiders && (input.origin !== 'user' || input.status !== 'needs-review' || input.supersedes)) {
     throw new Error('Only a user-authored review candidate can reconsider a prior terminal record.');
+  }
+  if (input.supersedes && (input.origin !== 'user' || input.status !== 'confirmed' || input.reconsiders)) {
+    throw new Error('Only a user-confirmed replacement can supersede an existing fact. Save it for review first, then confirm it explicitly.');
   }
   if (input.expiresAt !== undefined && input.expiresAt <= Date.now()) throw new Error('A new fact expiration must be in the future.');
   const topic = input.topic.trim();
@@ -1472,35 +1482,13 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
       throw new Error(`This claim has a rejected or inactive terminal record in this project. Review that record or explicitly reconsider it (${blockedDuplicate.id}).`);
     }
     if (input.supersedes) {
-      if (typeof input.supersedes !== 'string' || input.supersedes.length > 200) throw new Error('The fact to supersede is invalid.');
-      const previous = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${input.supersedes}`));
-      if (!previous || isTerminalMemoryStatus(previous.status)) throw new Error('The selected previous fact is unavailable.');
-      previous.status = 'superseded';
-      appendStatusChange(previous, 'superseded', now);
-      previous.supersededBy = fact.id;
-      previous.updatedAt = now;
-      previous.revision = (previous.revision ?? 1) + 1;
-      await revokeAcceptedProposals(transaction, projectId, previous.id, now);
-      fact.supersedes = previous.id;
-      for (const otherId of previous.conflictsWith) {
-        const other = await idbRequest<ProjectMemoryFact | undefined>(memory.get(`${projectId}\0${otherId}`));
-        if (other) {
-          other.conflictsWith = other.conflictsWith.filter(id => id !== previous.id);
-          if (!other.conflictsWith.length && other.status === 'needs-review' && other.reviewStateBeforeConflict) {
-            const restoredStatus = other.reviewStateBeforeConflict === 'proposed' ? 'proposed' : 'needs-review';
-            other.status = restoredStatus;
-            appendStatusChange(other, restoredStatus, now);
-            delete other.reviewStateBeforeConflict;
-          }
-          other.updatedAt = now;
-          other.revision = (other.revision ?? 1) + 1;
-          memory.put(other);
-        }
+      const previous = projectFacts.find(item => item.id === input.supersedes);
+      if (!previous || previous.status !== 'confirmed' || previous.conflictsWith.length
+        || previous.confirmationTrust !== 'authenticated' || !previous.confirmationEventId
+        || previous.category !== fact.category || normalizeMemoryTopic(previous.topic) !== fact.normalizedTopic) {
+        throw new Error('Only an authenticated, conflict-free fact on the same topic can be selected for replacement.');
       }
-      previous.conflictsWith = [];
-      memory.put(previous);
-      matching = await idbRequest<ProjectMemoryFact[]>(memory.index('projectTopic').getAll(
-        IDBKeyRange.only([projectId, fact.category, fact.normalizedTopic])));
+      matching = projectFacts.filter(item => item.category === fact.category && item.normalizedTopic === fact.normalizedTopic);
     } else {
       matching = await idbRequest<ProjectMemoryFact[]>(memory.index('projectTopic').getAll(
         IDBKeyRange.only([projectId, fact.category, fact.normalizedTopic])));
@@ -1530,7 +1518,7 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
         projects.put(project);
         return sameUserFact;
       }
-      const duplicateAIFact = input.origin === 'ai' && matching.find(previous => !isTerminalMemoryStatus(previous.status)
+      const duplicateAIFact = input.origin === 'ai' && matching.find(previous => previous.origin === 'ai' && previous.status === 'proposed'
         && previous.statement.trim().normalize('NFKC').toLocaleLowerCase() === fact.statement.normalize('NFKC').toLocaleLowerCase()
         && previous.taskState === fact.taskState);
       if (duplicateAIFact) {
@@ -1715,6 +1703,76 @@ async function recordFactConfirmationRevocation(
   return revoked;
 }
 
+async function recordFactSupersession(projectId: string, replacementId: string, previousId: string): Promise<ProjectMemoryFact> {
+  const [facts, trust] = await Promise.all([listProjectMemory(projectId), getProjectTrustSummary(projectId)]);
+  const replacement = facts.find(fact => fact.id === replacementId);
+  const previous = facts.find(fact => fact.id === previousId);
+  if (!replacement || replacement.status !== 'confirmed' || !replacement.confirmationEventId
+    || await factConfirmationTrust(replacement, trust) !== 'authenticated') {
+    throw new Error('The replacement fact must have a valid user confirmation before it can supersede history.');
+  }
+  if (!previous || previous.status !== 'confirmed' || previous.conflictsWith.length
+    || !previous.confirmationEventId || await factConfirmationTrust(previous, trust) !== 'authenticated') {
+    throw new Error('The selected fact changed or is no longer an authenticated current fact. Resolve it before replacing it.');
+  }
+  if (!trust.readyForConfirmations || !trust.state) throw new Error('Project trust is unavailable. Restore local trust before replacing a confirmed fact.');
+
+  const lifecycleProjectId = trust.state.sourceProjectId ?? projectId;
+  const nextRevision = (previous.revision ?? 1) + 1;
+  const previousHistory = readStatusHistory(previous.statusHistory, previous.status, previous.createdAt);
+  if (previousHistory.at(-1)?.status !== previous.status) throw new Error('The selected fact has inconsistent lifecycle history.');
+  if (previousHistory.length >= 10_000) throw new Error('This fact reached the supported lifecycle-history limit. Preserve its history and create a linked new fact.');
+  const confirmation = trust.events.find(event => event.id === previous.confirmationEventId);
+  if (!confirmation) throw new Error('The selected fact confirmation is missing from the project trust history.');
+  const material = await factConfirmationMaterial(previous);
+
+  await appendProjectTrustEvent(projectId, {
+    eventType: 'claim.confirmation-revoked', subjectId: previous.id, subjectFingerprint: material.subjectFingerprint,
+    subjectVersion: previous.revision ?? 1, evidenceFingerprints: material.evidenceFingerprints,
+    changedAt: Date.now(), details: {
+      confirmationEventId: confirmation.id, reason: 'superseded', fromStatus: 'confirmed', toStatus: 'superseded',
+      lifecycleRevision: nextRevision, lifecycleProjectId,
+    },
+  }, { factMutations: [
+    {
+      factId: previous.id, expectedUpdatedAt: previous.updatedAt, expectedRevision: previous.revision ?? 1,
+      apply(current, event, changedAt) {
+        if (current.status !== 'confirmed' || current.confirmationEventId !== confirmation.id || current.conflictsWith.length) {
+          throw new Error('The selected fact changed before its replacement could be committed.');
+        }
+        current.status = 'superseded';
+        appendStatusChange(current, 'superseded', changedAt);
+        current.supersededBy = replacement.id;
+        current.revision = nextRevision;
+        current.confirmationRevocationEventId = event.id;
+        current.confirmationTrust = 'revoked';
+        const statusChange = current.statusHistory?.at(-1);
+        if (!statusChange || statusChange.status !== 'superseded') throw new Error('The replacement lifecycle event could not be attached.');
+        statusChange.trustEventId = event.id;
+        statusChange.trustEventHash = event.eventHash;
+        statusChange.trustKeyId = event.actorKeyId;
+        current.lifecycleProjectId = lifecycleProjectId;
+        current.updatedAt = changedAt;
+      },
+    },
+    {
+      factId: replacement.id, expectedUpdatedAt: replacement.updatedAt, expectedRevision: replacement.revision ?? 1,
+      apply(current, _event, changedAt) {
+        if (current.status !== 'confirmed' || current.confirmationEventId !== replacement.confirmationEventId
+          || current.confirmationTrust !== 'authenticated') {
+          throw new Error('The replacement confirmation changed before its history link could be committed.');
+        }
+        current.supersedes = previous.id;
+        current.updatedAt = changedAt;
+      },
+    },
+  ], revokeAcceptedProposalFactIds: [previous.id] });
+
+  const updated = (await listProjectMemory(projectId)).find(fact => fact.id === replacement.id);
+  if (!updated) throw new Error('The signed replacement completed but its project fact is unavailable.');
+  return updated;
+}
+
 export async function createProjectMemoryFact(projectId: string, input: ProjectMemoryInput): Promise<ProjectMemoryFact> {
   if (input.status === 'confirmed') await ensureProjectTrustReady(projectId);
   const beforeFacts = await listProjectMemory(projectId);
@@ -1742,7 +1800,11 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
       await recordFactConfirmationRevocation(projectId, previous, current, reason);
     }
   }
-  if (input.status === 'confirmed' && fact.status === 'confirmed') return recordFactConfirmation(projectId, fact);
+  if (input.status === 'confirmed' && fact.status === 'confirmed') {
+    const confirmed = await recordFactConfirmation(projectId, fact);
+    if (input.supersedes) return recordFactSupersession(projectId, confirmed.id, input.supersedes);
+    return confirmed;
+  }
   return (await listProjectMemory(projectId)).find(item => item.id === fact.id) ?? fact;
 }
 
@@ -2327,20 +2389,27 @@ export async function reviewProjectUpdateProposal(projectId: string, proposalId:
     });
     return acceptedFactStatus;
   } catch (error) {
-    await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
-      const updates = transaction.objectStore('updates');
-      const projects = transaction.objectStore('projects');
-      const memory = transaction.objectStore('memory');
-      const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
-      if (current?.status === 'reviewing' && current.reviewingSince === now) {
-        const reopenedAt = Date.now();
-        const facts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
-        recoverInterruptedProposal(current, facts, reopenedAt);
-        updates.put(current);
-        const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
-        if (project && !project.restoringSince) { touchProject(project, reopenedAt); projects.put(project); }
-      }
-    }).catch(() => {});
+    try {
+      await withTransaction(['updates', 'projects', 'memory'], 'readwrite', async transaction => {
+        const updates = transaction.objectStore('updates');
+        const projects = transaction.objectStore('projects');
+        const memory = transaction.objectStore('memory');
+        const current = await idbRequest<ProjectUpdateProposal | undefined>(updates.get(proposal.key));
+        if (current?.status === 'reviewing' && current.reviewingSince === now) {
+          const reopenedAt = Date.now();
+          const facts = await idbRequest<ProjectMemoryFact[]>(memory.index('projectId').getAll(IDBKeyRange.only(projectId)));
+          recoverInterruptedProposal(current, facts, reopenedAt);
+          updates.put(current);
+          const project = await idbRequest<ProjectRecord | undefined>(projects.get(projectId));
+          if (project && !project.restoringSince) { touchProject(project, reopenedAt); projects.put(project); }
+        }
+      });
+    } catch (recoveryError) {
+      const originalMessage = error instanceof Error ? error.message : String(error);
+      const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+      throw new AggregateError([error, recoveryError],
+        `Project update review failed: ${originalMessage}. Recovery also failed: ${recoveryMessage}.`);
+    }
     throw error;
   }
 }
