@@ -1,0 +1,33 @@
+[WebServer] (node:56172) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:58600) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 8 tests using 8 workers
+
+(node:59248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40780) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:24428) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:50320) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:59368) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39864) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41996) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 5 [chromium] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (7.6s)
+  ok 8 [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default (8.7s)
+  ok 3 [chromium] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (10.2s)
+  ok 6 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (11.6s)
+  ok 4 [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (13.7s)
+  ok 2 [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (16.6s)
+  ok 1 [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (17.8s)
+  ok 7 [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (21.1s)
+
+  8 passed (53.4s)

@@ -1,0 +1,140 @@
+[WebServer] (node:39372) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:58156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 8 tests using 8 workers
+
+(node:34452) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57536) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15776) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58756) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19620) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:53936) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27184) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32872) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 8 [chromium] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (33.3s)
+  ok 3 [chromium] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (47.5s)
+  x  4 [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (52.1s)
+  x  1 [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (50.6s)
+  x  6 [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (48.9s)
+  x  2 [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (54.9s)
+  x  5 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (51.0s)
+  x  7 [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default (56.4s)
+
+
+  1) [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).getByRole('button', { name: 'Close', exact: true })
+        - locator resolved to <button aria-label="Close" class="icon-button dialog-close">…</button>
+
+
+      51 |   await expect(dialog.locator('.project-session-item')).toContainText('Matched in conversation content');
+      52 |   await dialog.getByLabel('Search project history…', { exact: true }).fill('');
+    > 53 |   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+         |                                                                    ^
+      54 |
+      55 |   await importConversation(page, 'source-v2.json', 'UPDATED_VERSION_TWO_MARKER');
+      56 |   dialog = await openProjects(page);
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-library.spec.ts:53:68
+
+    Error Context: test-results\project-library-project-hi-724d5-rsions-and-verifies-backups-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-project-hi-724d5-rsions-and-verifies-backups-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-project-hi-724d5-rsions-and-verifies-backups-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-library-unchanged--24ff4-a-without-adding-a-revision-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-unchanged--24ff4-a-without-adding-a-revision-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-unchanged--24ff4-a-without-adding-a-revision-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-library-project-re-eff1f-project-removes-its-history-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-project-re-eff1f-project-removes-its-history-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-project-re-eff1f-project-removes-its-history-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-library-project-sn-afdaf-ctive-conversation-branches-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-project-sn-afdaf-ctive-conversation-branches-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-project-sn-afdaf-ctive-conversation-branches-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6 failed
+    [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups 
+    [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision 
+    [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history 
+    [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches 
+    [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration 
+    [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+  2 passed (1.7m)

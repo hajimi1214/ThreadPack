@@ -249,3 +249,43 @@ test('archiving a project preserves its identity and history and allows restorat
   await expect(restoredDialog.locator('.project-session-item')).toContainText('Durable project history');
   await expect(restoredDialog.locator('.project-session-item')).toContainText('Version 1');
 });
+
+test('MCP setup guide generates a project-scoped read-only client snippet by default', async ({ page }) => {
+  await page.goto('/');
+  const dialog = await openProjects(page);
+  await dialog.getByLabel('Project name', { exact: true }).fill('MCP guide project');
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  const projectId = await dialog.locator('.project-list-item').getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+
+  await dialog.getByText('MCP client setup guide', { exact: true }).click();
+  await dialog.getByLabel('ThreadPack CLI command').fill('C:\\Tools\\ThreadPack\\threadpack.cmd');
+  await dialog.getByLabel('Full shared backup path').fill('C:\\Project Data\\project-state.jsonl');
+  const snippet = dialog.getByLabel('Configuration snippet');
+  const readonlyValue = await snippet.inputValue();
+  expect(readonlyValue).toMatch(/^\[mcp_servers\.threadpack\]/);
+  expect(readonlyValue).toContain('"--project-id"');
+  expect(readonlyValue).toContain(projectId!);
+  expect(readonlyValue).toContain('"--read-only"');
+  expect(readonlyValue).toContain('C:\\\\Project Data\\\\project-state.jsonl');
+
+  await dialog.getByLabel('Allow candidate updates').check();
+  const writableValue = await snippet.inputValue();
+  expect(writableValue).toContain('"--client-id", "codex"');
+  expect(writableValue).toContain('"--allow-candidate-updates"');
+  expect(writableValue).not.toContain('"--read-only"');
+
+  await dialog.getByLabel('Allow candidate updates').uncheck();
+  await dialog.getByLabel('Allow task coordination').check();
+  const taskValue = await snippet.inputValue();
+  expect(taskValue).toContain('"--allow-task-coordination"');
+  expect(taskValue).not.toContain('"--allow-candidate-updates"');
+
+  await dialog.getByLabel('Client format').selectOption('workbuddy');
+  const jsonValue = await snippet.inputValue();
+  expect(JSON.parse(jsonValue).mcpServers.threadpack.command).toBe('C:\\Tools\\ThreadPack\\threadpack.cmd');
+  const jsonArguments = JSON.parse(jsonValue).mcpServers.threadpack.args as string[];
+  expect(jsonArguments).toContain('--project-id');
+  expect(jsonArguments).toContain('--allow-task-coordination');
+  expect(jsonArguments).toContain('workbuddy');
+});

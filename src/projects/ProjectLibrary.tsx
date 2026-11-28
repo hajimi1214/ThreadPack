@@ -12,6 +12,7 @@ import {
 import type { ProjectRecord, ProjectRevisionSummary, ProjectSessionInput, ProjectSessionSummary, SharedProjectBackupStatus, SharedProjectFileHandle } from './store';
 import type { ProjectTaskClaim, ProjectUpdateProposal } from './memory-types';
 import ProjectMemoryPanel from './ProjectMemoryPanel';
+import McpSetupGuide from './McpSetupGuide';
 
 interface ActiveSession { conversationId: string; title: string; messageCount: number }
 interface Props {
@@ -425,6 +426,7 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
           <div><strong><Inbox size={13} />{t.projectUpdateInbox}</strong><small>{sharedStatus.inboxConnected ? `${sharedStatus.inboxFilename ?? ''} · ${proposals.filter(proposal => proposal.status === 'pending').length} ${t.projectUpdatePending}` : t.projectUpdateInboxHint}</small></div>
           {sharedStatus.inboxConnected && <button className="button secondary small" disabled={!!busy} onClick={checkUpdateInbox}><RefreshCw size={13} />{t.projectUpdateCheck}</button>}<button className="button secondary small" disabled={!!busy || !sharedStatus.connected || !sharedFileAvailable || !inboxFileAvailable} onClick={connectUpdateInbox}><Inbox size={13} />{t.projectUpdateConnect}</button>
         </div>
+        <McpSetupGuide projectId={selectedProject.id} t={t} />
         {!!taskClaims.length && <section className="project-update-list" aria-label={t.projectTaskCoordination}>
           <h4>{t.projectTaskCoordination}</h4>
           {taskClaims.map((claim, index) => <article className="project-update-item" key={`${claim.claimId}-${claim.action}-${claim.claimedAt}-${index}`}>
