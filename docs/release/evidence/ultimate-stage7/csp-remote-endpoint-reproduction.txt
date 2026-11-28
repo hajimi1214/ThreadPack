@@ -1,0 +1,16 @@
+ThreadPack production CSP endpoint reproduction
+Date: 2026-11-29
+Environment: Windows 10.0.26200, Node v24.14.1, Playwright 1.65.1, Chromium
+
+Target: http://127.0.0.1:4382/ (local production preview)
+Remote-shaped endpoint: https://threadpack-ai.example.invalid/v1/chat/completions
+The endpoint was intercepted by Playwright and did not resolve to an external service.
+
+Before CSP change:
+connect-src 'self' ws://127.0.0.1:4317
+fetch result: blocked (TypeError)
+Playwright route interceptions: 0
+CSP console violations: 2
+
+After CSP change:
+The AI extraction browser scenario using the same remote-shaped HTTPS endpoint passed on Chromium, Firefox, and WebKit. The scenario asserts that the intercepted endpoint received the in-memory test credential and selected synthetic evidence, and that the test credential is absent from the backup.
