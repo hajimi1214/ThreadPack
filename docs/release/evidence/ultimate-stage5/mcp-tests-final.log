@@ -1,0 +1,19 @@
+✔ MCP bridge serves the latest authorized backup with a trust boundary (349.0843ms)
+✔ MCP bridge fails closed for a tampered memory record (166.9155ms)
+✔ MCP validates v9 migration records and the backup manifest (372.395ms)
+✔ MCP context and tasks use the canonical trust projection and structured filters (443.5848ms)
+✔ MCP binds a matching quote to its exact message rather than any revision message (204.3278ms)
+✔ MCP bridge appends a candidate update to the separate inbox without changing project facts (1639.5148ms)
+✔ MCP task leases prevent duplicate owners and bind result proposals to an active claim (8262.8397ms)
+✔ MCP can be configured as a per-client read-only instance (648.8864ms)
+✔ MCP candidate update schema includes the user preference category (347.2439ms)
+✔ MCP verifies v8 signature integrity but does not trust keys supplied by the backup (425.8473ms)
+✔ MCP omits expired facts from current context and identifies them as unauthenticated imported history (182.6835ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13420.0096

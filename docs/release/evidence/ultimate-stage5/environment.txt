@@ -1,0 +1,6 @@
+Recorded: 2026-11-28 19:19:54 +08:00
+OS: Microsoft Windows NT 10.0.26200.0
+Node: v24.14.1
+npm: 11.11.0
+Browser matrix: Chromium, Firefox, WebKit via Playwright
+Network test: npm audit --omit=dev --audit-level=high

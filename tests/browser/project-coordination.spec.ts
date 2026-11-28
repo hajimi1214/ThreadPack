@@ -67,8 +67,13 @@ test('MCP task claims and results flow through shared project review', async ({ 
   await memoryForm.locator('textarea').nth(0).fill('Verify project backup restoration.');
   await memoryForm.getByRole('button', { name: 'Confirm and save', exact: true }).click();
   await expect(library.locator('.memory-fact').filter({ hasText: 'Verify project backup restoration.' })).toContainText('Signed by this project’s local trusted key');
-  await expect.poll(async () => page.evaluate(async () =>
-    (await (window as unknown as { readProjectFile: () => Promise<string> }).readProjectFile()).includes('Verify project backup restoration.')),
+  await expect.poll(async () => page.evaluate(async statement => {
+    const contents = await (window as unknown as { readProjectFile: () => Promise<string> }).readProjectFile();
+    return contents.split(/\r?\n/).filter(Boolean).some(line => {
+      const record = JSON.parse(line) as { type: string; data?: { statement?: string; status?: string } };
+      return record.type === 'memory' && record.data?.statement === statement && record.data.status === 'confirmed';
+    });
+  }, 'Verify project backup restoration.'),
   { timeout: 30_000 }).toBe(true);
 
   const statePath = testInfo.outputPath('coordination-project.jsonl');
@@ -78,8 +83,13 @@ test('MCP task claims and results flow through shared project review', async ({ 
   async function callTool(name: string, args: Record<string, unknown> = {}, syncInbox = true) {
     const state = await page.evaluate(async () => await (window as unknown as { readProjectFile: () => Promise<string> }).readProjectFile());
     await writeFile(statePath, state, 'utf8');
+    const projectRecord = state.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as { type: string; projectId?: string })
+      .find(record => record.type === 'threadpack_project');
+    expect(projectRecord?.projectId).toBeTruthy();
     const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n';
-    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, '--', '--backup', statePath, '--inbox', inboxPath], {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, '--',
+      '--backup', statePath, '--inbox', inboxPath, '--client-id', 'codex-local', '--project-id', projectRecord!.projectId!,
+      '--allow-candidate-updates', '--allow-task-coordination'], {
       cwd: resolve('.'), encoding: 'utf8', input,
     });
     expect(result.status, result.stderr).toBe(0);
@@ -97,7 +107,7 @@ test('MCP task claims and results flow through shared project review', async ({ 
   expect(tasks[0]!.activeClaim).toBeNull();
   const taskId = tasks[0]!.id;
   const lease = await callTool('threadpack_project_claim_task', {
-    client: 'codex-local', idempotencyKey: 'codex-claim-backup', action: 'claim', taskId, leaseSeconds: 300,
+    idempotencyKey: 'codex-claim-backup', action: 'claim', taskId, leaseSeconds: 300,
   });
   expect(lease.status).toBe('recorded');
   expect(lease.clientIdentityVerified).toBe(false);
@@ -112,13 +122,13 @@ test('MCP task claims and results flow through shared project review', async ({ 
   const resultMessage = revision.content!.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as { id?: string; content?: string })
     .find(message => message.content?.includes('Restore fixture verification completed successfully.'))!;
   await callTool('threadpack_project_submit_update', {
-    client: 'codex-local', idempotencyKey: 'codex-backup-result', sessionId: session.id, sessionVersion: session.currentVersion,
+    idempotencyKey: 'codex-backup-result', sessionId: session.id, sessionVersion: session.currentVersion,
     messageId: resultMessage.id, evidenceQuote: 'Restore fixture verification completed successfully.', category: 'task',
     taskId, claimId: lease.claimId, taskState: 'done', topic: 'Backup recovery',
     statement: 'The backup restore completed successfully.',
   }, false);
   const released = await callTool('threadpack_project_claim_task', {
-    client: 'codex-local', idempotencyKey: 'codex-release-backup', action: 'release', claimId: lease.claimId,
+    idempotencyKey: 'codex-release-backup', action: 'release', claimId: lease.claimId,
   }, false);
   expect(released.status).toBe('recorded');
   await page.evaluate(async text => await (window as unknown as { setInboxFile: (value: string) => Promise<void> }).setInboxFile(text), await readFile(inboxPath, 'utf8'));

@@ -22,3 +22,7 @@ This matrix is updated at each product stage. `PASS` denotes direct evidence for
 Firefox and WebKit skips are tied to tests requiring local file-handle permission or Chromium Origin Private File System capabilities. Chromium runs those paths. Stage 4 browser runs used CI retry policy, and all flaky retries passed. The first-attempt failures remain recorded in the full logs and are classified as conditional results. Tests were not removed or weakened to obtain these results. Stage 4 detailed evidence is in `docs/release/ultimate-stage4-context-projection-report.md`.
 
 After the Stage 4 export-boundary regression fixes, the context generation, incremental export, and empty-project pack flows each passed 3/3 in Chromium, Firefox, and WebKit. The complete Chromium project-memory suite passed 21 cases and had 1 additional case pass on retry. Detailed candidate logs are under `docs/release/evidence/ultimate-stage4/`.
+
+## Stage 5 collaboration addendum
+
+The current candidate adds least-privilege MCP instance settings. Read and task-list tools are available by default. Candidate submission and task coordination require separate opt-ins plus a fixed client label and exact project ID. The model cannot provide or override the client label in tool arguments. This is local operator configuration, not external-client authentication. See `docs/release/ultimate-stage5-collaboration-report.md` and logs in `docs/release/evidence/ultimate-stage5/`.

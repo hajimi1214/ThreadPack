@@ -1,0 +1,5 @@
+
+> threadpack@1.7.1 build:web
+> tsc --noEmit && vite build
+
+tests/browser/project-shared-state.spec.ts(339,45): error TS2304: Cannot find name 'createHash'.

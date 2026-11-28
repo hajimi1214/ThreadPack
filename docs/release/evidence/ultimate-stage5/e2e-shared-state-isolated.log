@@ -1,0 +1,49 @@
+[WebServer] (node:57552) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:33728) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:19688) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 [chromium] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload (25.6s)
+
+
+  1) [chromium] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item')
+    Expected: 3
+    Received: 2
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item') with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item')
+        14 × locator resolved to 2 elements
+           - unexpected value "2"
+
+
+      352 |   await restored.locator('.project-library-heading').getByRole('button', { name: 'Restore backup', exact: true }).click();
+      353 |   await (await restoreChooser).setFiles(renamedBackupPath);
+    > 354 |   await expect(restored.locator('.project-list-item')).toHaveCount(3);
+          |                                                        ^
+      355 |   const copiedProject = restored.getByRole('button', { name: /Restored audit copy/ });
+      356 |   await copiedProject.click();
+      357 |   await expect(restored.getByLabel('Update audit history')).toContainText('revoked');
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-shared-state.spec.ts:354:56
+
+    Error Context: test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests\browser\project-shared-state.spec.ts:32:1 › project changes update one authorized shared file and survive a reload 

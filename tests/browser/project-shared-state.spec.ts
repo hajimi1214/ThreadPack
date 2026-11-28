@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import {
+  digestProjectBackupRecord, emptyBackupRecordCounts, extendProjectBackupRecordChain,
+  incrementBackupRecordCount, PROJECT_BACKUP_CHAIN_SEED,
+} from '../../src/projects/backup-format';
 import { setupLocalProjectTrust } from './helpers/project-trust';
 
 interface BackupRecord {
@@ -200,16 +205,19 @@ test('project changes update one authorized shared file and survive a reload', a
     sharedText = await page.evaluate(async () => await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile());
     await writeFile(inboxBackupPath, sharedText, 'utf8');
     const backupRecords = sharedText.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as {
-      type: string; data?: { id?: string; currentVersion?: number; sessionId?: string; version?: number; content?: string };
+      type: string; projectId?: string; data?: { id?: string; currentVersion?: number; sessionId?: string; version?: number; content?: string };
     });
+    const projectId = backupRecords.find(record => record.type === 'threadpack_project')?.projectId;
+    expect(projectId).toBeTruthy();
     const session = backupRecords.find(record => record.type === 'session')!.data!;
     const revision = backupRecords.find(record => record.type === 'revision' && record.data?.sessionId === session.id && record.data?.version === session.currentVersion)!.data!;
     const citedMessage = revision.content!.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as { id?: string; content?: string })
       .find(message => message.content?.includes('UPDATED_SHARED_SESSION_MARKER'))!;
     const request = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
-      name: 'threadpack_project_submit_update', arguments: { client: 'browser-test-client', idempotencyKey: `browser:${topic}:${statement}`, sessionId: session.id, sessionVersion: session.currentVersion, messageId: citedMessage.id, evidenceQuote: 'UPDATED_SHARED_SESSION_MARKER', category: 'decision', topic, statement, evidenceReference: 'browser test' },
+      name: 'threadpack_project_submit_update', arguments: { idempotencyKey: `browser:${topic}:${statement}`, sessionId: session.id, sessionVersion: session.currentVersion, messageId: citedMessage.id, evidenceQuote: 'UPDATED_SHARED_SESSION_MARKER', category: 'decision', topic, statement, evidenceReference: 'browser test' },
     } }) + '\n';
-    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', inboxScript, '--', '--backup', inboxBackupPath, '--inbox', inboxPath], { cwd: resolve('.'), encoding: 'utf8', input: request });
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', inboxScript, '--',
+      '--backup', inboxBackupPath, '--inbox', inboxPath, '--client-id', 'browser-test-client', '--project-id', projectId!, '--allow-candidate-updates'], { cwd: resolve('.'), encoding: 'utf8', input: request });
     expect(result.status, result.stderr).toBe(0);
     const rpcResponse = JSON.parse(result.stdout.trim()) as { error?: { message: string } };
     const rpcError = rpcResponse.error as { message: string } | undefined;
@@ -326,6 +334,20 @@ test('project changes update one authorized shared file and survive a reload', a
   const backupHeader = JSON.parse(backupLines[0]!) as { project: { name: string } };
   backupHeader.project.name = 'Restored audit copy';
   backupLines[0] = JSON.stringify(backupHeader);
+  const backupRecords = backupLines.map(line => JSON.parse(line) as Record<string, unknown> & { type: string });
+  const manifestRecord = backupRecords.at(-1);
+  if (!manifestRecord || manifestRecord.type !== 'manifest') throw new Error('Expected a v9 backup manifest.');
+  const hashText = async (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+  let recordChainHash = PROJECT_BACKUP_CHAIN_SEED;
+  const recordCounts = emptyBackupRecordCounts();
+  const dataRecords = backupRecords.slice(0, -1);
+  for (const record of dataRecords) {
+    const digest = await digestProjectBackupRecord(record, hashText);
+    recordChainHash = await extendProjectBackupRecordChain(recordChainHash, digest, hashText);
+    if (record.type !== 'threadpack_project') incrementBackupRecordCount(recordCounts, record.type);
+  }
+  Object.assign(manifestRecord, { recordCount: dataRecords.length, recordChainHash, recordCounts });
+  backupLines[backupLines.length - 1] = JSON.stringify(manifestRecord);
   const renamedBackupPath = testInfo.outputPath('restored-audit-copy.jsonl');
   await writeFile(renamedBackupPath, backupLines.join('\n') + '\n', 'utf8');
   const finalUpdates = (await readFile(finalBackupPath!, 'utf8')).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line) as { type: string; data?: { statement?: string; status?: string; statusHistory?: { status: string }[]; auditHistory?: { action: string }[] } })

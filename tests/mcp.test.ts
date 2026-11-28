@@ -292,29 +292,45 @@ test('MCP bridge appends a candidate update to the separate inbox without changi
   await writeFile(backupPath, backup, 'utf8');
   await writeFile(inboxPath, '{"type":"threadpack_update"', 'utf8');
   const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'threadpack_project_submit_update', arguments: {
-    client: 'codex-test', idempotencyKey: 'chat-7-update-1', sessionId: 'session-1', sessionVersion: 1, messageId: 'message-1', category: 'decision', topic: 'Runtime', statement: 'Keep the runtime local.', evidenceReference: 'test fixture', evidenceQuote: 'stay local',
+    idempotencyKey: 'chat-7-update-1', sessionId: 'session-1', sessionVersion: 1, messageId: 'message-1', category: 'decision', topic: 'Runtime', statement: 'Keep the runtime local.', evidenceReference: 'test fixture', evidenceQuote: 'stay local',
   } } }) + '\n';
-  const result = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8', input });
+  const updatePermissions = ['--client-id', 'codex-test', '--project-id', 'project-1', '--allow-candidate-updates'];
+  const taskOnlyAttempt = await runMcpProcess(backupPath, inboxPath, input,
+    ['--client-id', 'task-only', '--project-id', 'project-1', '--allow-task-coordination']);
+  assert.equal((JSON.parse(taskOnlyAttempt.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
+  assert.equal(await readFile(inboxPath, 'utf8'), '{"type":"threadpack_update"');
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
   assert.equal(result.status, 0, result.stderr);
   const response = JSON.parse(result.stdout.trim()) as { result?: { structuredContent?: { status: string } } };
   assert.equal(response.result?.structuredContent?.status, 'pending');
   const inbox = await readFile(inboxPath, 'utf8');
   assert.match(inbox, /threadpack_update/);
   assert.match(inbox, /Keep the runtime local/);
-  const firstId = JSON.parse(inbox.trim()).proposal.id;
-  const retry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8', input });
+  const storedProposal = JSON.parse(inbox.trim()).proposal as { id: string; client: string };
+  const firstId = storedProposal.id;
+  assert.equal(storedProposal.client, 'codex-test');
+  const forgedArguments = JSON.parse(input) as { jsonrpc: string; id: number; method: string; params: { name: string; arguments: Record<string, unknown> } };
+  forgedArguments.params.arguments.client = 'attacker-selected-client';
+  const forgedIdentity = await runMcpProcess(backupPath, inboxPath, JSON.stringify(forgedArguments) + '\n', updatePermissions);
+  assert.equal((JSON.parse(forgedIdentity.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
+  assert.equal(await readFile(inboxPath, 'utf8'), inbox);
+  const wrongProject = await runMcpProcess(backupPath, inboxPath, input,
+    ['--client-id', 'codex-test', '--project-id', 'different-project', '--allow-candidate-updates']);
+  assert.equal((JSON.parse(wrongProject.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
+  assert.equal(await readFile(inboxPath, 'utf8'), inbox);
+  const retry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
   assert.equal(retry.status, 0, retry.stderr);
   const retriedInbox = await readFile(inboxPath, 'utf8');
   assert.equal(retriedInbox.trim().split('\n').length, 1);
   assert.equal(JSON.parse(retriedInbox.trim()).proposal.id, firstId);
   await writeFile(inboxPath, retriedInbox.trimEnd(), 'utf8');
-  const interruptedReplyRetry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8', input });
+  const interruptedReplyRetry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
   assert.equal(interruptedReplyRetry.status, 0, interruptedReplyRetry.stderr);
   assert.equal((await readFile(inboxPath, 'utf8')).trim().split('\n').length, 1);
   const reusedKey = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'threadpack_project_submit_update', arguments: {
-    client: 'codex-test', idempotencyKey: 'chat-7-update-1', sessionId: 'session-1', sessionVersion: 1, messageId: 'message-2', category: 'decision', topic: 'Runtime', statement: 'Changed content reusing the same retry key.', evidenceReference: 'test fixture', evidenceQuote: 'stay local',
+    idempotencyKey: 'chat-7-update-1', sessionId: 'session-1', sessionVersion: 1, messageId: 'message-2', category: 'decision', topic: 'Runtime', statement: 'Changed content reusing the same retry key.', evidenceReference: 'test fixture', evidenceQuote: 'stay local',
   } } }) + '\n';
-  const rejectedReuse = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8', input: reusedKey });
+  const rejectedReuse = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input: reusedKey });
   assert.equal(rejectedReuse.status, 0);
   assert.equal((JSON.parse(rejectedReuse.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal((await readFile(inboxPath, 'utf8')).trim().split('\n').length, 1);
@@ -322,8 +338,8 @@ test('MCP bridge appends a candidate update to the separate inbox without changi
 
   const concurrentInboxPath = join(folder, 'concurrent-project-updates.jsonl');
   const concurrent = await Promise.all([
-    runMcpProcess(backupPath, concurrentInboxPath, input),
-    runMcpProcess(backupPath, concurrentInboxPath, input),
+    runMcpProcess(backupPath, concurrentInboxPath, input, updatePermissions),
+    runMcpProcess(backupPath, concurrentInboxPath, input, updatePermissions),
   ]);
   assert.deepEqual(concurrent.map(result => result.status), [0, 0]);
   const concurrentRecords = (await readFile(concurrentInboxPath, 'utf8')).trim().split('\n');
@@ -351,12 +367,13 @@ test('MCP task leases prevent duplicate owners and bind result proposals to an a
   await writeFile(backupPath, backup, 'utf8');
 
   const request = (name: string, args: Record<string, unknown> = {}) => JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n';
-  const clientRequest = (client: string, action: string, key: string, claimId?: string) => request('threadpack_project_claim_task', {
-    client, idempotencyKey: key, action, ...(action === 'claim' ? { taskId: 'task-1', leaseSeconds: 300 } : { claimId }),
+  const clientPermissions = (client: string) => ['--client-id', client, '--project-id', 'task-project', '--allow-task-coordination'];
+  const clientRequest = (action: string, key: string, claimId?: string, spoofedClient?: string) => request('threadpack_project_claim_task', {
+    ...(spoofedClient ? { client: spoofedClient } : {}), idempotencyKey: key, action, ...(action === 'claim' ? { taskId: 'task-1', leaseSeconds: 300 } : { claimId }),
   });
   const claims = await Promise.all([
-    runMcpProcess(backupPath, inboxPath, clientRequest('codex', 'claim', 'codex-task-claim')),
-    runMcpProcess(backupPath, inboxPath, clientRequest('claude-code', 'claim', 'claude-task-claim')),
+    runMcpProcess(backupPath, inboxPath, clientRequest('claim', 'codex-task-claim'), clientPermissions('codex')),
+    runMcpProcess(backupPath, inboxPath, clientRequest('claim', 'claude-task-claim'), clientPermissions('claude-code')),
   ]);
   assert.deepEqual(claims.map(result => result.status), [0, 0]);
   const claimResults = claims.map(result => JSON.parse(result.stdout.trim()) as { result?: { structuredContent?: { claimId: string; status: string } }; error?: { code: number } });
@@ -366,10 +383,14 @@ test('MCP task leases prevent duplicate owners and bind result proposals to an a
   const owner = winningIndex === 0 ? 'codex' : 'claude-code';
   const ownerIdempotencyKey = owner === 'codex' ? 'codex-task-claim' : 'claude-task-claim';
   const claimId = claimResults[winningIndex]!.result!.structuredContent!.claimId;
-  const claimRetry = await runMcpProcess(backupPath, inboxPath, clientRequest(owner, 'claim', ownerIdempotencyKey));
+  const claimRetry = await runMcpProcess(backupPath, inboxPath, clientRequest('claim', ownerIdempotencyKey), clientPermissions(owner));
   assert.equal((JSON.parse(claimRetry.stdout.trim()) as { result?: { structuredContent?: { status: string } }; error?: { message: string } }).result?.structuredContent?.status, 'already-recorded', claimRetry.stdout + claimRetry.stderr);
-  const spoofedRelease = await runMcpProcess(backupPath, inboxPath, clientRequest(owner === 'codex' ? 'claude-code' : 'codex', 'release', 'spoofed-release', claimId));
+  const otherClient = owner === 'codex' ? 'claude-code' : 'codex';
+  const spoofedRelease = await runMcpProcess(backupPath, inboxPath, clientRequest('release', 'spoofed-release', claimId), clientPermissions(otherClient));
   assert.equal((JSON.parse(spoofedRelease.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
+  const forgedClientRelease = await runMcpProcess(backupPath, inboxPath,
+    clientRequest('release', 'forged-client-release', claimId, owner), clientPermissions(otherClient));
+  assert.equal((JSON.parse(forgedClientRelease.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   const tasks = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath], {
     encoding: 'utf8', input: request('threadpack_project_tasks'),
   });
@@ -382,11 +403,11 @@ test('MCP task leases prevent duplicate owners and bind result proposals to an a
   assert.equal(tasksResult.result?.structuredContent?.tasks[0]?.activeClaim?.claimId, claimId);
 
   const submit = request('threadpack_project_submit_update', {
-    client: owner, idempotencyKey: 'task-result-1', sessionId: 'session-task', sessionVersion: 1,
+    idempotencyKey: 'task-result-1', sessionId: 'session-task', sessionVersion: 1,
     messageId: 'task-result', evidenceQuote: 'restore verification command completed', category: 'task',
     taskId: 'task-1', claimId, taskState: 'done', topic: 'Backup recovery', statement: 'The backup restore completed successfully.',
   });
-  const submitted = await runMcpProcess(backupPath, inboxPath, submit);
+  const submitted = await runMcpProcess(backupPath, inboxPath, submit, [...clientPermissions(owner), '--allow-candidate-updates']);
   const proposal = (await readFile(inboxPath, 'utf8')).trim().split('\n')
     .map(line => JSON.parse(line) as { type: string; proposal?: { taskId?: string; claimId?: string } })
     .find(line => line.type === 'threadpack_update');
@@ -394,25 +415,25 @@ test('MCP task leases prevent duplicate owners and bind result proposals to an a
   assert.equal(proposal?.proposal?.taskId, 'task-1');
   assert.equal(proposal?.proposal?.claimId, claimId);
 
-  const release = await runMcpProcess(backupPath, inboxPath, clientRequest(owner, 'release', `${owner}-release-task`, claimId));
+  const release = await runMcpProcess(backupPath, inboxPath, clientRequest('release', `${owner}-release-task`, claimId), clientPermissions(owner));
   assert.equal(release.status, 0);
-  const afterRelease = await runMcpProcess(backupPath, inboxPath, clientRequest('other-client', 'claim', 'other-claim-task'));
+  const afterRelease = await runMcpProcess(backupPath, inboxPath, clientRequest('claim', 'other-claim-task'), clientPermissions('other-client'));
   assert.equal(afterRelease.status, 0);
   const secondClaim = (JSON.parse(afterRelease.stdout.trim()) as { result?: { structuredContent?: { status: string; claimId: string } }; error?: { message: string } }).result?.structuredContent;
   assert.equal(secondClaim?.status, 'recorded', afterRelease.stdout + afterRelease.stderr);
-  const secondRelease = await runMcpProcess(backupPath, inboxPath, clientRequest('other-client', 'release', 'other-release-task', secondClaim!.claimId));
+  const secondRelease = await runMcpProcess(backupPath, inboxPath, clientRequest('release', 'other-release-task', secondClaim!.claimId), clientPermissions('other-client'));
   assert.equal((JSON.parse(secondRelease.stdout.trim()) as { result?: { structuredContent?: { status: string } } }).result?.structuredContent?.status, 'recorded');
 
   const repeatedClaimIds = new Set<string>();
   for (let round = 0; round < 10; round++) {
     const client = `cycle-client-${round}`;
-    const claim = await runMcpProcess(backupPath, inboxPath, clientRequest(client, 'claim', `${client}-claim`));
+    const claim = await runMcpProcess(backupPath, inboxPath, clientRequest('claim', `${client}-claim`), clientPermissions(client));
     const claimResult = (JSON.parse(claim.stdout.trim()) as { result?: { structuredContent?: { status: string; claimId: string } } }).result?.structuredContent;
     assert.equal(claimResult?.status, 'recorded');
     repeatedClaimIds.add(claimResult!.claimId);
-    const renewed = await runMcpProcess(backupPath, inboxPath, clientRequest(client, 'renew', `${client}-renew`, claimResult!.claimId));
+    const renewed = await runMcpProcess(backupPath, inboxPath, clientRequest('renew', `${client}-renew`, claimResult!.claimId), clientPermissions(client));
     assert.equal((JSON.parse(renewed.stdout.trim()) as { result?: { structuredContent?: { action: string } } }).result?.structuredContent?.action, 'renewed');
-    const released = await runMcpProcess(backupPath, inboxPath, clientRequest(client, 'release', `${client}-release`, claimResult!.claimId));
+    const released = await runMcpProcess(backupPath, inboxPath, clientRequest('release', `${client}-release`, claimResult!.claimId), clientPermissions(client));
     assert.equal((JSON.parse(released.stdout.trim()) as { result?: { structuredContent?: { action: string } } }).result?.structuredContent?.action, 'released');
   }
   const inboxEvents = (await readFile(inboxPath, 'utf8')).trim().split('\n')
@@ -442,6 +463,18 @@ test('MCP can be configured as a per-client read-only instance', async () => {
   const denied = await runMcpProcess(backupPath, inboxPath, writeRequest, ['--read-only']);
   assert.equal((JSON.parse(denied.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal((await readFile(inboxPath).catch(() => '')).length, 0);
+
+  const invalidMixedPermissions = await runMcpProcess(backupPath, inboxPath, '', [
+    '--client-id', 'readonly-client', '--project-id', 'readonly-project', '--allow-candidate-updates', '--read-only',
+  ]);
+  assert.notEqual(invalidMixedPermissions.status, 0);
+  assert.match(invalidMixedPermissions.stderr, /Processing failed/);
+
+  const wrongProject = await runMcpProcess(backupPath, inboxPath,
+    JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'threadpack_project_context', arguments: {} } }) + '\n',
+    ['--client-id', 'scoped-client', '--project-id', 'other-project', '--allow-candidate-updates']);
+  assert.equal((JSON.parse(wrongProject.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
+  assert.equal((await readFile(inboxPath).catch(() => '')).length, 0);
 });
 
 test('MCP candidate update schema includes the user preference category', async () => {
@@ -454,13 +487,21 @@ test('MCP candidate update schema includes the user preference category', async 
   }) + '\n';
   await writeFile(backupPath, backup, 'utf8');
   await writeFile(inboxPath, '', 'utf8');
-  const result = await runMcpProcess(backupPath, inboxPath,
+  const defaultReadOnly = await runMcpProcess(backupPath, inboxPath,
     JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  const defaultToolNames = ((JSON.parse(defaultReadOnly.stdout.trim()) as { result: { tools: { name: string }[] } }).result.tools).map(tool => tool.name);
+  assert.deepEqual(defaultToolNames, ['threadpack_project_context', 'threadpack_project_tasks']);
+  const result = await runMcpProcess(backupPath, inboxPath,
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n',
+    ['--client-id', 'schema-client', '--project-id', 'schema-project', '--allow-candidate-updates']);
   assert.equal(result.status, 0, result.stderr);
   const response = JSON.parse(result.stdout.trim()) as { result?: { tools?: { name: string; inputSchema?: { properties?: { category?: { enum?: string[] } } } }[] } };
+  const toolNames = response.result?.tools?.map(tool => tool.name) ?? [];
+  assert.deepEqual(toolNames, ['threadpack_project_context', 'threadpack_project_tasks', 'threadpack_project_submit_update']);
   const submitTool = response.result?.tools?.find(tool => tool.name === 'threadpack_project_submit_update');
   assert.ok(submitTool);
   assert.ok(submitTool.inputSchema?.properties?.category?.enum?.includes('preference'));
+  assert.equal('client' in (submitTool.inputSchema?.properties ?? {}), false);
 });
 
 test('MCP verifies v8 signature integrity but does not trust keys supplied by the backup', async () => {

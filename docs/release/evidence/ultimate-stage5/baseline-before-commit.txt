@@ -1,0 +1,15 @@
+Status:
+## release-candidate/third-round-stage5-baseline
+ M README.md
+ M README.zh-CN.md
+ M cli/index.ts
+ M cli/mcp-server.ts
+ M docs/architecture/mcp-integration.md
+ M docs/architecture/system-architecture.md
+ M docs/testing/acceptance-matrix.md
+ M tests/browser/project-coordination.spec.ts
+ M tests/browser/project-shared-state.spec.ts
+ M tests/mcp.test.ts
+HEAD: 74da06f11b3843ff301c0617c144662245a35361
+origin/main: 77a197696480e8edebdc9bde7bca43443d3a759b
+Remote candidate: 74da06f11b3843ff301c0617c144662245a35361	refs/heads/release-candidate/third-round-stage5-baseline

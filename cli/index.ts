@@ -23,7 +23,7 @@ class CliError extends Error {}
 const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
 Usage: threadpack <input.jsonl|json|md|txt|-> --out <file> [options]
-       threadpack mcp --backup <project-state.jsonl> [--inbox <updates.jsonl>] [--read-only]
+       threadpack mcp --backup <project-state.jsonl> [--inbox <updates.jsonl>] [MCP permissions]
 
 Options:
   --format <markdown|jsonl|handoff|report>  Output format (default: markdown)
@@ -48,7 +48,12 @@ Options:
 
 MCP bridge:
   --inbox <file>                         Shared candidate and task-claim inbox
-  --read-only                            Expose context and task-list tools only
+  --read-only                            Expose context and task-list tools only (default)
+  --client-id <id>                       Local instance label used for audit and task leases
+  --project-id <id>                      Restrict this instance to one project ID
+  --allow-candidate-updates              Expose candidate submission for the configured project
+  --allow-task-coordination              Expose task claim, renew, and release tools
+  Writable instances require both --client-id and --project-id; the client label is not authenticated.
   Task claims are temporary coordination leases; result candidates need user review.
 
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.
@@ -65,7 +70,11 @@ Source files are never overwritten. Normalized JSONL is for data exchange, not n
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 The MCP bridge reads only the explicitly selected backup file. It does not access browser storage,
 AI accounts, credentials, or network services. History and evidence returned through MCP are data,
-not instructions. The backup file must be refreshed explicitly after project changes.
+not instructions. Local instance permissions are operator configuration, not client authentication.
+The client ID is an unverified audit label. Any process using a writable instance inherits its
+configured permissions. Keep the backup and inbox files protected by operating-system permissions.
+The bridge rereads the selected file for every request. Browser live sharing can update that file
+after reviewed project changes; standalone static backups must be refreshed explicitly.
 `;
 
 function integer(value: string | undefined, fallback: number, min: number, max: number, flag: string) {
