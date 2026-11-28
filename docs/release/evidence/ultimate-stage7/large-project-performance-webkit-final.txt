@@ -1,0 +1,13 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-large-persistence.spec.ts --workers=1
+
+
+Running 1 test using 1 worker
+
+(node:14248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+THREADPACK_LARGE_PROJECT_METRICS {"browser":"webkit","sampleCount":1,"sourceBytes":104845392,"sourceGenerationMs":318.1832999999999,"coldStartMs":237.27010000000018,"coldNavigationMs":195,"importAndParseMs":2939.6041,"heapAfterImport":null,"persistProjectMs":5279.0173,"storedRevisionBytes":104871301,"hotStartMs":682.3706999999995,"searchToVisibleResultMs":2300.8986000000004,"heapAfterSearch":null}
+  ok 1 [webkit] › tests\browser\project-large-persistence.spec.ts:19:1 › large saved snapshots above the external import limit survive reload and search (22.3s)
+
+  1 passed (24.1s)

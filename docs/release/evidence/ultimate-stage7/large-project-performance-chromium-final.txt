@@ -1,0 +1,13 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-large-persistence.spec.ts --workers=1
+
+
+Running 1 test using 1 worker
+
+(node:55584) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+THREADPACK_LARGE_PROJECT_METRICS {"browser":"chromium","sampleCount":1,"sourceBytes":104845392,"sourceGenerationMs":257.19499999999994,"coldStartMs":391.4582999999998,"coldNavigationMs":191.5,"importAndParseMs":3049.5766999999996,"heapAfterImport":{"usedJSHeapSize":11900000,"totalJSHeapSize":15200000,"jsHeapSizeLimit":3760000000},"persistProjectMs":3100.709899999999,"storedRevisionBytes":104871301,"hotStartMs":190.89229999999952,"searchToVisibleResultMs":3066.4485999999997,"heapAfterSearch":{"usedJSHeapSize":11900000,"totalJSHeapSize":15200000,"jsHeapSizeLimit":3760000000}}
+  ok 1 [chromium] › tests\browser\project-large-persistence.spec.ts:19:1 › large saved snapshots above the external import limit survive reload and search (16.1s)
+
+  1 passed (18.3s)
