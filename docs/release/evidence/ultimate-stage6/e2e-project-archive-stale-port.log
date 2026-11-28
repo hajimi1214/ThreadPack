@@ -1,0 +1,38 @@
+
+Running 1 test using 1 worker
+
+(node:21104) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (30.3s)
+
+
+  1) [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).getByRole('button', { name: 'Archive project', exact: true })
+
+
+      233 |   expect(projectId).toBeTruthy();
+      234 |
+    > 235 |   await dialog.getByRole('button', { name: 'Archive project', exact: true }).click();
+          |                                                                              ^
+      236 |   await expect(dialog.locator('.project-list-item')).toHaveCount(0);
+      237 |   await expect(dialog.getByRole('region', { name: 'Archived projects', exact: true })).toContainText('Keep this project');
+      238 |   await page.reload();
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-library.spec.ts:235:78
+
+    Error Context: test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-archiving--70c25-tory-and-allows-restoration-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration 

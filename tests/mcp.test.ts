@@ -36,6 +36,59 @@ function runMcpProcess(backupPath: string, inboxPath: string, input: string, ext
   });
 }
 
+test('MCP diagnostics validate local files and effective permissions without writing', async () => {
+  const backupPath = join(folder, 'diagnostic-project.jsonl');
+  const inboxPath = join(folder, 'diagnostic-inbox.jsonl');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'diagnostic-project', createdAt: 1,
+    project: { name: 'Diagnostic project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  await writeFile(backupPath, backup, 'utf8');
+
+  const readOnly = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8' });
+  assert.equal(readOnly.status, 0, readOnly.stderr);
+  const diagnostic = JSON.parse(readOnly.stdout.trim()) as {
+    status: string; transport: string; projectId: string;
+    backup: { valid: boolean; sessions: number; facts: number };
+    inbox: { state: string; explicitlyConfigured: boolean; bytes: number; records: number };
+    access: { clientIdentityVerified: boolean; candidateUpdates: boolean; taskCoordination: boolean };
+    tools: string[];
+  };
+  assert.equal(diagnostic.status, 'ready');
+  assert.equal(diagnostic.transport, 'stdio');
+  assert.equal(diagnostic.projectId, 'diagnostic-project');
+  assert.deepEqual(diagnostic.backup, { valid: true, bytes: Buffer.byteLength(backup), sessions: 0, facts: 0 });
+  assert.deepEqual(diagnostic.inbox, { state: 'absent', explicitlyConfigured: true, bytes: 0, records: 0 });
+  assert.equal(diagnostic.access.clientIdentityVerified, false);
+  assert.equal(diagnostic.access.candidateUpdates, false);
+  assert.equal(diagnostic.access.taskCoordination, false);
+  assert.deepEqual(diagnostic.tools, ['threadpack_project_context', 'threadpack_project_tasks']);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  await assert.rejects(readFile(inboxPath), { code: 'ENOENT' });
+
+  await writeFile(inboxPath, '', 'utf8');
+  const existingInbox = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath, '--inbox', inboxPath], { encoding: 'utf8' });
+  assert.equal(existingInbox.status, 0, existingInbox.stderr);
+  const existingInboxDiagnostic = JSON.parse(existingInbox.stdout.trim()) as typeof diagnostic;
+  assert.deepEqual(existingInboxDiagnostic.inbox, { state: 'valid', explicitlyConfigured: true, bytes: 0, records: 0 });
+  assert.equal(await readFile(inboxPath, 'utf8'), '');
+
+  const writable = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--client-id', 'codex', '--project-id', 'diagnostic-project', '--allow-candidate-updates'], { encoding: 'utf8' });
+  assert.equal(writable.status, 0, writable.stderr);
+  const writableDiagnostic = JSON.parse(writable.stdout.trim()) as typeof diagnostic;
+  assert.equal(writableDiagnostic.access.candidateUpdates, true);
+  assert.deepEqual(writableDiagnostic.tools, ['threadpack_project_context', 'threadpack_project_tasks', 'threadpack_project_submit_update']);
+
+  const wrongProject = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--client-id', 'codex', '--project-id', 'another-project', '--allow-candidate-updates'], { encoding: 'utf8' });
+  assert.notEqual(wrongProject.status, 0);
+  assert.match(wrongProject.stderr, /Processing failed/);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  assert.equal(await readFile(inboxPath, 'utf8'), '');
+});
+
 test('MCP bridge serves the latest authorized backup with a trust boundary', async () => {
   const memory = {
     id: 'fact-1', category: 'constraint', topic: 'Runtime', statement: 'The runtime must stay local.', origin: 'user', status: 'confirmed',

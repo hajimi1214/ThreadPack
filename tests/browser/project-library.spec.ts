@@ -220,3 +220,32 @@ test('disabling IndexedDB reports a project-library error while temporary proces
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator('.message-content').filter({ hasText: 'TEMPORARY_WORKFLOW_MARKER' })).toHaveCount(1);
 });
+
+test('archiving a project preserves its identity and history and allows restoration', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'archived-session.json', 'ARCHIVED_PROJECT_HISTORY_MARKER');
+  const dialog = await openProjects(page);
+  await dialog.getByLabel('Project name', { exact: true }).fill('Keep this project');
+  await dialog.getByRole('button', { name: 'Create project', exact: true }).click();
+  await dialog.getByRole('button', { name: /Save current conversation/ }).click();
+  await expect(dialog.locator('.project-session-item')).toContainText('Durable project history');
+  const projectId = await dialog.locator('.project-list-item').getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+
+  await dialog.getByRole('button', { name: 'Archive project', exact: true }).click();
+  await expect(dialog.locator('.project-list-item')).toHaveCount(0);
+  await expect(dialog.getByRole('region', { name: 'Archived projects', exact: true })).toContainText('Keep this project');
+  await page.reload();
+  const restoredDialog = await openProjects(page);
+  await expect(restoredDialog.locator('.project-list-item')).toHaveCount(0);
+  const archived = restoredDialog.getByRole('region', { name: 'Archived projects', exact: true });
+  const archivedItem = archived.locator('.project-archived-item[data-project-id="' + projectId + '"]');
+  await expect(archivedItem).toContainText('Keep this project');
+  await archivedItem.getByRole('button', { name: 'Restore', exact: true }).click();
+
+  const restored = restoredDialog.locator('.project-list-item');
+  await expect(restored).toHaveCount(1);
+  await expect(restored).toHaveAttribute('data-project-id', projectId!);
+  await expect(restoredDialog.locator('.project-session-item')).toContainText('Durable project history');
+  await expect(restoredDialog.locator('.project-session-item')).toContainText('Version 1');
+});

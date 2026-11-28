@@ -15,6 +15,15 @@
 .project-list-item:hover,.project-list-item.active{background:#f0f5fd;}
 .project-list-item strong{font-size:12px;font-weight:600;line-height:1.5;color:#3c5272;overflow-wrap:anywhere;}
 .project-list-item small,.project-detail-heading small{font-size:9px;line-height:1.5;color:#8291a6;}
+.project-archived-list{display:grid;gap:5px;margin-top:8px;padding-top:10px;border-top:1px solid #e7ecf4;}
+.project-archived-heading{display:grid;gap:3px;}
+.project-archived-list h3{margin:0 0 2px;font-size:10px;font-weight:600;color:#718198;}
+.project-archived-heading small{font-size:8px;line-height:1.5;color:#8795a9;}
+.project-archived-item{display:grid;gap:4px;padding:8px;border:1px solid #e7ecf4;border-radius:5px;background:#fbfcfe;}
+.project-archived-item>div{display:grid;gap:2px;min-width:0;}
+.project-archived-item strong{font-size:9px;color:#607189;overflow-wrap:anywhere;}
+.project-archived-item small{font-size:8px;color:#8795a9;}
+.project-archived-item .text-button{justify-self:start;}
 .project-detail{min-width:0;}
 .project-detail-heading{padding-bottom:11px;border-bottom:1px solid #e7ecf4;}
 .project-detail-heading>div{min-width:0;flex:1;}
@@ -143,6 +152,7 @@
   .project-library-grid{grid-template-columns:minmax(0,1fr);gap:12px;}
   .project-list{flex-direction:row;max-height:none;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid #e7ecf4;padding:0 0 8px;}
   .project-list-item{flex:0 0 150px;border:1px solid #e7ecf4;}
+  .project-archived-list{flex:0 0 200px;align-content:start;margin:0;padding:0 0 0 10px;border-top:0;border-left:1px solid #e7ecf4;}
   .project-detail-heading h3{font-size:13px;}
   .project-session-item{flex-wrap:wrap;}
   .project-session-copy{flex-basis:100%;}

@@ -33,6 +33,7 @@ export interface ProjectRecord {
   importantNotes: string;
   createdAt: number;
   updatedAt: number;
+  archivedAt?: number;
   restoringSince?: number;
   migrationHistory?: ProjectBackupMigrationRecord[];
 }
@@ -857,8 +858,16 @@ export async function listProjects(): Promise<ProjectRecord[]> {
   await cleanAbandonedRestores();
   return withTransaction(['projects'], 'readonly', async transaction =>
     (await idbRequest<ProjectRecord[]>(transaction.objectStore('projects').getAll()))
-      .filter(project => !project.restoringSince)
+      .filter(project => !project.restoringSince && project.archivedAt === undefined)
       .sort((a, b) => b.updatedAt - a.updatedAt));
+}
+
+export async function listArchivedProjects(): Promise<ProjectRecord[]> {
+  await cleanAbandonedRestores();
+  return withTransaction(['projects'], 'readonly', async transaction =>
+    (await idbRequest<ProjectRecord[]>(transaction.objectStore('projects').getAll()))
+      .filter(project => !project.restoringSince && Number.isSafeInteger(project.archivedAt))
+      .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0)));
 }
 
 export async function createProject(name: string): Promise<ProjectRecord> {
@@ -870,6 +879,32 @@ export async function createProject(name: string): Promise<ProjectRecord> {
     transaction.objectStore('projects').add(project);
   });
   return project;
+}
+
+export async function archiveProject(projectId: string): Promise<ProjectRecord> {
+  if (typeof projectId !== 'string' || !projectId || projectId.length > 200) throw new Error('This project is unavailable.');
+  return withTransaction(['projects'], 'readwrite', async transaction => {
+    const store = transaction.objectStore('projects');
+    const project = await idbRequest<ProjectRecord | undefined>(store.get(projectId));
+    if (!project || project.restoringSince || project.archivedAt !== undefined) throw new Error('This project is unavailable.');
+    project.archivedAt = Date.now();
+    touchProject(project);
+    store.put(project);
+    return project;
+  });
+}
+
+export async function restoreArchivedProject(projectId: string): Promise<ProjectRecord> {
+  if (typeof projectId !== 'string' || !projectId || projectId.length > 200) throw new Error('This project is unavailable.');
+  return withTransaction(['projects'], 'readwrite', async transaction => {
+    const store = transaction.objectStore('projects');
+    const project = await idbRequest<ProjectRecord | undefined>(store.get(projectId));
+    if (!project || project.restoringSince || !Number.isSafeInteger(project.archivedAt)) throw new Error('This archived project is unavailable.');
+    delete project.archivedAt;
+    touchProject(project);
+    store.put(project);
+    return project;
+  });
 }
 
 export async function updateProject(projectId: string, changes: Partial<Pick<ProjectRecord, 'name' | 'summary' | 'importantNotes'>>): Promise<ProjectRecord> {

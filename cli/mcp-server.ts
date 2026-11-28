@@ -143,10 +143,10 @@ async function recoverInboxTail(path: string): Promise<void> {
   }
 }
 
-async function readInboxRecords(path: string, projectId: string): Promise<{ records: InboxEnvelope[]; bytes: number }> {
+async function readInboxRecords(path: string, projectId: string): Promise<{ records: InboxEnvelope[]; bytes: number; exists: boolean }> {
   let info;
   try { info = await stat(path); }
-  catch (value) { if ((value as NodeJS.ErrnoException).code === 'ENOENT') return { records: [], bytes: 0 }; throw value; }
+  catch (value) { if ((value as NodeJS.ErrnoException).code === 'ENOENT') return { records: [], bytes: 0, exists: false }; throw value; }
   if (!info.isFile() || info.size > MAX_BACKUP_BYTES) throw error('The update inbox must be a regular file no larger than 256 MiB.');
   const records: InboxEnvelope[] = [];
   const lines = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
@@ -158,7 +158,7 @@ async function readInboxRecords(path: string, projectId: string): Promise<{ reco
     inboxPayload(value, projectId);
     records.push(value as InboxEnvelope);
   }
-  return { records, bytes: info.size };
+  return { records, bytes: info.size, exists: true };
 }
 
 async function withInboxLock<T>(path: string, projectId: string,
@@ -908,6 +908,7 @@ export async function runMcpServer(arguments_: string[], version = 'unknown'): P
       backup: { type: 'string' }, inbox: { type: 'string' }, 'read-only': { type: 'boolean' },
       'client-id': { type: 'string' }, 'project-id': { type: 'string' },
       'allow-candidate-updates': { type: 'boolean' }, 'allow-task-coordination': { type: 'boolean' },
+      check: { type: 'boolean' },
     } });
   } catch { throw error('Use threadpack mcp --backup <project-backup.jsonl>.'); }
   if (typeof parsed.values.backup !== 'string' || !parsed.values.backup.trim()) throw error('Use threadpack mcp --backup <project-backup.jsonl>.');
@@ -929,7 +930,35 @@ export async function runMcpServer(arguments_: string[], version = 'unknown'): P
     allowCandidateUpdates,
     allowTaskCoordination,
   };
-  await ensureSeparateFiles(parsed.values.backup, proposalPath(parsed.values.backup, configuredInbox));
+  const backupPath = resolve(parsed.values.backup);
+  const inboxPath = proposalPath(backupPath, configuredInbox);
+  await ensureSeparateFiles(backupPath, inboxPath);
+  if (parsed.values.check === true) {
+    const context = await loadScopedBackup(backupPath, policy);
+    const [backupInfo, inbox] = await Promise.all([
+      stat(backupPath), readInboxRecords(inboxPath, context.projectId),
+    ]);
+    process.stdout.write(`${JSON.stringify({
+      status: 'ready', transport: 'stdio', protocolVersion: '2024-11-05', serverVersion: version,
+      projectId: context.projectId || null, snapshotCreatedAt: context.snapshotCreatedAt,
+      projectUpdatedAt: context.project.updatedAt,
+      backup: { valid: true, bytes: backupInfo.size, sessions: context.sessions.length, facts: context.facts.length },
+      inbox: {
+        state: inbox.exists ? 'valid' : 'absent',
+        explicitlyConfigured: configuredInbox !== undefined,
+        bytes: inbox.bytes,
+        records: inbox.records.length,
+      },
+      access: {
+        clientLabel: policy.clientId || null, clientIdentityVerified: false,
+        projectScope: policy.projectId || null,
+        candidateUpdates: policy.allowCandidateUpdates,
+        taskCoordination: policy.allowTaskCoordination,
+      },
+      tools: mcpTools(policy).map(tool => tool.name),
+    })}\n`);
+    return;
+  }
 
   let pending = '';
   process.stdin.setEncoding('utf8');

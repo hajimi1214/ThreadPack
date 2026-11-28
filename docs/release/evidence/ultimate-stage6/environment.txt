@@ -1,0 +1,7 @@
+Environment: Windows 10.0.26200
+Node.js: v24.14.1
+npm: 11.11.0
+Playwright: 1.65.1
+Candidate branch: release-candidate/third-round-stage5-baseline
+Baseline HEAD: 5ca5bfadbfbae92945b1ba0edfabc05a787c08bf
+origin/main: 77a197696480e8edebdc9bde7bca43443d3a759b

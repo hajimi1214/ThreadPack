@@ -20,4 +20,6 @@ MCP 候选更新通路写入单独 inbox，并由用户审核后才可能影响�
 
 MCP 工具 schema、Context/Tasks 投影、候选 inbox、默认只读、按能力写入授权、项目范围校验、客户端参数伪造拒绝和备份校验由 Node 测试覆盖，具体用例及汇总见 `tests/mcp.test.ts` 与阶段验收报告。Windows 本地测试已执行。Linux 部署及 WorkBuddy、Codex、Claude Code 的真实模型调用仍需独立验证。
 
+`threadpack mcp --check` 以只读方式验证备份、收件箱、项目范围和本地进程配置下可用的工具，并输出诊断 JSON 后退出。它不启动 MCP stdio 会话，不探测外部 AI 客户端，也不证明对端已经连接。
+
 外部 AI 产品是否能配置 stdio、本地服务进程权限及模型自动调用工具取决于客户端版本和用户授权。仅有 MCP 服务可启动或协议工具可被测试不代表任意客户端真实支持或已完成接续。

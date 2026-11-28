@@ -1,0 +1,30 @@
+[WebServer] (node:55728) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:16320) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 7 tests using 7 workers
+
+(node:10512) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32872) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42716) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:39016) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:35848) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57512) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 4 [chromium] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (15.3s)
+  ok 7 [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (18.6s)
+  ok 1 [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (20.2s)
+  ok 5 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (20.2s)
+  ok 3 [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (20.4s)
+  ok 6 [chromium] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (24.9s)
+  ok 2 [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (26.7s)
+
+  7 passed (55.9s)

@@ -47,6 +47,7 @@ Options:
   --version                              Show the installed version
 
 MCP bridge:
+  --check                                Validate the selected backup and inbox, then exit without writing
   --inbox <file>                         Shared candidate and task-claim inbox
   --read-only                            Expose context and task-list tools only (default)
   --client-id <id>                       Local instance label used for audit and task leases
@@ -54,6 +55,7 @@ MCP bridge:
   --allow-candidate-updates              Expose candidate submission for the configured project
   --allow-task-coordination              Expose task claim, renew, and release tools
   Writable instances require both --client-id and --project-id; the client label is not authenticated.
+  Use threadpack mcp --check --backup <file> to diagnose local backup, inbox and effective tool settings.
   Task claims are temporary coordination leases; result candidates need user review.
 
 Use '-' as input to read UTF-8 text from stdin. Input is limited to 100 MiB.

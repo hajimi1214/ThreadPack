@@ -3,11 +3,11 @@ import { Archive, ArrowDownToLine, Check, Clock3, FileJson, FolderPlus, Inbox, L
 import type { TranslationKey } from '../i18n';
 import type { Lang } from '../i18n';
 import {
-  connectSharedProjectBackup, connectSharedProjectInbox, createProject, deleteProject, disconnectSharedProjectBackup, exportProjectBackup,
-  getProjectSession, getSharedProjectBackupStatus, listProjectRevisions, listProjects, listProjectSessions,
+  archiveProject, connectSharedProjectBackup, connectSharedProjectInbox, createProject, deleteProject, disconnectSharedProjectBackup, exportProjectBackup,
+  getProjectSession, getSharedProjectBackupStatus, listArchivedProjects, listProjectRevisions, listProjects, listProjectSessions,
   importSharedProjectUpdates, listProjectTaskClaims, listProjectUpdateProposals, reconnectSharedProjectBackup, recoverStaleProjectUpdateReviews, reviewProjectUpdateProposal,
   editProjectUpdateProposal, revokeAcceptedProjectUpdate, restoreProjectBackup, restoreProjectRevision,
-  saveProjectSession, syncSharedProjectBackup, updateProject,
+  restoreArchivedProject, saveProjectSession, syncSharedProjectBackup, updateProject,
 } from './store';
 import type { ProjectRecord, ProjectRevisionSummary, ProjectSessionInput, ProjectSessionSummary, SharedProjectBackupStatus, SharedProjectFileHandle } from './store';
 import type { ProjectTaskClaim, ProjectUpdateProposal } from './memory-types';
@@ -26,6 +26,7 @@ interface Props {
 
 export default function ProjectLibrary({ activeSession, t, lang, close, readActiveSession, openSession, notify }: Props) {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<ProjectRecord[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [projectReload, setProjectReload] = useState(0);
@@ -70,8 +71,9 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   const inboxFileAvailable = supportsLocalFilePicker('showOpenFilePicker');
 
   async function refreshProjects(preferredId = selectedProjectId) {
-    const next = await listProjects();
+    const [next, archived] = await Promise.all([listProjects(), listArchivedProjects()]);
     setProjects(next);
+    setArchivedProjects(archived);
     const nextId = next.some(project => project.id === preferredId) ? preferredId : next[0]?.id ?? '';
     setSelectedProjectId(nextId);
     setProjectReload(value => value + 1);
@@ -79,8 +81,9 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
   }
 
   async function refreshProjectMetadata(projectId: string) {
-    const next = await listProjects();
+    const [next, archived] = await Promise.all([listProjects(), listArchivedProjects()]);
     setProjects(next);
+    setArchivedProjects(archived);
     if (next.some(project => project.id === projectId)) setSelectedProjectId(projectId);
     setProjectReload(value => value + 1);
     setSharedStatus(await syncSharedProjectBackup(projectId));
@@ -88,7 +91,9 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
 
   useEffect(() => {
     let active = true;
-    void listProjects().then(value => { if (active) { setProjects(value); setSelectedProjectId(value[0]?.id ?? ''); } })
+    void Promise.all([listProjects(), listArchivedProjects()]).then(([activeProjects, archived]) => {
+      if (active) { setProjects(activeProjects); setArchivedProjects(archived); setSelectedProjectId(activeProjects[0]?.id ?? ''); }
+    })
       .catch(value => { if (active) setError(value instanceof Error ? value.message : t.projectStorageError); })
       .finally(() => { if (active) setProjectsLoading(false); });
     return () => { active = false; };
@@ -345,6 +350,23 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
     });
   }
 
+  function archiveSelectedProject() {
+    if (!selectedProject) return;
+    void run('archive-project', async () => {
+      await archiveProject(selectedProject.id);
+      await refreshProjects('');
+      notify(t.projectArchived);
+    });
+  }
+
+  function restoreArchiveItem(projectId: string) {
+    void run('restore-archived-project', async () => {
+      const project = await restoreArchivedProject(projectId);
+      await refreshProjects(project.id);
+      notify(t.projectArchiveRestored);
+    });
+  }
+
   function downloadBackup() {
     if (!selectedProject) return;
     void run('backup', async () => {
@@ -381,9 +403,16 @@ export default function ProjectLibrary({ activeSession, t, lang, close, readActi
         {projectsLoading && <p className="project-empty">{t.projectLoading}</p>}
         {!projectsLoading && !projects.length && <p className="project-empty">{t.projectEmpty}</p>}
         {projects.map(project => <button key={project.id} data-project-id={project.id} className={`project-list-item ${selectedProjectId === project.id ? 'active' : ''}`} aria-pressed={selectedProjectId === project.id} onClick={() => setSelectedProjectId(project.id)}><strong>{project.name}</strong><small>{formatDate(project.updatedAt)}</small></button>)}
+        {!!archivedProjects.length && <section className="project-archived-list" aria-label={t.projectArchivedList}>
+          <div className="project-archived-heading"><h3>{t.projectArchivedList}</h3><small>{t.projectArchiveNote}</small></div>
+          {archivedProjects.map(project => <article className="project-archived-item" key={project.id} data-project-id={project.id}>
+            <div><strong>{project.name}</strong><small>{t.projectArchivedOn} {formatDate(project.archivedAt!)}</small></div>
+            <button className="text-button" disabled={!!busy} onClick={() => restoreArchiveItem(project.id)}>{t.projectArchiveRestore}</button>
+          </article>)}
+        </section>}
       </section>
       {selectedProject && <section className="project-detail">
-        <div className="project-detail-heading"><div><h3>{selectedProject.name}</h3><small>{t.projectUpdated} · {formatDate(selectedProject.updatedAt)}</small></div><button className="icon-button muted" aria-label={t.projectBackupExport} title={t.projectBackupExport} disabled={!!busy} onClick={downloadBackup}><ArrowDownToLine size={16} /></button><button className="icon-button muted" aria-label={t.projectDelete} title={t.projectDelete} disabled={!!busy} onClick={removeSelectedProject}><Trash2 size={16} /></button></div>
+        <div className="project-detail-heading"><div><h3>{selectedProject.name}</h3><small>{t.projectUpdated} · {formatDate(selectedProject.updatedAt)}</small></div><button className="icon-button muted" aria-label={t.projectBackupExport} title={t.projectBackupExport} disabled={!!busy} onClick={downloadBackup}><ArrowDownToLine size={16} /></button><button className="icon-button muted" aria-label={t.projectArchive} title={t.projectArchive} disabled={!!busy} onClick={archiveSelectedProject}><Archive size={16} /></button><button className="icon-button muted" aria-label={t.projectDelete} title={t.projectDelete} disabled={!!busy} onClick={removeSelectedProject}><Trash2 size={16} /></button></div>
         <div className="project-shared-state" aria-label={t.projectSharedConnect}>
           <div><strong><Link2 size={13} />{t.projectSharedConnect}</strong><small>{sharedStatus.connected
             ? sharedStatus.state === 'current' ? t.projectSharedCurrent : sharedStatus.state === 'out-of-date' ? t.projectSharedOutOfDate : sharedStatus.state === 'permission-required' ? t.projectSharedPermission : t.projectSharedFailed

@@ -98,6 +98,8 @@ AI 提取默认关闭。使用时需设置 HTTPS Chat Completions 接口和模�
 
 在同一台电脑上，将每个本地 stdio MCP 实例配置为启动 `threadpack mcp --backup /path/to/threadpack-shared-project.jsonl --inbox /path/to/threadpack-project-updates.jsonl`。默认只开放上下文和任务列表工具。如需开放候选提交或任务协调，请配置本地 `--client-id` 标签、精确的 `--project-id`，以及对应的 `--allow-candidate-updates` 或 `--allow-task-coordination`。这些参数是由用户配置的进程设置，不是经过认证的客户端凭据。任何使用可写实例的进程都会继承其权限，客户端标签仍未经验证。请用操作系统文件权限保护备份和收件箱。`--read-only` 会明确禁止启用写入能力。`threadpack_project_context` 工具和 `threadpack://project/context` 资源会在每次请求时重新读取共享状态，并返回快照版本和项目更新时间。`threadpack_project_tasks` 列出已确认、无冲突且未完成的任务及临时认领状态。客户端可通过 `threadpack_project_claim_task` 认领、续期或释放任务，以降低重复工作。客户端标签不代表经过验证的身份，任务认领也不代表工作已经完成。提交任务结果时，可通过 `threadpack_project_submit_update` 附上任务 ID 和认领 ID。每项候选仍须引用已保存会话版本和消息中的精确摘录，并提供可安全重试的幂等键。浏览器项目面板会导入认领和候选、将客户端标签明确显示为未经验证，并要求用户审查后才会写入项目事实。用户可以编辑或拒绝候选、查看状态历史和认领活动，也可以撤销已接受候选并保留其审计轨迹。接受后若与其他事实冲突，会进入现有冲突审查流程。客户端可在后续读取时比较版本。本地 stdio MCP 仅适用于支持用户配置本地 MCP 的 AI 客户端，不能接续不支持该功能的 ChatGPT 或 Claude 网页会话。桥接不会访问浏览器存储、AI 账号凭据或网络服务，也不会跨电脑同步。断开连接会停止浏览器更新，但保留文件；如需撤销客户端读取权限，请删除文件或修改客户端配置。项目备份功能仍独立保留，供恢复使用。
 
+运行 `threadpack mcp --check --backup /path/to/threadpack-shared-project.jsonl --inbox /path/to/threadpack-project-updates.jsonl` 可只读检查本地备份、收件箱和当前生效的工具权限，不会启动 MCP 会话，也不会修改文件。该检查只验证 ThreadPack 本地配置，不代表 AI 客户端能够启动或使用该服务。
+
 实时文件连接需要安全上下文中的 Chromium 浏览器及 File System Access API，共享文件上限为 256 MiB。Firefox、Safari 和不支持此 API 的环境仍可使用本地项目及普通备份导入导出。不支持用户配置本地 MCP 进程的 ChatGPT 或 Claude 网页对话无法直接使用此桥接。
 
 ## 安装与使用
