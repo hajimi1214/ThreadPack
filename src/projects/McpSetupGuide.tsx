@@ -26,18 +26,20 @@ export default function McpSetupGuide({ projectId, t }: Props) {
   const [command, setCommand] = useState('threadpack');
   const [backupPath, setBackupPath] = useState('');
   const [inboxPath, setInboxPath] = useState('');
+  const [connectionLogPath, setConnectionLogPath] = useState('');
   const [allowCandidates, setAllowCandidates] = useState(false);
   const [allowTaskCoordination, setAllowTaskCoordination] = useState(false);
   const [copied, setCopied] = useState(false);
   const args = useMemo(() => {
     const result = ['mcp', '--backup', backupPath.trim(), '--project-id', projectId];
     if (inboxPath.trim()) result.push('--inbox', inboxPath.trim());
+    if (connectionLogPath.trim()) result.push('--connection-log', connectionLogPath.trim());
     if (allowCandidates || allowTaskCoordination) {
       result.push('--client-id', target, ...(allowCandidates ? ['--allow-candidate-updates'] : []),
         ...(allowTaskCoordination ? ['--allow-task-coordination'] : []));
     } else result.push('--read-only');
     return result;
-  }, [allowCandidates, allowTaskCoordination, backupPath, inboxPath, projectId, target]);
+  }, [allowCandidates, allowTaskCoordination, backupPath, connectionLogPath, inboxPath, projectId, target]);
   const configuration = useMemo(() => target === 'codex'
     ? codexConfiguration(command.trim() || 'threadpack', args)
     : jsonConfiguration(command.trim() || 'threadpack', args), [args, command, target]);
@@ -68,6 +70,7 @@ export default function McpSetupGuide({ projectId, t }: Props) {
         <label><span>{t.mcpSetupCommand}</span><input value={command} onChange={event => setCommand(event.target.value)} autoComplete="off" /></label>
         <label><span>{t.mcpSetupBackup}</span><input value={backupPath} onChange={event => setBackupPath(event.target.value)} placeholder={t.mcpSetupBackupPlaceholder} autoComplete="off" /></label>
         <label><span>{t.mcpSetupInbox}</span><input value={inboxPath} onChange={event => setInboxPath(event.target.value)} placeholder={t.mcpSetupInboxPlaceholder} autoComplete="off" /></label>
+        <label><span>{t.mcpSetupConnectionLog}</span><input value={connectionLogPath} onChange={event => setConnectionLogPath(event.target.value)} placeholder={t.mcpSetupConnectionLogPlaceholder} autoComplete="off" /></label>
       </div>
       <p className="mcp-setup-note">{t.mcpSetupPathNote} <code>{projectId}</code></p>
       <fieldset className="mcp-setup-permissions">

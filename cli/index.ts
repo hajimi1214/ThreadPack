@@ -54,6 +54,7 @@ MCP bridge:
   --project-id <id>                      Restrict this instance to one project ID
   --allow-candidate-updates              Expose candidate submission for the configured project
   --allow-task-coordination              Expose task claim, renew, and release tools
+  --connection-log <file>                Append metadata-only MCP events (opt-in, max 4 MiB)
   Writable instances require both --client-id and --project-id; the client label is not authenticated.
   Use threadpack mcp --check --backup <file> to diagnose local backup, inbox and effective tool settings.
   Task claims are temporary coordination leases; result candidates need user review.
@@ -77,6 +78,10 @@ The client ID is an unverified audit label. Any process using a writable instanc
 configured permissions. Keep the backup and inbox files protected by operating-system permissions.
 The bridge rereads the selected file for every request. Browser live sharing can update that file
 after reviewed project changes; standalone static backups must be refreshed explicitly.
+Connection logging is disabled by default. When enabled, it records client-declared initialize
+metadata and tool names, outcomes, and durations, but never tool arguments or returned content.
+The log is separate from the backup and inbox, restricted to the current user on POSIX, and capped
+at 4 MiB. Rotate it manually after the limit is reached. Client metadata remains unverified.
 `;
 
 function integer(value: string | undefined, fallback: number, min: number, max: number, flag: string) {

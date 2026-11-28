@@ -265,6 +265,7 @@ const fr: Record<TranslationKey, string> = {
   mcpSetupClient: 'Format du client', mcpSetupCommand: 'Commande CLI ThreadPack', mcpSetupBackup: 'Chemin complet de la sauvegarde partagée',
   mcpSetupBackupPlaceholder: 'Par exemple C:\\Users\\vous\\threadpack-project.jsonl', mcpSetupInbox: 'Chemin facultatif de la boîte de réception',
   mcpSetupInboxPlaceholder: 'Laisser vide pour utiliser le chemin par défaut près de la sauvegarde', mcpSetupPathNote: 'Le navigateur ne révèle pas les chemins locaux. Cette configuration est limitée à l’identifiant de projet',
+  mcpSetupConnectionLog: 'Journal de connexion facultatif, métadonnées uniquement', mcpSetupConnectionLogPlaceholder: 'Laisser vide pour désactiver. Aucun contenu. Limite de 4 Mio.',
   mcpSetupPermissions: 'Autorisations MCP facultatives', mcpSetupCandidatePermission: 'Autoriser les mises à jour candidates', mcpSetupTaskPermission: 'Autoriser la coordination des tâches',
   mcpSetupWriteWarning: 'Les propositions nécessitent une validation. Le libellé du client est un paramètre local non authentifié. Protégez sa configuration et la boîte de réception.',
   mcpSetupSnippet: 'Extrait de configuration', mcpSetupFillPaths: 'Saisissez la commande CLI et le chemin complet de la sauvegarde.',

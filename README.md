@@ -100,6 +100,8 @@ In the project library, **MCP client setup guide** generates a project-scoped st
 
 Run `threadpack mcp --check --backup /path/to/threadpack-shared-project.jsonl --inbox /path/to/threadpack-project-updates.jsonl` to validate the local backup, inbox and effective tool permissions without starting an MCP session or changing either file. This checks the ThreadPack side only and does not prove that an AI client can launch or use the server.
 
+The setup guide can optionally add `--connection-log <path>`. Logging is disabled by default. The local JSONL log records allowlisted client names, version-shaped metadata and capability names from initialize, plus observed MCP methods/tool names with outcomes and durations. Unknown client names are reduced to `unrecognized`, configured client labels are not written, and tool arguments or returned project context are never stored. The log must be separate from the backup and inbox, is restricted to the current user on POSIX, and has a 4 MiB cap. Once full or if a write fails, logging stops with a stderr notice while MCP requests continue. Rotate the file manually to resume logging. Client-declared names and capabilities remain unverified metadata.
+
 Live file connection requires a secure Chromium-based browser with the File System Access API and is limited to shared backup files up to 256 MiB. Firefox, Safari, and browser environments without this API keep the local project workflow and ordinary backup import/export. ChatGPT or Claude web conversations that do not support user-configured local MCP processes cannot use the bridge directly.
 
 ## Installation and usage

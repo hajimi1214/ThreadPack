@@ -269,6 +269,11 @@ test('MCP setup guide generates a project-scoped read-only client snippet by def
   expect(readonlyValue).toContain('"--read-only"');
   expect(readonlyValue).toContain('C:\\\\Project Data\\\\project-state.jsonl');
 
+  await dialog.getByLabel('Optional metadata-only connection log').fill('C:\\Project Data\\threadpack-mcp-log.jsonl');
+  const loggedValue = await snippet.inputValue();
+  expect(loggedValue).toContain('"--connection-log"');
+  expect(loggedValue).toContain('C:\\\\Project Data\\\\threadpack-mcp-log.jsonl');
+
   await dialog.getByLabel('Allow candidate updates').check();
   const writableValue = await snippet.inputValue();
   expect(writableValue).toContain('"--client-id", "codex"');

@@ -157,6 +157,7 @@ const ja: Record<TranslationKey, string> = {
   mcpSetupClient: 'クライアント形式', mcpSetupCommand: 'ThreadPack CLI コマンド', mcpSetupBackup: '共有バックアップのフルパス',
   mcpSetupBackupPlaceholder: '例: C:\\Users\\you\\threadpack-project.jsonl', mcpSetupInbox: '更新 inbox の任意パス',
   mcpSetupInboxPlaceholder: '空欄の場合はバックアップ隣の既定パスを使用', mcpSetupPathNote: 'ブラウザーはローカルファイルパスを公開しません。この設定の対象プロジェクト ID',
+  mcpSetupConnectionLog: '任意の接続メタデータログ', mcpSetupConnectionLogPlaceholder: '空欄で無効。内容は記録せず、上限は 4 MiB。',
   mcpSetupPermissions: '任意の MCP 権限', mcpSetupCandidatePermission: '候補更新を許可', mcpSetupTaskPermission: 'タスク調整を許可',
   mcpSetupWriteWarning: '書き込み候補はユーザーによる確認が必要です。クライアントラベルは未認証のローカル設定です。クライアント設定と inbox を保護してください。',
   mcpSetupSnippet: '設定例', mcpSetupFillPaths: 'CLI コマンドとバックアップのフルパスを入力してください。',

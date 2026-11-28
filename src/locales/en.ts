@@ -155,6 +155,7 @@ const en = {
   mcpSetupClient: 'Client format', mcpSetupCommand: 'ThreadPack CLI command', mcpSetupBackup: 'Full shared backup path',
   mcpSetupBackupPlaceholder: 'For example, C:\\Users\\you\\threadpack-project.jsonl', mcpSetupInbox: 'Optional update inbox path',
   mcpSetupInboxPlaceholder: 'Leave blank to use the default next to the backup', mcpSetupPathNote: 'The browser does not reveal local file paths. This configuration is scoped to project ID',
+  mcpSetupConnectionLog: 'Optional metadata-only connection log', mcpSetupConnectionLogPlaceholder: 'Leave blank to disable. No call content is saved. 4 MiB cap.',
   mcpSetupPermissions: 'Optional MCP permissions', mcpSetupCandidatePermission: 'Allow candidate updates', mcpSetupTaskPermission: 'Allow task coordination',
   mcpSetupWriteWarning: 'Write tools require user review. The client label is an unauthenticated local setting. Protect the client configuration and inbox.',
   mcpSetupSnippet: 'Configuration snippet', mcpSetupFillPaths: 'Enter the CLI command and full backup path to generate a snippet.',

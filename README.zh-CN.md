@@ -102,6 +102,8 @@ AI 提取默认关闭。使用时需设置 HTTPS Chat Completions 接口和模�
 
 运行 `threadpack mcp --check --backup /path/to/threadpack-shared-project.jsonl --inbox /path/to/threadpack-project-updates.jsonl` 可只读检查本地备份、收件箱和当前生效的工具权限，不会启动 MCP 会话，也不会修改文件。该检查只验证 ThreadPack 本地配置，不代表 AI 客户端能够启动或使用该服务。
 
+配置引导可选添加 `--connection-log <path>`。日志默认关闭，启用后以本地 JSONL 记录初始化时白名单内的客户端名称、符合版本号格式的版本及能力名称，以及观察到的 MCP 方法和工具名、调用结果及耗时。未识别的客户端名称统一记为 `unrecognized`，不会写入原始 client label，也不保存工具参数或项目上下文返回内容。日志必须与备份和收件箱分开，在 POSIX 系统上限制为当前用户可读写，最大 4 MiB。日志达到上限或写入失败时会通过 stderr 提示并停止记录，MCP 请求仍会继续。手动轮换日志文件后可恢复记录。客户端声明的名称与能力仍是未经验证的元数据。
+
 实时文件连接需要安全上下文中的 Chromium 浏览器及 File System Access API，共享文件上限为 256 MiB。Firefox、Safari 和不支持此 API 的环境仍可使用本地项目及普通备份导入导出。不支持用户配置本地 MCP 进程的 ChatGPT 或 Claude 网页对话无法直接使用此桥接。
 
 ## 安装与使用

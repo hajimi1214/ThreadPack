@@ -11,6 +11,7 @@ import {
   PROJECT_BACKUP_CHAIN_SEED,
 } from '../src/projects/backup-format';
 import { generateSigningIdentity, createRecoveryBundle, signTrustEvent, TRUST_EVENT_SCHEMA, TRUST_CHAIN_ORIGIN } from '../src/projects/trust-crypto';
+import { MAX_MCP_CONNECTION_LOG_BYTES } from '../cli/mcp-connection-log';
 
 let folder: string;
 let cli: string;
@@ -87,6 +88,148 @@ test('MCP diagnostics validate local files and effective permissions without wri
   assert.match(wrongProject.stderr, /Processing failed/);
   assert.equal(await readFile(backupPath, 'utf8'), backup);
   assert.equal(await readFile(inboxPath, 'utf8'), '');
+});
+
+test('opt-in MCP connection log records declared client metadata without prompts or tool content', async () => {
+  const backupPath = join(folder, 'connection-log-project.jsonl');
+  const inboxPath = join(folder, 'connection-log-inbox.jsonl');
+  const logPath = join(folder, 'connection-log.jsonl');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'connection-log-project', createdAt: 1,
+    project: { name: 'Connection log project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  await writeFile(backupPath, backup, 'utf8');
+
+  const diagnostic = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--inbox', inboxPath, '--connection-log', logPath], { encoding: 'utf8' });
+  assert.equal(diagnostic.status, 0, diagnostic.stderr);
+  assert.deepEqual(JSON.parse(diagnostic.stdout).connectionLog, { state: 'new', bytes: 0 });
+  await assert.rejects(readFile(logPath), { code: 'ENOENT' });
+
+  const privateMarker = 'PRIVATE_PROMPT_LOG_MARKER';
+  const clientMetadataSecret = 'sk-ant-api03-CLIENT_METADATA_SECRET';
+  const localLabelSecret = 'sk-ant-api03-LOCAL_LABEL_SECRET';
+  const input = [
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+      protocolVersion: '2024-11-05', clientInfo: { name: clientMetadataSecret, version: 'sk-ant-version-secret' },
+      capabilities: { tools: { listChanged: true } },
+    } }),
+    JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {
+      name: 'threadpack_project_context', arguments: { query: privateMarker, budget: 3000 },
+    } }),
+  ].join('\n') + '\n';
+  const result = await runMcpProcess(backupPath, inboxPath, input,
+    ['--connection-log', logPath, '--client-id', localLabelSecret]);
+  assert.equal(result.status, 0, result.stderr);
+  const entries = (await readFile(logPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
+  assert.deepEqual(entries.map(entry => entry.event), [
+    'server_started', 'client_initialize_received', 'client_initialized', 'rpc_request', 'tool_call', 'server_stopped',
+  ]);
+  assert.equal(entries[1]?.clientName, 'unrecognized');
+  assert.equal(entries[1]?.clientVersion, null);
+  assert.equal(entries[1]?.clientIdentityVerified, false);
+  assert.deepEqual(entries[1]?.declaredCapabilityNames, ['tools']);
+  assert.equal(entries[3]?.method, 'tools/list');
+  assert.equal(entries[4]?.toolName, 'threadpack_project_context');
+  assert.equal(entries[4]?.outcome, 'success');
+  assert.equal(typeof entries[4]?.durationMs, 'number');
+  assert.doesNotMatch(JSON.stringify(entries), new RegExp(privateMarker));
+  assert.doesNotMatch(JSON.stringify(entries), new RegExp(clientMetadataSecret));
+  assert.doesNotMatch(JSON.stringify(entries), new RegExp(localLabelSecret));
+  assert.doesNotMatch(JSON.stringify(entries), /sk-ant-version-secret/);
+  assert.doesNotMatch(JSON.stringify(entries), /project context|Connection log project/);
+});
+
+test('MCP connection log cannot alias the project backup or update inbox', async () => {
+  const backupPath = join(folder, 'connection-log-alias-project.jsonl');
+  const inboxPath = join(folder, 'connection-log-alias-inbox.jsonl');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'connection-log-alias-project', createdAt: 1,
+    project: { name: 'Alias project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  await writeFile(backupPath, backup, 'utf8');
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--inbox', inboxPath, '--connection-log', backupPath], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  await assert.rejects(readFile(inboxPath), { code: 'ENOENT' });
+});
+
+test('MCP connection log refuses an incomplete trailing record without changing the file', async () => {
+  const backupPath = join(folder, 'connection-log-tail-project.jsonl');
+  const inboxPath = join(folder, 'connection-log-tail-inbox.jsonl');
+  const logPath = join(folder, 'connection-log-tail.jsonl');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'connection-log-tail-project', createdAt: 1,
+    project: { name: 'Log tail project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  const incompleteLog = '{"event":"server_started","timestamp":"1970-01-01T00:00:00.000Z","format":"threadpack_mcp_connection_log","version":1}';
+  await writeFile(backupPath, backup, 'utf8');
+  await writeFile(logPath, incompleteLog, { encoding: 'utf8', mode: 0o600 });
+
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--inbox', inboxPath, '--connection-log', logPath], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(await readFile(logPath, 'utf8'), incompleteLog);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  await assert.rejects(readFile(inboxPath), { code: 'ENOENT' });
+});
+
+test('MCP connection log refuses unrelated existing files without appending to them', async () => {
+  const backupPath = join(folder, 'connection-log-format-project.jsonl');
+  const inboxPath = join(folder, 'connection-log-format-inbox.jsonl');
+  const logPath = join(folder, 'connection-log-format.jsonl');
+  const backup = JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'connection-log-format-project', createdAt: 1,
+    project: { name: 'Log format project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  }) + '\n';
+  const unrelatedLog = '{"event":"previous","timestamp":"1970-01-01T00:00:00.000Z"}\n';
+  await writeFile(backupPath, backup, 'utf8');
+  await writeFile(logPath, unrelatedLog, { encoding: 'utf8', mode: 0o600 });
+
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--inbox', inboxPath, '--connection-log', logPath], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(await readFile(logPath, 'utf8'), unrelatedLog);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  await assert.rejects(readFile(inboxPath), { code: 'ENOENT' });
+});
+
+test('MCP continues serving requests when the opt-in connection log reaches its size cap', async () => {
+  const backupPath = join(folder, 'connection-log-cap-project.jsonl');
+  const inboxPath = join(folder, 'connection-log-cap-inbox.jsonl');
+  const logPath = join(folder, 'connection-log-cap.jsonl');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'connection-log-cap-project', createdAt: 1,
+    project: { name: 'Log cap project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  const record = {
+    event: 'server_started', timestamp: new Date(0).toISOString(), format: 'threadpack_mcp_connection_log', version: 1,
+    padding: '',
+  };
+  const emptyLineBytes = Buffer.byteLength(`${JSON.stringify(record)}\n`);
+  record.padding = 'x'.repeat(MAX_MCP_CONNECTION_LOG_BYTES - emptyLineBytes - 1);
+  const priorLog = `${JSON.stringify(record)}\n`;
+  assert.equal(Buffer.byteLength(priorLog), MAX_MCP_CONNECTION_LOG_BYTES - 1);
+  await writeFile(backupPath, backup, 'utf8');
+  await writeFile(logPath, priorLog, { encoding: 'utf8', mode: 0o600 });
+
+  const input = [
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {} } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'threadpack_project_context', arguments: {} } }),
+  ].join('\n') + '\n';
+  const result = await runMcpProcess(backupPath, inboxPath, input, ['--connection-log', logPath]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /connection logging stopped/);
+  assert.equal(result.stdout.trim().split('\n').length, 2);
+  assert.equal(await readFile(logPath, 'utf8'), priorLog);
 });
 
 test('MCP bridge serves the latest authorized backup with a trust boundary', async () => {

@@ -154,6 +154,7 @@ const zh: Record<TranslationKey, string> = {
   mcpSetupClient: '客户端格式', mcpSetupCommand: 'ThreadPack CLI 命令', mcpSetupBackup: '共享备份完整路径',
   mcpSetupBackupPlaceholder: '例如 C:\\Users\\you\\threadpack-project.jsonl', mcpSetupInbox: '可选的更新收件箱路径',
   mcpSetupInboxPlaceholder: '留空则使用备份旁的默认路径', mcpSetupPathNote: '浏览器不会暴露本地文件路径。此配置限定到项目 ID',
+  mcpSetupConnectionLog: '可选的元数据连接日志', mcpSetupConnectionLogPlaceholder: '留空关闭。不记录调用内容，上限 4 MiB。',
   mcpSetupPermissions: '可选 MCP 权限', mcpSetupCandidatePermission: '允许提交候选更新', mcpSetupTaskPermission: '允许任务协调',
   mcpSetupWriteWarning: '写入工具产生的内容仍需用户审核。客户端标签不是经过认证的身份。请保护客户端配置和收件箱。',
   mcpSetupSnippet: '配置片段', mcpSetupFillPaths: '输入 CLI 命令和备份完整路径以生成配置片段。',

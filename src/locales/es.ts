@@ -265,6 +265,7 @@ const es: Record<TranslationKey, string> = {
   mcpSetupClient: 'Formato del cliente', mcpSetupCommand: 'Comando CLI de ThreadPack', mcpSetupBackup: 'Ruta completa de la copia compartida',
   mcpSetupBackupPlaceholder: 'Por ejemplo, C:\\Users\\tu\\threadpack-project.jsonl', mcpSetupInbox: 'Ruta opcional de la bandeja de actualizaciones',
   mcpSetupInboxPlaceholder: 'Déjalo vacío para usar la ruta predeterminada junto a la copia', mcpSetupPathNote: 'El navegador no revela rutas locales. Esta configuración se limita al ID del proyecto',
+  mcpSetupConnectionLog: 'Registro opcional de metadatos de conexión', mcpSetupConnectionLogPlaceholder: 'Déjalo vacío para desactivarlo. Sin contenido. Límite de 4 MiB.',
   mcpSetupPermissions: 'Permisos MCP opcionales', mcpSetupCandidatePermission: 'Permitir actualizaciones candidatas', mcpSetupTaskPermission: 'Permitir coordinación de tareas',
   mcpSetupWriteWarning: 'Las propuestas requieren revisión del usuario. La etiqueta del cliente es un ajuste local sin autenticar. Protege la configuración y la bandeja.',
   mcpSetupSnippet: 'Fragmento de configuración', mcpSetupFillPaths: 'Introduce el comando CLI y la ruta completa de la copia.',
