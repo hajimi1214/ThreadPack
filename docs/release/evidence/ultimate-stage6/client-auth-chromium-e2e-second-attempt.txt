@@ -1,0 +1,48 @@
+[WebServer] (node:10644) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:25684) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 8 tests using 1 worker
+
+(node:39024) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (9.3s)
+  ok 2 [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (3.7s)
+  ok 3 [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (3.6s)
+  ok 4 [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (4.2s)
+  ok 5 [chromium] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (2.3s)
+  ok 6 [chromium] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (1.9s)
+  ok 7 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (4.6s)
+  x  8 [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default (4.3s)
+
+
+  1) [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "Enter the registry path and one-time token"
+    Received string:    "Enter the CLI command and full backup path to generate a snippet."
+
+      285 |   await dialog.getByLabel('One-time client token').fill('A'.repeat(43));
+      286 |   await dialog.getByLabel('Token environment variable').fill('PATH');
+    > 287 |   expect(await snippet.inputValue()).toContain('Enter the registry path and one-time token');
+          |                                      ^
+      288 |   await dialog.getByLabel('Token environment variable').fill('THREADPACK_CLIENT_TOKEN');
+      289 |   await dialog.getByLabel('Allow candidate updates').check();
+      290 |   const writableValue = await snippet.inputValue();
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-library.spec.ts:287:38
+
+    Error Context: test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+  7 passed (1.3m)

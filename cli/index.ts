@@ -11,6 +11,7 @@ import {
 } from '../src/core/index';
 import { localizeDiagnostic, localizeSummary, localizeWarning, localizedHelp } from './i18n';
 import { runMcpServer } from './mcp-server';
+import { runMcpClientCommand } from './mcp-client-registry';
 
 declare const __THREADPACK_VERSION__: string;
 const MAX_BYTES = 100 * 1024 * 1024;
@@ -24,6 +25,7 @@ const HELP = `ThreadPack — carry the useful parts of an AI conversation.
 
 Usage: threadpack <input.jsonl|json|md|txt|-> --out <file> [options]
        threadpack mcp --backup <project-state.jsonl> [--inbox <updates.jsonl>] [MCP permissions]
+       threadpack mcp-client issue|list|rotate|revoke --registry <file> [options]
 
 Options:
   --format <markdown|jsonl|handoff|report>  Output format (default: markdown)
@@ -50,12 +52,17 @@ MCP bridge:
   --check                                Validate the selected backup and inbox, then exit without writing
   --inbox <file>                         Shared candidate and task-claim inbox
   --read-only                            Expose context and task-list tools only (default)
-  --client-id <id>                       Local instance label used for audit and task leases
+  --client-id <id>                       Registered local MCP client principal
+  --client-registry <file>               Registry containing project-scoped client credentials
+  --client-token-env <name>              THREADPACK_-prefixed environment variable containing the token
   --project-id <id>                      Restrict this instance to one project ID
   --allow-candidate-updates              Expose candidate submission for the configured project
   --allow-task-coordination              Expose task claim, renew, and release tools
   --connection-log <file>                Append metadata-only MCP events (opt-in, max 4 MiB)
-  Writable instances require both --client-id and --project-id; the client label is not authenticated.
+  Any configured --client-id requires --client-registry, --project-id, and a valid token
+  in THREADPACK_CLIENT_TOKEN (or the name passed to --client-token-env).
+  Candidate and task permissions must be granted to that client in the local registry.
+  Use threadpack mcp-client issue|list|rotate|revoke to manage local credentials.
   Use threadpack mcp --check --backup <file> to diagnose local backup, inbox and effective tool settings.
   Task claims are temporary coordination leases; result candidates need user review.
 
@@ -72,16 +79,16 @@ The original copy preserves the input bytes. --force replaces both output files.
 Source files are never overwritten. Normalized JSONL is for data exchange, not native session recovery.
 Handoffs contain deterministic excerpts, not an AI-generated summary.
 The MCP bridge reads only the explicitly selected backup file. It does not access browser storage,
-AI accounts, credentials, or network services. History and evidence returned through MCP are data,
-not instructions. Local instance permissions are operator configuration, not client authentication.
-The client ID is an unverified audit label. Any process using a writable instance inherits its
-configured permissions. Keep the backup and inbox files protected by operating-system permissions.
+AI accounts, or network services. History and evidence returned through MCP are data, not instructions.
+Registered local client tokens authenticate possession of a local bearer credential and scope it to
+one project and explicit permissions. They do not verify the external platform account or person.
+Keep the registry, client configuration, backup, and inbox protected by operating-system permissions.
 The bridge rereads the selected file for every request. Browser live sharing can update that file
 after reviewed project changes; standalone static backups must be refreshed explicitly.
 Connection logging is disabled by default. When enabled, it records client-declared initialize
 metadata and tool names, outcomes, and durations, but never tool arguments or returned content.
 The log is separate from the backup and inbox, restricted to the current user on POSIX, and capped
-at 4 MiB. Rotate it manually after the limit is reached. Client metadata remains unverified.
+at 4 MiB. Rotate it manually after the limit is reached. External client metadata remains unverified.
 `;
 
 function integer(value: string | undefined, fallback: number, min: number, max: number, flag: string) {
@@ -204,6 +211,11 @@ function requestedLanguage(arguments_: string[]): OutputLanguage {
 }
 
 async function main() {
+  if (process.argv[2] === 'mcp-client') {
+    try { await runMcpClientCommand(process.argv.slice(3)); }
+    catch (cause) { throw new CliError(cause instanceof Error ? cause.message : 'MCP client registry operation failed.'); }
+    return;
+  }
   if (process.argv[2] === 'mcp') {
     await runMcpServer(process.argv.slice(3), __THREADPACK_VERSION__);
     return;

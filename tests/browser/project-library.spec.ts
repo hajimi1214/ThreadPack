@@ -274,10 +274,25 @@ test('MCP setup guide generates a project-scoped read-only client snippet by def
   expect(loggedValue).toContain('"--connection-log"');
   expect(loggedValue).toContain('C:\\\\Project Data\\\\threadpack-mcp-log.jsonl');
 
+  await dialog.getByLabel('Optional metadata-only connection log').fill('C:\\Project Data\\log.jsonl"\r\n[attacker]');
+  const escapedValue = await snippet.inputValue();
+  expect(escapedValue).toContain('log.jsonl\\" [attacker]');
+  expect(escapedValue).not.toContain('\r\n[attacker]');
+  await dialog.getByLabel('Optional metadata-only connection log').fill('C:\\Project Data\\threadpack-mcp-log.jsonl');
+
+  await dialog.getByLabel('Authenticate this local MCP client', { exact: true }).check();
+  await dialog.getByLabel('Client registry path').fill('C:\\Project Data\\mcp-clients.json');
+  await dialog.getByLabel('One-time client token').fill('A'.repeat(43));
+  await dialog.getByLabel('Token environment variable').fill('PATH');
+  expect(await snippet.inputValue()).toContain('Complete the client ID, registry path');
+  await dialog.getByLabel('Token environment variable').fill('THREADPACK_CLIENT_TOKEN');
   await dialog.getByLabel('Allow candidate updates').check();
   const writableValue = await snippet.inputValue();
   expect(writableValue).toContain('"--client-id", "codex"');
+  expect(writableValue).toContain('"--client-registry"');
+  expect(writableValue).toContain('C:\\\\Project Data\\\\mcp-clients.json');
   expect(writableValue).toContain('"--allow-candidate-updates"');
+  expect(writableValue).toContain('A'.repeat(43));
   expect(writableValue).not.toContain('"--read-only"');
 
   await dialog.getByLabel('Allow candidate updates').uncheck();
@@ -293,4 +308,6 @@ test('MCP setup guide generates a project-scoped read-only client snippet by def
   expect(jsonArguments).toContain('--project-id');
   expect(jsonArguments).toContain('--allow-task-coordination');
   expect(jsonArguments).toContain('workbuddy');
+  expect(jsonArguments).toContain('--client-registry');
+  expect(JSON.parse(jsonValue).mcpServers.threadpack.env.THREADPACK_CLIENT_TOKEN).toBe('A'.repeat(43));
 });

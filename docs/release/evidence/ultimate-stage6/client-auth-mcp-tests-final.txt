@@ -1,0 +1,27 @@
+✔ MCP diagnostics validate local files and effective permissions without writing (1376.4528ms)
+✔ registered MCP client credentials are project-scoped, revocable, and stored only as hashes (2124.5941ms)
+✔ MCP rechecks registered credentials during a live stdio session (265.5337ms)
+✔ opt-in MCP connection log records declared client metadata without prompts or tool content (440.0996ms)
+✔ MCP connection log cannot alias the project backup or update inbox (189.5944ms)
+✔ MCP connection log refuses an incomplete trailing record without changing the file (196.8572ms)
+✔ MCP connection log refuses unrelated existing files without appending to them (203.8589ms)
+✔ MCP continues serving requests when the opt-in connection log reaches its size cap (293.6811ms)
+✔ MCP bridge serves the latest authorized backup with a trust boundary (243.9555ms)
+✔ MCP bridge fails closed for a tampered memory record (235.4845ms)
+✔ MCP validates v9 migration records and the backup manifest (430.8883ms)
+✔ MCP context and tasks use the canonical trust projection and structured filters (492.9566ms)
+✔ MCP binds a matching quote to its exact message rather than any revision message (225.5885ms)
+✔ MCP bridge appends a candidate update to the separate inbox without changing project facts (2070.0012ms)
+✔ MCP task leases prevent duplicate owners and bind result proposals to an active claim (11205.1427ms)
+✔ MCP can be configured as a per-client read-only instance (845.5503ms)
+✔ MCP candidate update schema includes the user preference category (445.5824ms)
+✔ MCP verifies v8 signature integrity but does not trust keys supplied by the backup (587.9756ms)
+✔ MCP omits expired facts from current context and identifies them as unauthenticated imported history (207.9336ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22668.6094

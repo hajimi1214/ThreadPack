@@ -1,0 +1,50 @@
+[WebServer] (node:59332) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:58640) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 8 tests using 1 worker
+
+(node:19500) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [chromium] › tests\browser\project-library.spec.ts:28:1 › project history survives reloads, deduplicates imports, restores versions and verifies backups (9.1s)
+  ok 2 [chromium] › tests\browser\project-library.spec.ts:99:1 › unchanged session imports refresh source metadata without adding a revision (4.0s)
+  ok 3 [chromium] › tests\browser\project-library.spec.ts:136:1 › project records stay isolated and deleting a project removes its history (3.4s)
+  ok 4 [chromium] › tests\browser\project-library.spec.ts:158:1 › project snapshots and backups retain inactive conversation branches (4.0s)
+  ok 5 [chromium] › tests\browser\project-library.spec.ts:198:1 › project library fits a narrow viewport without horizontal page overflow (2.2s)
+  ok 6 [chromium] › tests\browser\project-library.spec.ts:214:1 › disabling IndexedDB reports a project-library error while temporary processing remains available (1.7s)
+  ok 7 [chromium] › tests\browser\project-library.spec.ts:224:1 › archiving a project preserves its identity and history and allows restoration (4.8s)
+  x  8 [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default (5.5s)
+
+
+  1) [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "log.jsonl\\\"\\r\\n[attacker]"
+    Received string:    "[mcp_servers.threadpack]
+    command = \"C:\\\\Tools\\\\ThreadPack\\\\threadpack.cmd\"
+    args = [\"mcp\", \"--backup\", \"C:\\\\Project Data\\\\project-state.jsonl\", \"--project-id\", \"af893379-ebb1-4fbb-8a82-feaeb66d1c9a\", \"--connection-log\", \"C:\\\\Project Data\\\\log.jsonl\\\" [attacker]\", \"--read-only\"]"
+
+      277 |   await dialog.getByLabel('Optional metadata-only connection log').fill('C:\\Project Data\\log.jsonl"\r\n[attacker]');
+      278 |   const escapedValue = await snippet.inputValue();
+    > 279 |   expect(escapedValue).toContain('log.jsonl\\"\\r\\n[attacker]');
+          |                        ^
+      280 |   expect(escapedValue).not.toContain('\r\n[attacker]');
+      281 |   await dialog.getByLabel('Optional metadata-only connection log').fill('C:\\Project Data\\threadpack-mcp-log.jsonl');
+      282 |
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-library.spec.ts:279:24
+
+    Error Context: test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-library-MCP-setup--08421-y-client-snippet-by-default-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests\browser\project-library.spec.ts:253:1 › MCP setup guide generates a project-scoped read-only client snippet by default 
+  7 passed (1.2m)

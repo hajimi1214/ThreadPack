@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { build } from 'esbuild';
 import { test, before, after } from 'node:test';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../src/projects/backup-format';
 import { generateSigningIdentity, createRecoveryBundle, signTrustEvent, TRUST_EVENT_SCHEMA, TRUST_CHAIN_ORIGIN } from '../src/projects/trust-crypto';
 import { MAX_MCP_CONNECTION_LOG_BYTES } from '../cli/mcp-connection-log';
+import { issueMcpClient, revokeMcpClient } from '../cli/mcp-client-registry';
 
 let folder: string;
 let cli: string;
@@ -24,9 +26,28 @@ before(async () => {
 
 after(async () => { await rm(folder, { recursive: true, force: true }); });
 
-function runMcpProcess(backupPath: string, inboxPath: string, input: string, extraArguments: string[] = []): Promise<{ status: number | null; stdout: string; stderr: string }> {
+async function runMcpProcess(backupPath: string, inboxPath: string, input: string, extraArguments: string[] = [], extraEnvironment: NodeJS.ProcessEnv = {}): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  let serverArguments = [...extraArguments];
+  const environment = { ...process.env, ...extraEnvironment };
+  const clientIdIndex = serverArguments.indexOf('--client-id');
+  if (clientIdIndex >= 0 && !serverArguments.includes('--client-registry')) {
+    const clientId = serverArguments[clientIdIndex + 1] ?? '';
+    const projectIdIndex = serverArguments.indexOf('--project-id');
+    const projectId = projectIdIndex >= 0 ? serverArguments[projectIdIndex + 1] ?? '' : '';
+    if (!projectId) throw new Error('Authenticated MCP fixture requires an explicit project ID.');
+    const registryPath = join(folder, `mcp-client-${randomUUID()}.json`);
+    const issued = await issueMcpClient({
+      registryPath,
+      id: clientId.toLowerCase(),
+      projectId,
+      allowCandidateUpdates: serverArguments.includes('--allow-candidate-updates'),
+      allowTaskCoordination: serverArguments.includes('--allow-task-coordination'),
+    });
+    serverArguments.push('--client-registry', registryPath, '--client-token-env', 'THREADPACK_TEST_CLIENT_TOKEN');
+    environment.THREADPACK_TEST_CLIENT_TOKEN = issued.token;
+  }
   return new Promise((resolveResult, rejectResult) => {
-    const child = spawn(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...extraArguments], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...serverArguments], { stdio: ['pipe', 'pipe', 'pipe'], env: environment });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
@@ -53,7 +74,7 @@ test('MCP diagnostics validate local files and effective permissions without wri
     status: string; transport: string; projectId: string;
     backup: { valid: boolean; sessions: number; facts: number };
     inbox: { state: string; explicitlyConfigured: boolean; bytes: number; records: number };
-    access: { clientIdentityVerified: boolean; candidateUpdates: boolean; taskCoordination: boolean };
+    access: { clientIdentityVerified: boolean; localClientPrincipalAuthenticated?: boolean; localClientPrincipalId?: string | null; candidateUpdates: boolean; taskCoordination: boolean };
     tools: string[];
   };
   assert.equal(diagnostic.status, 'ready');
@@ -75,19 +96,156 @@ test('MCP diagnostics validate local files and effective permissions without wri
   assert.deepEqual(existingInboxDiagnostic.inbox, { state: 'valid', explicitlyConfigured: true, bytes: 0, records: 0 });
   assert.equal(await readFile(inboxPath, 'utf8'), '');
 
-  const writable = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
-    '--client-id', 'codex', '--project-id', 'diagnostic-project', '--allow-candidate-updates'], { encoding: 'utf8' });
+  const registryPath = join(folder, 'diagnostic-client-registry.json');
+  const credential = await issueMcpClient({ registryPath, id: 'codex', projectId: 'diagnostic-project', allowCandidateUpdates: true, allowTaskCoordination: false });
+  const clientAuthArguments = ['--client-id', 'codex', '--project-id', 'diagnostic-project', '--client-registry', registryPath,
+    '--client-token-env', 'THREADPACK_DIAGNOSTIC_TOKEN', '--allow-candidate-updates'];
+  const clientEnvironment = { ...process.env, THREADPACK_DIAGNOSTIC_TOKEN: credential.token };
+  const writable = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath, ...clientAuthArguments],
+    { encoding: 'utf8', env: clientEnvironment });
   assert.equal(writable.status, 0, writable.stderr);
   const writableDiagnostic = JSON.parse(writable.stdout.trim()) as typeof diagnostic;
   assert.equal(writableDiagnostic.access.candidateUpdates, true);
+  assert.equal(writableDiagnostic.access.localClientPrincipalAuthenticated, true);
+  assert.equal(writableDiagnostic.access.localClientPrincipalId, 'codex');
   assert.deepEqual(writableDiagnostic.tools, ['threadpack_project_context', 'threadpack_project_tasks', 'threadpack_project_submit_update']);
 
   const wrongProject = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
-    '--client-id', 'codex', '--project-id', 'another-project', '--allow-candidate-updates'], { encoding: 'utf8' });
+    ...clientAuthArguments.map((value, index) => index === 3 ? 'another-project' : value)],
+    { encoding: 'utf8', env: clientEnvironment });
   assert.notEqual(wrongProject.status, 0);
   assert.match(wrongProject.stderr, /Processing failed/);
+  const unsafeTokenEnvironment = spawnSync(process.execPath, [cli, 'mcp', '--check', '--backup', backupPath,
+    '--client-id', 'codex', '--project-id', 'diagnostic-project', '--client-registry', registryPath,
+    '--client-token-env', 'PATH'], { encoding: 'utf8', env: clientEnvironment });
+  assert.notEqual(unsafeTokenEnvironment.status, 0);
+  assert.match(unsafeTokenEnvironment.stderr, /Processing failed/);
   assert.equal(await readFile(backupPath, 'utf8'), backup);
   assert.equal(await readFile(inboxPath, 'utf8'), '');
+});
+
+test('registered MCP client credentials are project-scoped, revocable, and stored only as hashes', async () => {
+  const backupPath = join(folder, 'registered-client-project.jsonl');
+  const inboxPath = join(folder, 'registered-client-inbox.jsonl');
+  const registryPath = join(folder, 'registered-client-registry.json');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'registered-project', createdAt: 1,
+    project: { name: 'Registered project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  await writeFile(backupPath, backup, 'utf8');
+
+  const issue = spawnSync(process.execPath, [cli, 'mcp-client', 'issue', '--registry', registryPath,
+    '--id', 'codex', '--project-id', 'registered-project', '--allow-candidate-updates'], { encoding: 'utf8' });
+  assert.equal(issue.status, 0, issue.stderr);
+  const issued = JSON.parse(issue.stdout) as { id: string; token: string; tokenDelivery: string; permissions: { candidateUpdates: boolean } };
+  assert.equal(issued.id, 'codex');
+  assert.equal(issued.tokenDelivery, 'one-time-output');
+  assert.equal(issued.permissions.candidateUpdates, true);
+  assert.match(issued.token, /^[A-Za-z0-9_-]{43}$/);
+
+  let registryText = await readFile(registryPath, 'utf8');
+  assert.doesNotMatch(registryText, new RegExp(issued.token));
+  assert.match(registryText, /"tokenHash": "[a-f0-9]{64}"/);
+  const list = spawnSync(process.execPath, [cli, 'mcp-client', 'list', '--registry', registryPath], { encoding: 'utf8' });
+  assert.equal(list.status, 0, list.stderr);
+  assert.doesNotMatch(list.stdout, new RegExp(issued.token));
+  assert.doesNotMatch(list.stdout, /tokenHash/);
+
+  const authArguments = ['--client-id', 'codex', '--project-id', 'registered-project', '--client-registry', registryPath,
+    '--client-token-env', 'THREADPACK_REGISTERED_TEST_TOKEN', '--allow-candidate-updates'];
+  const valid = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, authArguments,
+    { THREADPACK_REGISTERED_TEST_TOKEN: issued.token });
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.deepEqual(((JSON.parse(valid.stdout.trim()) as { result: { tools: { name: string }[] } }).result.tools).map(tool => tool.name),
+    ['threadpack_project_context', 'threadpack_project_tasks', 'threadpack_project_submit_update']);
+
+  const wrongToken = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, authArguments,
+    { THREADPACK_REGISTERED_TEST_TOKEN: 'B'.repeat(43) });
+  assert.notEqual(wrongToken.status, 0);
+  assert.doesNotMatch(wrongToken.stderr, new RegExp(issued.token));
+
+  const wrongProjectArgs = [...authArguments];
+  wrongProjectArgs[3] = 'another-project';
+  const wrongProject = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, wrongProjectArgs,
+    { THREADPACK_REGISTERED_TEST_TOKEN: issued.token });
+  assert.notEqual(wrongProject.status, 0);
+
+  const rotate = spawnSync(process.execPath, [cli, 'mcp-client', 'rotate', '--registry', registryPath, '--id', 'codex'], { encoding: 'utf8' });
+  assert.equal(rotate.status, 0, rotate.stderr);
+  const rotated = JSON.parse(rotate.stdout) as { token: string };
+  assert.match(rotated.token, /^[A-Za-z0-9_-]{43}$/);
+  registryText = await readFile(registryPath, 'utf8');
+  assert.doesNotMatch(registryText, new RegExp(rotated.token));
+
+  const oldToken = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, authArguments,
+    { THREADPACK_REGISTERED_TEST_TOKEN: issued.token });
+  assert.notEqual(oldToken.status, 0);
+  const rotatedToken = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, authArguments,
+    { THREADPACK_REGISTERED_TEST_TOKEN: rotated.token });
+  assert.equal(rotatedToken.status, 0, rotatedToken.stderr);
+
+  const revoke = spawnSync(process.execPath, [cli, 'mcp-client', 'revoke', '--registry', registryPath, '--id', 'codex'], { encoding: 'utf8' });
+  assert.equal(revoke.status, 0, revoke.stderr);
+  assert.equal((JSON.parse(revoke.stdout) as { revokedAt: number | null }).revokedAt !== null, true);
+  const revokedToken = await runMcpProcess(backupPath, inboxPath,
+    `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`, authArguments,
+    { THREADPACK_REGISTERED_TEST_TOKEN: rotated.token });
+  assert.notEqual(revokedToken.status, 0);
+  assert.equal(await readFile(backupPath, 'utf8'), backup);
+  assert.equal(await readFile(inboxPath).catch(() => ''), '');
+});
+
+test('MCP rechecks registered credentials during a live stdio session', async () => {
+  const backupPath = join(folder, 'live-revocation-project.jsonl');
+  const inboxPath = join(folder, 'live-revocation-inbox.jsonl');
+  const registryPath = join(folder, 'live-revocation-registry.json');
+  const backup = `${JSON.stringify({
+    type: 'threadpack_project', version: 2, projectId: 'live-revocation-project', createdAt: 1,
+    project: { name: 'Live revocation project', summary: '', importantNotes: '', createdAt: 1, updatedAt: 1 },
+    sessionCount: 0, revisionCount: 0, factCount: 0,
+  })}\n`;
+  await writeFile(backupPath, backup, 'utf8');
+  const issued = await issueMcpClient({ registryPath, id: 'live-client', projectId: 'live-revocation-project',
+    allowCandidateUpdates: false, allowTaskCoordination: false });
+  const child = spawn(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath,
+    '--client-id', 'live-client', '--project-id', 'live-revocation-project', '--client-registry', registryPath,
+    '--client-token-env', 'THREADPACK_LIVE_TEST_TOKEN'], {
+    stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, THREADPACK_LIVE_TEST_TOKEN: issued.token },
+  });
+  const lines = createInterface({ input: child.stdout });
+  const reader = lines[Symbol.asyncIterator]();
+  const send = async (request: Record<string, unknown>) => {
+    child.stdin.write(`${JSON.stringify(request)}\n`);
+    const line = await reader.next();
+    assert.equal(line.done, false);
+    return JSON.parse(line.value) as { result?: { tools?: { name: string }[] }; error?: { code: number } };
+  };
+  let exitStatus: number | null = null;
+  const closed = new Promise<void>(resolveClosed => child.once('close', code => { exitStatus = code; resolveClosed(); }));
+  try {
+    const initialized = await send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+      protocolVersion: '2024-11-05', clientInfo: { name: 'fixture-client', version: '1.0.0' }, capabilities: {},
+    } });
+    assert.ok(initialized.result);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const listed = await send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    assert.deepEqual(listed.result?.tools?.map(tool => tool.name), ['threadpack_project_context', 'threadpack_project_tasks']);
+
+    await revokeMcpClient(registryPath, 'live-client');
+    const revoked = await send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+    assert.equal(revoked.error?.code, -32000);
+  } finally {
+    child.stdin.end();
+    await closed;
+    lines.close();
+  }
+  assert.equal(exitStatus, 0);
 });
 
 test('opt-in MCP connection log records declared client metadata without prompts or tool content', async () => {
@@ -122,7 +280,7 @@ test('opt-in MCP connection log records declared client metadata without prompts
     } }),
   ].join('\n') + '\n';
   const result = await runMcpProcess(backupPath, inboxPath, input,
-    ['--connection-log', logPath, '--client-id', localLabelSecret]);
+    ['--connection-log', logPath, '--client-id', localLabelSecret, '--project-id', 'connection-log-project']);
   assert.equal(result.status, 0, result.stderr);
   const entries = (await readFile(logPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
   assert.deepEqual(entries.map(entry => entry.event), [
@@ -495,7 +653,7 @@ test('MCP bridge appends a candidate update to the separate inbox without changi
     ['--client-id', 'task-only', '--project-id', 'project-1', '--allow-task-coordination']);
   assert.equal((JSON.parse(taskOnlyAttempt.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal(await readFile(inboxPath, 'utf8'), '{"type":"threadpack_update"');
-  const result = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
+  const result = await runMcpProcess(backupPath, inboxPath, input, updatePermissions);
   assert.equal(result.status, 0, result.stderr);
   const response = JSON.parse(result.stdout.trim()) as { result?: { structuredContent?: { status: string } } };
   assert.equal(response.result?.structuredContent?.status, 'pending');
@@ -514,19 +672,19 @@ test('MCP bridge appends a candidate update to the separate inbox without changi
     ['--client-id', 'codex-test', '--project-id', 'different-project', '--allow-candidate-updates']);
   assert.equal((JSON.parse(wrongProject.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal(await readFile(inboxPath, 'utf8'), inbox);
-  const retry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
+  const retry = await runMcpProcess(backupPath, inboxPath, input, updatePermissions);
   assert.equal(retry.status, 0, retry.stderr);
   const retriedInbox = await readFile(inboxPath, 'utf8');
   assert.equal(retriedInbox.trim().split('\n').length, 1);
   assert.equal(JSON.parse(retriedInbox.trim()).proposal.id, firstId);
   await writeFile(inboxPath, retriedInbox.trimEnd(), 'utf8');
-  const interruptedReplyRetry = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input });
+  const interruptedReplyRetry = await runMcpProcess(backupPath, inboxPath, input, updatePermissions);
   assert.equal(interruptedReplyRetry.status, 0, interruptedReplyRetry.stderr);
   assert.equal((await readFile(inboxPath, 'utf8')).trim().split('\n').length, 1);
   const reusedKey = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'threadpack_project_submit_update', arguments: {
     idempotencyKey: 'chat-7-update-1', sessionId: 'session-1', sessionVersion: 1, messageId: 'message-2', category: 'decision', topic: 'Runtime', statement: 'Changed content reusing the same retry key.', evidenceReference: 'test fixture', evidenceQuote: 'stay local',
   } } }) + '\n';
-  const rejectedReuse = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--inbox', inboxPath, ...updatePermissions], { encoding: 'utf8', input: reusedKey });
+  const rejectedReuse = await runMcpProcess(backupPath, inboxPath, reusedKey, updatePermissions);
   assert.equal(rejectedReuse.status, 0);
   assert.equal((JSON.parse(rejectedReuse.stdout.trim()) as { error?: { code: number } }).error?.code, -32000);
   assert.equal((await readFile(inboxPath, 'utf8')).trim().split('\n').length, 1);

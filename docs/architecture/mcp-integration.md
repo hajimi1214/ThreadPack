@@ -2,7 +2,7 @@
 
 ## 服务入口
 
-ThreadPack 提供本地 stdio MCP 服务，入口位于 `cli/mcp-server.ts`。客户端启动服务进程并通过标准输入/输出交换 JSON-RPC/MCP 消息。上下文和任务列表工具默认可用。候选更新和任务协调工具分别通过本地 `--allow-candidate-updates` 与 `--allow-task-coordination` 参数开启，并要求精确的 `--project-id` 与 `--client-id`。
+ThreadPack 提供本地 stdio MCP 服务，入口位于 `cli/mcp-server.ts`。客户端启动服务进程并通过标准输入/输出交换 JSON-RPC/MCP 消息。上下文和任务列表工具默认可用。只读实例可以不配置客户端身份，但只暴露显式选择的本地备份范围。配置 `--client-id` 时，必须同时提供项目 ID、本地客户端注册表和令牌环境变量。候选更新和任务协调除需在客户端注册表中分别授权外，也需在服务配置中通过 `--allow-candidate-updates` 与 `--allow-task-coordination` 开启。
 
 ## 共享读取语义
 
@@ -12,13 +12,17 @@ ThreadPack 提供本地 stdio MCP 服务，入口位于 `cli/mcp-server.ts`。�
 
 上下文、会话内容、证据引用和工具输出是参考数据，不是用户当前授权的操作。bindingStatus、relation、confirmationTrust 与 lifecycleTrust 分别保留，来源匹配不会自动成为支持关系。
 
-## 更新权限
+## 本地客户端身份与更新权限
 
-MCP 候选更新通路写入单独 inbox，并由用户审核后才可能影响正式项目记录。服务端从本地进程配置取得客户端标签，不接受工具参数覆盖此标签。它仍不是密码学客户端认证，标签只是未经验证的审计字段。工具权限是实例级 operator configuration，任何能够使用该实例的进程都继承其权限。精确项目 ID 会在每次读取或写入前与备份项目 ID 比较。用户应通过操作系统文件权限保护共享备份和 inbox。此机制不提供跨用户账户的身份认证或远程授权。
+`threadpack mcp-client issue` 为客户端项目组合生成 256 位随机 bearer token。注册表仅保存 SHA-256 摘要，不保存令牌明文。`list` 不显示摘要或令牌，`rotate` 立即使旧令牌失效，`revoke` 保留撤销记录。MCP 服务在启动及每次资源/工具请求前重新验证客户端、项目范围和权限。令牌从环境变量读取，不出现在命令参数或连接日志中。
+
+这是 ThreadPack 本机注册主体的持有者认证。它不能证明 WorkBuddy、Codex、Claude Code 等外部平台的账号或操作者身份，也不提供跨 Windows 用户账户、远程网络服务或同一操作系统账户内恶意进程的隔离。凭据注册表在 POSIX 系统上要求仅当前用户访问；Windows ACL 由文件父目录继承，本版本没有独立读取和验证 Windows ACL。客户端配置可能包含 bearer token，应按密钥文件保管。
+
+MCP 候选更新通路写入单独 inbox，并由用户审核后才可能影响正式项目记录。运行中已认证的主体可提交候选，但共享 inbox 中的历史客户端标签和任务认领仍不具备离线密码学签名，默认继续作为未验证协调元数据展示。精确项目 ID 会在每次读取或写入前与备份项目 ID 比较。用户仍须通过操作系统文件权限保护共享备份、凭据注册表和 inbox。此机制不提供远程授权。
 
 ## 验证状态
 
-MCP 工具 schema、Context/Tasks 投影、候选 inbox、默认只读、按能力写入授权、项目范围校验、客户端参数伪造拒绝和备份校验由 Node 测试覆盖，具体用例及汇总见 `tests/mcp.test.ts` 与阶段验收报告。Windows 本地测试已执行。Linux 部署及 WorkBuddy、Codex、Claude Code 的真实模型调用仍需独立验证。
+MCP 工具 schema、Context/Tasks 投影、候选 inbox、默认只读、按能力写入授权、项目范围校验、凭据哈希存储、轮换/撤销、运行中撤销生效、客户端参数伪造拒绝和备份校验由 Node 测试覆盖，具体用例及汇总见 `tests/mcp.test.ts` 与阶段验收报告。Windows 本地测试已执行。Linux 部署及 WorkBuddy、Codex、Claude Code 的真实模型调用仍需独立验证。
 
 `threadpack mcp --check` 以只读方式验证备份、收件箱、项目范围和本地进程配置下可用的工具，并输出诊断 JSON 后退出。它不启动 MCP stdio 会话，不探测外部 AI 客户端，也不证明对端已经连接。
 
