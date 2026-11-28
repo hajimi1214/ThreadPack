@@ -1455,8 +1455,9 @@ async function createProjectMemoryFactInternal(projectId: string, input: Project
     const now = Date.now();
     const fact: ProjectMemoryFact = {
       key: `${projectId}\0${id}`, id, projectId, category: input.category, topic, normalizedTopic,
-      statement: input.statement.trim(), revision: 1, origin: input.origin, status: input.status,
-      statusHistory: [{ status: input.status, changedAt: now }],
+      statement: input.statement.trim(), revision: 1, origin: input.origin,
+      status: input.supersedes && input.status === 'confirmed' ? 'needs-review' : input.status,
+      statusHistory: [{ status: input.supersedes && input.status === 'confirmed' ? 'needs-review' : input.status, changedAt: now }],
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
       ...(input.reconsiders ? { reconsiders: input.reconsiders } : {}),
       ...(input.category === 'task' ? { taskState: input.taskState ?? 'unclear' } : {}),
@@ -1707,9 +1708,9 @@ async function recordFactSupersession(projectId: string, replacementId: string, 
   const [facts, trust] = await Promise.all([listProjectMemory(projectId), getProjectTrustSummary(projectId)]);
   const replacement = facts.find(fact => fact.id === replacementId);
   const previous = facts.find(fact => fact.id === previousId);
-  if (!replacement || replacement.status !== 'confirmed' || !replacement.confirmationEventId
-    || await factConfirmationTrust(replacement, trust) !== 'authenticated') {
-    throw new Error('The replacement fact must have a valid user confirmation before it can supersede history.');
+  if (!replacement || replacement.origin !== 'user' || replacement.status !== 'needs-review'
+    || replacement.confirmationEventId || replacement.conflictsWith.length) {
+    throw new Error('The replacement must remain an unconflicted review candidate until the prior fact is safely superseded.');
   }
   if (!previous || previous.status !== 'confirmed' || previous.conflictsWith.length
     || !previous.confirmationEventId || await factConfirmationTrust(previous, trust) !== 'authenticated') {
@@ -1758,9 +1759,8 @@ async function recordFactSupersession(projectId: string, replacementId: string, 
     {
       factId: replacement.id, expectedUpdatedAt: replacement.updatedAt, expectedRevision: replacement.revision ?? 1,
       apply(current, _event, changedAt) {
-        if (current.status !== 'confirmed' || current.confirmationEventId !== replacement.confirmationEventId
-          || current.confirmationTrust !== 'authenticated') {
-          throw new Error('The replacement confirmation changed before its history link could be committed.');
+        if (current.status !== 'needs-review' || current.confirmationEventId || current.conflictsWith.length) {
+          throw new Error('The replacement review candidate changed before its history link could be committed.');
         }
         current.supersedes = previous.id;
         current.updatedAt = changedAt;
@@ -1801,9 +1801,11 @@ export async function createProjectMemoryFact(projectId: string, input: ProjectM
     }
   }
   if (input.status === 'confirmed' && fact.status === 'confirmed') {
-    const confirmed = await recordFactConfirmation(projectId, fact);
-    if (input.supersedes) return recordFactSupersession(projectId, confirmed.id, input.supersedes);
-    return confirmed;
+    return recordFactConfirmation(projectId, fact);
+  }
+  if (input.status === 'confirmed' && input.supersedes && fact.status === 'needs-review' && !fact.conflictsWith.length) {
+    await recordFactSupersession(projectId, fact.id, input.supersedes);
+    return updateProjectMemoryStatus(projectId, fact.id, 'confirmed');
   }
   return (await listProjectMemory(projectId)).find(item => item.id === fact.id) ?? fact;
 }

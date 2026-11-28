@@ -729,6 +729,7 @@ test('superseded facts retain signed history and can only return through an expl
   const superseded = dialog.locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' });
   await expect(superseded).toContainText('Superseded', { timeout: 30_000 });
   await expect(superseded).toContainText('Confirmation was revoked');
+  await expect(dialog.locator('.memory-fact.confirmed')).toHaveCount(1);
 
   await superseded.getByRole('button', { name: 'Reconsider as a new review item', exact: true }).click();
   const reconsiderForm = dialog.locator('.memory-form');
@@ -750,6 +751,11 @@ test('superseded facts retain signed history and can only return through an expl
   expect(oldRecord?.status).toBe('superseded');
   expect(oldRecord?.supersededBy).toBe(newRecord?.id);
   expect(oldRecord?.statusHistory).toMatchObject([{ status: 'confirmed' }, { status: 'superseded' }]);
+  expect(newRecord?.status).toBe('needs-review');
+  expect(newRecord?.supersedes).toBe(oldRecord?.id);
+  expect(newRecord?.statusHistory).toMatchObject([
+    { status: 'needs-review' }, { status: 'confirmed' }, { status: 'needs-review' },
+  ]);
   expect((oldRecord?.statusHistory as { trustEventId?: string }[]).at(-1)?.trustEventId).toBeTruthy();
   expect(reconsiderRecord?.status).toBe('needs-review');
 });
