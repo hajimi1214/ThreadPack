@@ -449,7 +449,7 @@ test('AI proposals are source-checked, stay pending review, and leave no stored 
     return fact.id;
   });
   const secret = 'synthetic-api-key-do-not-store';
-  const endpoint = new URL('/v1/chat/completions', page.url()).toString();
+  const endpoint = 'https://threadpack-ai.example.invalid/v1/chat/completions';
   let capturedAuthorization = '';
   let capturedEvidence = '';
   let routeError = '';
