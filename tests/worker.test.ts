@@ -4,6 +4,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { DEFAULT_OPTIONS, parseInput } from '../src/core';
 import type { CleanOptions } from '../src/core';
 import { MAX_IMPORT_BYTES, MAX_PREVIEW_CHARACTERS, MAX_SNIPPET_PREVIEW_CHARACTERS, WorkerEngine } from '../src/worker/engine';
+import { extractZipText, MAX_ZIP_ENTRIES, MAX_ZIP_UNCOMPRESSED_BYTES } from '../src/worker/zip-import';
 import { MAX_PROJECT_SESSION_BYTES } from '../src/projects/limits';
 import type { CleanSummary, ExportExcerptRequest, ImportProgress, ParseInfo, QueryRequest } from '../src/worker/types';
 
@@ -567,6 +568,17 @@ test('ZIP imports reject unsafe paths without echoing archive entry names', asyn
   const zip = zipSync({ '../private.json': new TextEncoder().encode('{"messages":[]}') });
   await assert.rejects(engine.handle({ id: next(), type: 'parse', archiveId: 6, keepArchiveId: null,
     file: { name: 'unsafe.zip', size: zip.byteLength, arrayBuffer: async () => zip.buffer as ArrayBuffer } as File }), error => error instanceof Error && /supported text export/.test(error.message) && !error.message.includes('private.json'));
+});
+
+test('ZIP expansion and entry-count limits reject adversarial archives', () => {
+  const manyEntries = Object.fromEntries(Array.from({ length: MAX_ZIP_ENTRIES + 1 }, (_, index) => [
+    `entry-${index}.txt`, new Uint8Array(),
+  ]));
+  assert.throws(() => extractZipText(zipSync(manyEntries)), /too many files/);
+
+  const expansionBomb = zipSync({ 'large.txt': new Uint8Array(MAX_ZIP_UNCOMPRESSED_BYTES + 1) }, { level: 9 });
+  assert.ok(expansionBomb.byteLength < 1024 * 1024);
+  assert.throws(() => extractZipText(expansionBomb), /100 MiB safety limit/);
 });
 
 test('exports distinguish conversations by ordinal without including source titles in filenames', async () => {
