@@ -1,0 +1,80 @@
+﻿COMMAND: CI=1 THREADPACK_TEST_PORT=46188 THREADPACK_BROWSER=firefox node node_modules/playwright/cli.js test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-firefox-verify2
+node.exe : [WebServer] (node:41992) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+At C:\Users\30317\AppData\Local\Temp\threadpack-stage4-firefox-verify2.ps1:7 char:1
++ & 'E:\node\node.exe' 'node_modules/playwright/cli.js' test 'tests/bro ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WebServer] (no... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:39468) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 21 tests using 1 worker
+
+(node:37076) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [firefox] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (16.3s)
+  ok  2 [firefox] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (16.5s)
+  ok  3 [firefox] › tests\browser\project-memory.spec.ts:307:1 › rejecting a fact invalidates generated Markdown and JSON context together (11.6s)
+  ok  4 [firefox] › tests\browser\project-memory.spec.ts:348:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (16.5s)
+  ok  5 [firefox] › tests\browser\project-memory.spec.ts:403:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (10.0s)
+  ok  6 [firefox] › tests\browser\project-memory.spec.ts:469:1 › user preferences are categorized, reviewed, and included with their lifecycle status (7.2s)
+  ok  7 [firefox] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate (29.1s)
+  ok  8 [firefox] › tests\browser\project-memory.spec.ts:587:1 › expired facts leave current context while preserving signed history after reload (11.5s)
+  ok  9 [firefox] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (11.6s)
+  ok 10 [firefox] › tests\browser\project-memory.spec.ts:692:1 › version-one project backups restore after the IndexedDB schema migration (5.8s)
+  ok 11 [firefox] › tests\browser\project-memory.spec.ts:712:1 › project backup versions one through eight migrate with a deterministic untrusted history record (15.0s)
+  ok 12 [firefox] › tests\browser\project-memory.spec.ts:765:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (4.7s)
+  ok 13 [firefox] › tests\browser\project-memory.spec.ts:784:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (14.2s)
+  ok 14 [firefox] › tests\browser\project-memory.spec.ts:865:1 › indexed database version one projects survive the schema upgrade and accept memory facts (14.4s)
+  ok 15 [firefox] › tests\browser\project-memory.spec.ts:931:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (28.2s)
+  ok 16 [firefox] › tests\browser\project-memory.spec.ts:1120:1 › deleting an imported trust copy leaves the source project anchor intact (16.7s)
+  -  17 [firefox] › tests\browser\project-memory.spec.ts:1191:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  x  18 [firefox] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (22.1s)
+(node:52172) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 19 [firefox] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (retry #1) (29.5s)
+  ok 20 [firefox] › tests\browser\project-memory.spec.ts:1390:1 › changing evidence relationships revokes the prior signed fact confirmation (12.2s)
+  ok 21 [firefox] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (12.1s)
+  ok 22 [firefox] › tests\browser\project-memory.spec.ts:1508:1 › missing source revisions remain visible as unverified without breaking project memory reads (13.5s)
+
+
+  1) [firefox] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact').filter({ hasText: 'Keep the release package local.' })
+    Expected substring: "Confirmed by user"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact').filter({ hasText: 'Keep the release package local.' }) with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact').filter({ hasText: 'Keep the release package local.' })
+
+
+      1293 |
+      1294 |   const fact = dialog.locator('.memory-fact').filter({ hasText: 'Keep the release package local.' });
+    > 1295 |   await expect(fact).toContainText('Confirmed by user');
+           |                      ^
+      1296 |   await expect(fact).toContainText('Source binding: Exact source match');
+      1297 |   await expect(fact).toContainText(/Evidence relationship\s*Not assessed/);
+      1298 |
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:1295:22
+
+    Error Context: test-results\ultimate-stage4-firefox-verify2\project-memory-legacy-evid-3d910-estore-Context-Pack-and-MCP-firefox\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-firefox-verify2\project-memory-legacy-evid-3d910-estore-Context-Pack-and-MCP-firefox\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-firefox-verify2\project-memory-legacy-evid-3d910-estore-Context-Pack-and-MCP-firefox\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 flaky
+    [firefox] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP 
+  1 skipped
+  19 passed (6.4m)
+EXITCODE=0

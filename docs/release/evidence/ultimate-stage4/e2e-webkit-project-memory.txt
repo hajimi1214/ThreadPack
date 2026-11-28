@@ -1,0 +1,33 @@
+[WebServer] (node:25200) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:5168) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 19 tests using 1 worker
+
+(node:52096) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (21.6s)
+  ok  2 [webkit] › tests\browser\project-memory.spec.ts:238:1 › rejecting a fact invalidates generated Markdown and JSON context together (25.7s)
+  ok  3 [webkit] › tests\browser\project-memory.spec.ts:279:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (19.6s)
+  ok  4 [webkit] › tests\browser\project-memory.spec.ts:334:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (18.9s)
+  ok  5 [webkit] › tests\browser\project-memory.spec.ts:400:1 › user preferences are categorized, reviewed, and included with their lifecycle status (14.3s)
+  ok  6 [webkit] › tests\browser\project-memory.spec.ts:434:1 › rejected claims stay terminal until the user creates a linked review candidate (26.8s)
+  ok  7 [webkit] › tests\browser\project-memory.spec.ts:518:1 › expired facts leave current context while preserving signed history after reload (18.1s)
+  ok  8 [webkit] › tests\browser\project-memory.spec.ts:572:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (24.0s)
+  ok  9 [webkit] › tests\browser\project-memory.spec.ts:621:1 › version-one project backups restore after the IndexedDB schema migration (10.5s)
+  ok 10 [webkit] › tests\browser\project-memory.spec.ts:641:1 › project backup versions one through eight migrate with a deterministic untrusted history record (10.6s)
+  ok 11 [webkit] › tests\browser\project-memory.spec.ts:694:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (18.3s)
+  ok 12 [webkit] › tests\browser\project-memory.spec.ts:775:1 › indexed database version one projects survive the schema upgrade and accept memory facts (8.2s)
+  ok 13 [webkit] › tests\browser\project-memory.spec.ts:841:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (38.1s)
+  ok 14 [webkit] › tests\browser\project-memory.spec.ts:1030:1 › deleting an imported trust copy leaves the source project anchor intact (7.3s)
+  -  15 [webkit] › tests\browser\project-memory.spec.ts:1101:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 16 [webkit] › tests\browser\project-memory.spec.ts:1177:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (14.7s)
+  ok 17 [webkit] › tests\browser\project-memory.spec.ts:1300:1 › changing evidence relationships revokes the prior signed fact confirmation (13.9s)
+  ok 18 [webkit] › tests\browser\project-memory.spec.ts:1329:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (14.2s)
+  ok 19 [webkit] › tests\browser\project-memory.spec.ts:1418:1 › missing source revisions remain visible as unverified without breaking project memory reads (12.7s)
+
+  Slow test file: [webkit] › tests\browser\project-memory.spec.ts (5.3m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  1 skipped
+  18 passed (5.7m)

@@ -285,16 +285,39 @@ export interface ContextOmission {
   id: string;
   topic: string;
   category: MemoryCategory;
-  reason: 'budget' | 'not-relevant' | 'terminal-status';
+  reason: 'budget' | 'not-relevant' | 'terminal-status' | 'filtered';
+}
+
+export type MemoryTrustFilter = 'all' | 'authenticated' | 'unverified' | 'ai-proposal';
+
+export interface MemoryProjectionFilters {
+  category?: MemoryCategory;
+  status?: MemoryStatus | 'active' | 'terminal';
+  trust?: MemoryTrustFilter;
+  factId?: string;
+  sourceSessionId?: string;
+  sourceVersion?: number;
+  sourceKind?: EvidenceKind;
+  sourceReference?: string;
+  updatedAfter?: number;
 }
 
 export interface GeneratedProjectContext {
   text: string;
+  projectionVersion: number;
+  projectionAsOf: number;
+  projectionStateKey: string;
+  projectionIndex?: ProjectMemoryProjectionIndex;
+  statusCounts: Record<MemoryStatus, number>;
+  filtersApplied: MemoryProjectionFilters;
+  deltaOnly: boolean;
   factStateKey?: string;
   projectStateKey?: string;
   budget: number;
   usedCharacters: number;
   includedFactIds: string[];
+  includedHistoricalIds: string[];
+  projectedFacts: ProjectedMemoryFactRecord[];
   omissions: ContextOmission[];
   omittedSections: string[];
   conflictCount: number;
@@ -302,4 +325,88 @@ export interface GeneratedProjectContext {
   staleEvidenceCount: number;
   uncitedCount: number;
   unverifiedEvidenceCount: number;
+  conflictingFactIds: string[];
+  terminalHistory: ProjectedTerminalMemory[];
+  omittedTerminalHistoryCount: number;
+  delta?: ProjectMemoryDelta;
+}
+
+export interface ProjectedTerminalMemory {
+  id: string;
+  category: MemoryCategory;
+  topic: string;
+  statement: string;
+  origin: MemoryOrigin;
+  status: Extract<MemoryStatus, 'rejected' | 'superseded' | 'expired' | 'revoked'>;
+  trust: 'historical-only';
+  lifecycleTrust: LifecycleTrustStatus;
+  statusHistory?: MemoryStatusChange[];
+  supersedes?: string;
+  supersededBy?: string;
+  expiresAt?: number;
+  expiredAt?: number;
+  reconsiders?: string;
+  confirmationEventId?: string;
+  confirmationRevocationEventId?: string;
+}
+
+export interface ProjectedMemoryFactRecord {
+  id: string;
+  category: MemoryCategory;
+  topic: string;
+  statement: string;
+  trust: string;
+  origin: MemoryOrigin;
+  status: MemoryStatus;
+  lifecycleTrust: LifecycleTrustStatus;
+  confirmationTrust: ConfirmationTrustStatus;
+  storedStatus?: MemoryStatus;
+  projectionWarnings: string[];
+  statusHistory: MemoryStatusChange[];
+  taskState?: TaskState;
+  revision?: number;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt?: number;
+  expiredAt?: number;
+  reconsiders?: string;
+  confirmationEventId?: string;
+  confirmationProjectId?: string;
+  confirmationVersion?: number;
+  confirmationRevocationEventId?: string;
+  conflictsWith: string[];
+  supersedes?: string;
+  supersededBy?: string;
+  evidence: (MemoryEvidence & {
+    bindingStatus: NonNullable<MemoryEvidence['bindingStatus']>;
+    relation: NonNullable<MemoryEvidence['relation']>;
+    relationBasis: NonNullable<MemoryEvidence['relationBasis']>;
+    trust: 'untrusted-evidence';
+    sessionTitle?: string;
+  })[];
+}
+
+export interface ProjectMemoryProjectionIndex {
+  projectionVersion: number;
+  projectId: string;
+  stateKey: string;
+  facts: Record<string, { recordKey: string; status: MemoryStatus }>;
+}
+
+export interface ProjectMemoryDelta {
+  projectionVersion: number;
+  baselineTrust: 'unverified-client-supplied';
+  fromStateKey: string;
+  toStateKey: string;
+  asOf: number;
+  addedIds: string[];
+  updatedIds: string[];
+  terminalizedIds: string[];
+  removedIds: string[];
+  relatedConflictIds: string[];
+  filtersApplied: MemoryProjectionFilters;
+  omittedChangedCount: number;
+  omittedRemovedCount: number;
+  changedFacts: ProjectedMemoryFactRecord[];
+  historicalChanges: ProjectedTerminalMemory[];
 }

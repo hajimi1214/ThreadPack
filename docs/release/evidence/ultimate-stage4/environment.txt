@@ -1,0 +1,1 @@
+ENVIRONMENT=Windows 11; Node=v24.14.1; npm=11.11.0

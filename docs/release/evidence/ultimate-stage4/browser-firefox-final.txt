@@ -1,0 +1,30 @@
+COMMAND: CI=1 THREADPACK_TEST_PORT=46186 THREADPACK_BROWSER=firefox npx playwright test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-firefox-final
+[WebServer] (node:25580) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:36716) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 21 tests using 1 worker
+
+(node:55104) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [firefox] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (16.2s)
+  ok  2 [firefox] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (11.0s)
+  ok  3 [firefox] › tests\browser\project-memory.spec.ts:307:1 › rejecting a fact invalidates generated Markdown and JSON context together (6.6s)
+  ok  4 [firefox] › tests\browser\project-memory.spec.ts:348:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (7.9s)
+  ok  5 [firefox] › tests\browser\project-memory.spec.ts:403:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (6.9s)
+  ok  6 [firefox] › tests\browser\project-memory.spec.ts:469:1 › user preferences are categorized, reviewed, and included with their lifecycle status (6.4s)
+  ok  7 [firefox] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate (22.5s)
+  ok  8 [firefox] › tests\browser\project-memory.spec.ts:587:1 › expired facts leave current context while preserving signed history after reload (17.6s)
+  ok  9 [firefox] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (18.6s)
+  ok 10 [firefox] › tests\browser\project-memory.spec.ts:692:1 › version-one project backups restore after the IndexedDB schema migration (5.1s)
+  ok 11 [firefox] › tests\browser\project-memory.spec.ts:712:1 › project backup versions one through eight migrate with a deterministic untrusted history record (16.0s)
+  ok 12 [firefox] › tests\browser\project-memory.spec.ts:765:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (5.8s)
+  ok 13 [firefox] › tests\browser\project-memory.spec.ts:784:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (12.1s)
+  ok 14 [firefox] › tests\browser\project-memory.spec.ts:865:1 › indexed database version one projects survive the schema upgrade and accept memory facts (8.2s)
+  ok 15 [firefox] › tests\browser\project-memory.spec.ts:931:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (23.7s)
+  ok 16 [firefox] › tests\browser\project-memory.spec.ts:1120:1 › deleting an imported trust copy leaves the source project anchor intact (6.5s)
+  -  17 [firefox] › tests\browser\project-memory.spec.ts:1191:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 18 [firefox] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (11.1s)
+  ok 19 [firefox] › tests\browser\project-memory.spec.ts:1390:1 › changing evidence relationships revokes the prior signed fact confirmation (9.4s)
+  ok 20 [firefox] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (12.7s)

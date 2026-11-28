@@ -1,0 +1,2 @@
+COMMAND: CI=1 THREADPACK_TEST_PORT=46185 THREADPACK_BROWSER=chromium npx playwright test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-chromium-final
+EXITCODE=-1073740791

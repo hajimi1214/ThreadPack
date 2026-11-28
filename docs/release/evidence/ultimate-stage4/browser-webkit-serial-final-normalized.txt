@@ -1,0 +1,136 @@
+COMMAND: CI=1 THREADPACK_TEST_PORT=46189 THREADPACK_BROWSER=webkit node node_modules/playwright/cli.js test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-webkit-verify
+node.exe : [WebServer] (node:13924) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+At C:\Users\30317\AppData\Local\Temp\threadpack-stage4-webkit-verify.ps1:7 char:1
++ & 'E:\node\node.exe' 'node_modules/playwright/cli.js' test 'tests/bro ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WebServer] (no... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:48440) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 21 tests using 1 worker
+
+(node:52072) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (21.9s)
+  ok  2 [webkit] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (31.7s)
+  ok  3 [webkit] › tests\browser\project-memory.spec.ts:307:1 › rejecting a fact invalidates generated Markdown and JSON context together (18.3s)
+  ok  4 [webkit] › tests\browser\project-memory.spec.ts:348:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (16.1s)
+  ok  5 [webkit] › tests\browser\project-memory.spec.ts:403:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (17.0s)
+  ok  6 [webkit] › tests\browser\project-memory.spec.ts:469:1 › user preferences are categorized, reviewed, and included with their lifecycle status (13.3s)
+  x   7 [webkit] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate (1.5s)
+(node:51724) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  8 [webkit] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate (retry #1) (30.7s)
+  ok  9 [webkit] › tests\browser\project-memory.spec.ts:587:1 › expired facts leave current context while preserving signed history after reload (13.7s)
+  x  10 [webkit] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (21.9s)
+(node:16840) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 11 [webkit] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (retry #1) (25.6s)
+  ok 12 [webkit] › tests\browser\project-memory.spec.ts:692:1 › version-one project backups restore after the IndexedDB schema migration (4.7s)
+  ok 13 [webkit] › tests\browser\project-memory.spec.ts:712:1 › project backup versions one through eight migrate with a deterministic untrusted history record (11.5s)
+  ok 14 [webkit] › tests\browser\project-memory.spec.ts:765:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (4.9s)
+  ok 15 [webkit] › tests\browser\project-memory.spec.ts:784:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (19.6s)
+  ok 16 [webkit] › tests\browser\project-memory.spec.ts:865:1 › indexed database version one projects survive the schema upgrade and accept memory facts (8.8s)
+  ok 17 [webkit] › tests\browser\project-memory.spec.ts:931:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (44.0s)
+  ok 18 [webkit] › tests\browser\project-memory.spec.ts:1120:1 › deleting an imported trust copy leaves the source project anchor intact (13.6s)
+  -  19 [webkit] › tests\browser\project-memory.spec.ts:1191:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 20 [webkit] › tests\browser\project-memory.spec.ts:1267:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (17.8s)
+  ok 21 [webkit] › tests\browser\project-memory.spec.ts:1390:1 › changing evidence relationships revokes the prior signed fact confirmation (15.2s)
+  x  22 [webkit] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (30.9s)
+(node:26424) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 23 [webkit] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (retry #1) (20.5s)
+  ok 24 [webkit] › tests\browser\project-memory.spec.ts:1508:1 › missing source revisions remain visible as unverified without breaking project memory reads (17.9s)
+
+
+  1) [webkit] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate 
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator: locator('.messages-list')
+    Expected: "false"
+    Error: Target page, context or browser has been closed
+
+    Call log:
+      - Expect "toHaveAttribute" locator('.messages-list') with timeout 5000ms
+      - waiting for locator('.messages-list')
+      - Target page, context or browser has been closed
+
+
+      21 |     })),
+      22 |   });
+    > 23 |   await expect(page.locator('.messages-list')).toHaveAttribute('aria-busy', 'false');
+         |                                                ^
+      24 | }
+      25 |
+      26 | async function openProjectMemory(page: Page) {
+        at importConversation (D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:23:48)
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:506:3
+
+    Error Context: test-results\ultimate-stage4-webkit-verify\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-webkit-verify\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-webkit-verify\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [webkit] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.needs-review').filter({ hasText: 'Reconsiders a terminal historical record' })
+    Expected substring: "Needs review"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.needs-review').filter({ hasText: 'Reconsiders a terminal historical record' }) with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.needs-review').filter({ hasText: 'Reconsiders a terminal historical record' })
+
+
+      671 |   await reconsiderForm.getByRole('button', { name: 'Save for review', exact: true }).click();
+      672 |   const reconsidered = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'Reconsiders a terminal historical record' });
+    > 673 |   await expect(reconsidered).toContainText('Needs review');
+          |                              ^
+      674 |   await expect(superseded).toContainText('Superseded');
+      675 |
+      676 |   const backupDownload = page.waitForEvent('download');
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:673:30
+
+    Error Context: test-results\ultimate-stage4-webkit-verify\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-webkit-verify\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-webkit-verify\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [webkit] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import 
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\ultimate-stage4-webkit-verify\project-memory-a-user-atte-c1081-firmation-and-backup-import-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-webkit-verify\project-memory-a-user-atte-c1081-firmation-and-backup-import-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-webkit-verify\project-memory-a-user-atte-c1081-firmation-and-backup-import-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3 flaky
+    [webkit] › tests\browser\project-memory.spec.ts:503:1 › rejected claims stay terminal until the user creates a linked review candidate 
+    [webkit] › tests\browser\project-memory.spec.ts:641:1 › superseded facts retain signed history and can only return through an explicit reconsideration link 
+    [webkit] › tests\browser\project-memory.spec.ts:1419:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import 
+  1 skipped
+  17 passed (7.7m)
+EXITCODE=0

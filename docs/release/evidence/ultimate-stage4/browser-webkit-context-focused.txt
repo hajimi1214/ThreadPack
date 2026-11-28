@@ -1,0 +1,18 @@
+COMMAND=THREADPACK_BROWSER=webkit THREADPACK_TEST_PORT=4357 npm run test:e2e -- tests/browser/project-memory.spec.ts --workers=1 --grep="context builder applies filters" --output=test-results/ultimate-stage4-context-webkit
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts --workers=1 --grep=context builder applies filters --output=test-results/ultimate-stage4-context-webkit
+
+[WebServer] (node:45076) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:39456) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:15880) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [webkit] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (12.3s)
+
+  1 passed (36.8s)
+EXITCODE=0

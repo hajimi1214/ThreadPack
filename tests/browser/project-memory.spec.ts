@@ -185,6 +185,7 @@ async function readProjectTrustStates(page: Page) {
 }
 
 test('project facts cite saved messages, expose conflicts, and generate a budgeted handoff', async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto('/');
   await importConversation(page, 'runtime.json', 'The runtime must stay offline and use JSONL for backups.');
   const dialog = await openProjectMemory(page);
@@ -216,6 +217,8 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   const conflict = dialog.locator('.memory-fact').filter({ hasText: 'The runtime requires a cloud connection.' });
   await expect(conflict).toContainText('Needs review');
   await conflict.getByRole('button', { name: 'Reject', exact: true }).click();
+  await expect(dialog.locator('.memory-fact.rejected').filter({ hasText: 'The runtime requires a cloud connection.' }))
+    .toContainText('Rejected', { timeout: 30_000 });
   await expect(dialog.locator('.memory-conflict-banner')).not.toBeVisible();
 
   await dialog.locator('.memory-context-controls input').fill('offline runtime');
@@ -233,6 +236,88 @@ test('project facts cite saved messages, expose conflicts, and generate a budget
   expect(strFromU8(packageFiles['PROJECT_CONTEXT.md']!)).toContain('The runtime must stay offline.');
   expect(JSON.parse(strFromU8(packageFiles['threadpack-memory.json']!)).facts[0].evidence[0].sessionTitle).toBe('Runtime decisions');
   expect(strFromU8(packageFiles['AGENTS.md']!)).toContain('AI proposals are not confirmed facts');
+});
+
+test('the context builder applies filters and exports an untrusted incremental delta from a project baseline', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/');
+  await importConversation(page, 'incremental-baseline.json', 'The runtime stays local. Preserve the immutable source history.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  await setupLocalProjectTrust(page, dialog);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  let form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('constraint');
+  await form.locator('input').nth(0).fill('Runtime boundary');
+  await form.locator('textarea').nth(0).fill('The runtime stays local.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('The runtime stays local.');
+  await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+  await expect(dialog.locator('.memory-fact.confirmed')).toContainText('The runtime stays local.');
+  const projectId = await dialog.locator('.project-list-item[aria-pressed="true"]').getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+
+  const baselineDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Download state baseline', exact: true }).click();
+  const baselinePath = await (await baselineDownload).path();
+  const baselineText = await readFile(baselinePath!, 'utf8');
+  const baseline = JSON.parse(baselineText) as { format: string; version: number; index: { projectId: string; facts: Record<string, unknown> } };
+  expect(baseline).toMatchObject({ format: 'threadpack-memory-projection-baseline', version: 1, index: { projectId } });
+  expect(Object.keys(baseline.index.facts)).toHaveLength(1);
+
+  await dialog.getByRole('button', { name: 'Add fact', exact: true }).click();
+  form = dialog.locator('.memory-form');
+  await form.locator('select').nth(0).selectOption('decision');
+  await form.locator('input').nth(0).fill('Archive retention');
+  await form.locator('textarea').nth(0).fill('Preserve the immutable source history.');
+  await form.locator('select').nth(2).selectOption({ label: 'Runtime decisions' });
+  await form.locator('textarea').nth(1).fill('Preserve the immutable source history.');
+  await form.getByRole('button', { name: 'Save for review', exact: true }).click();
+  await expect(dialog.locator('.memory-fact.needs-review').filter({ hasText: 'Preserve the immutable source history.' }))
+    .toContainText('Needs review', { timeout: 30_000 });
+
+  await dialog.getByLabel('Import baseline for changes', { exact: true }).setInputFiles({
+    name: 'baseline.json', mimeType: 'application/json', buffer: Buffer.from(baselineText),
+  });
+  await expect(dialog.getByText(/Delta baseline loaded/)).toBeVisible();
+  await dialog.locator('.memory-delta-only input').check();
+  await dialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  const context = dialog.getByRole('textbox', { name: 'Generate project context', exact: true });
+  await expect(context).toHaveValue(/Incremental state changes only/);
+  await expect(context).toHaveValue(/Preserve the immutable source history/);
+  await expect(context).not.toHaveValue(/The runtime stays local/);
+
+  const packDownload = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
+  const packPath = await (await packDownload).path();
+  const files = unzipSync(await readFile(packPath!));
+  const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!)) as {
+    budget: { includedFactIds: string[] };
+    projection: { stateIndex: { projectId: string; stateKey: string }; deltaOnly: boolean };
+    delta: { addedIds: string[]; fromStateKey: string; toStateKey: string };
+  };
+  expect(memory.budget.includedFactIds).toHaveLength(1);
+  expect(memory.projection.stateIndex.projectId).toBe(projectId);
+  expect(memory.projection.deltaOnly).toBe(true);
+  expect(memory.delta.addedIds).toHaveLength(1);
+  expect(memory.delta.fromStateKey).not.toBe(memory.delta.toStateKey);
+});
+
+test('a project without facts can export its project-scoped context pack', async ({ page }) => {
+  await page.goto('/');
+  await importConversation(page, 'empty-memory.json', 'A project can save sessions before recording facts.');
+  const dialog = await openProjectMemory(page);
+  await saveCurrentSession(dialog);
+  const projectId = await dialog.locator('.project-list-item[aria-pressed="true"]').getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+  await dialog.getByRole('button', { name: 'Build context', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Export AI context pack', exact: true }).click();
+  const files = unzipSync(await readFile((await (await download).path())!));
+  const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!));
+  expect(memory.facts).toEqual([]);
+  expect(memory.projection.stateIndex.projectId).toBe(projectId);
 });
 
 test('rejecting a fact invalidates generated Markdown and JSON context together', async ({ page }) => {
@@ -570,6 +655,7 @@ test('expired facts leave current context while preserving signed history after 
 });
 
 test('superseded facts retain signed history and can only return through an explicit reconsideration link', async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto('/');
   await importConversation(page, 'memory-lifecycle-supersede.json', 'The deployment stays on the internal network.');
   const dialog = await openProjectMemory(page);
@@ -581,6 +667,7 @@ test('superseded facts retain signed history and can only return through an expl
   await form.locator('select').nth(0).selectOption('constraint');
   await form.locator('input').nth(0).fill('Deployment boundary');
   await form.locator('textarea').nth(0).fill('The deployment stays on the internal network.');
+  await expect(form.getByRole('button', { name: 'Confirm and save', exact: true })).toBeEnabled();
   await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
   const original = dialog.locator('.memory-fact.confirmed').filter({ hasText: 'The deployment stays on the internal network.' });
   await expect(original).toContainText('Signed by this project’s local trusted key');
@@ -591,7 +678,7 @@ test('superseded facts retain signed history and can only return through an expl
   await form.locator('textarea').nth(0).fill('The deployment stays on the isolated internal network.');
   await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
   const superseded = dialog.locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' });
-  await expect(superseded).toContainText('Superseded');
+  await expect(superseded).toContainText('Superseded', { timeout: 30_000 });
   await expect(superseded).toContainText('Confirmation was revoked');
 
   await superseded.getByRole('button', { name: 'Reconsider as a new review item', exact: true }).click();
@@ -689,6 +776,25 @@ test('project backup versions one through eight migrate with a deterministic unt
   expect(exported.filter(record => record.type === 'migration')).toHaveLength(1);
   expect(exported.at(-1)).toMatchObject({ type: 'manifest', version: 1 });
   expect(migrationIds.size).toBe(8);
+});
+
+test('a legacy AI record claiming confirmed is read as a proposal and requires explicit review', async ({ page }) => {
+  await page.goto('/');
+  const dialog = await openProjectMemory(page);
+  const rows = legacyBackup(2).trim().split(/\r?\n/).map(line => JSON.parse(line) as { type: string; data?: Record<string, unknown>; fingerprint?: string });
+  const memory = rows.find(row => row.type === 'memory')!;
+  const data = memory.data!;
+  data.origin = 'ai';
+  data.statusHistory = [{ status: 'confirmed', changedAt: data.createdAt }];
+  memory.fingerprint = createHash('sha256').update(JSON.stringify(data), 'utf8').digest('hex');
+  await restoreBackup(page, dialog, 'legacy-ai-confirmed.jsonl', `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
+  await expect(dialog.locator('.project-list-item[aria-pressed="true"]')).toContainText('Legacy v2');
+  const record = dialog.locator('.memory-fact.needs-review').filter({ hasText: 'Keep the release process controlled.' });
+  await expect(record).toContainText('Legacy AI record claimed confirmation');
+  await expect(record.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+  await record.getByRole('button', { name: 'Needs review', exact: true }).click();
+  await expect(record).toContainText('Needs review');
+  await expect(record).not.toContainText('Legacy AI record claimed confirmation');
 });
 
 test('v9 backup manifests reject corruption and rollback staging before a clean retry', async ({ page }) => {

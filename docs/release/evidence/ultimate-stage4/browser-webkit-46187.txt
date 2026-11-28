@@ -1,0 +1,21 @@
+COMMAND: CI=1 THREADPACK_TEST_PORT=46187 THREADPACK_BROWSER=webkit npx playwright test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-webkit-46187
+[WebServer] (node:37044) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:6124) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 21 tests using 1 worker
+
+(node:30080) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   1 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (30.0s)
+(node:37244) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x   2 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (retry #1) (17.3s)
+(node:30076) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  3 [webkit] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (15.8s)
+  ok  4 [webkit] › tests\browser\project-memory.spec.ts:307:1 › rejecting a fact invalidates generated Markdown and JSON context together (13.6s)
+  ok  5 [webkit] › tests\browser\project-memory.spec.ts:348:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (13.7s)
+  ok  6 [webkit] › tests\browser\project-memory.spec.ts:403:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (13.9s)
+  ok  7 [webkit] › tests\browser\project-memory.spec.ts:469:1 › user preferences are categorized, reviewed, and included with their lifecycle status (9.1s)

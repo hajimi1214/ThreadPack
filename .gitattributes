@@ -3,3 +3,4 @@
 *.jpg binary
 *.jpeg binary
 *.zip binary
+docs/release/evidence/ultimate-stage4/*.txt -text !eol

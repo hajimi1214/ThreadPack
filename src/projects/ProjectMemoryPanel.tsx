@@ -9,15 +9,17 @@ import {
   listProjectMemory, listProjectRevisions, listProjectSessionStates, retrustProjectDevice, rotateProjectTrustKey,
   revokeProjectTrustKey, updateProjectMemoryEvidenceRelation, updateProjectMemoryStatus,
 } from './store';
-import type { EvidenceRelation, MemoryCategory, MemoryEvidenceInput, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
+import type { EvidenceRelation, MemoryCategory, MemoryEvidenceInput, MemoryProjectionFilters, MemoryStatus, ProjectMemoryFact, TaskState } from './memory-types';
 import { canAttestEvidenceRelation } from './evidence-binding';
 import { isTerminalMemoryStatus } from './memory-lifecycle';
 import { publicKeyFingerprint } from './trust-crypto';
 import type { RecoveryBundle } from './trust-crypto';
-import { generateProjectContext, memoryFactsStateKey, memoryProjectStateKey } from './memory-context';
+import { generateProjectContext, memoryProjectStateKey } from './memory-context';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from './memory-ai';
 import type { AIEvidenceMessage } from './memory-ai';
 import { buildProjectContextPackage } from './memory-export';
+import { createProjectMemoryDelta, createProjectMemoryProjection, createProjectMemoryProjectionIndex, parseProjectMemoryProjectionBaseline } from './memory-projection';
+import type { ProjectMemoryProjectionIndex } from './memory-types';
 
 interface SessionState { id: string; title: string; currentVersion: number }
 interface RevisionChoice { version: number; current: boolean }
@@ -33,6 +35,7 @@ interface Props {
 const MAX_AI_SESSIONS = 4;
 const MAX_AI_MESSAGES = 48;
 const MAX_AI_EVIDENCE_CHARACTERS = 32_000;
+const MAX_PROJECTION_BASELINE_BYTES = 900 * 1024;
 
 function diagnosticMessage(value: unknown, fallback: string): string {
   if (value instanceof Error) return value.message;
@@ -121,6 +124,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [recoveryImportPassphrase, setRecoveryImportPassphrase] = useState('');
   const [recoveryFingerprintConfirmation, setRecoveryFingerprintConfirmation] = useState('');
   const [error, setError] = useState('');
+  const memoryReadSequence = useRef(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [category, setCategory] = useState<MemoryCategory>('decision');
   const [topic, setTopic] = useState('');
@@ -143,6 +147,15 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [working, setWorking] = useState('');
   const [query, setQuery] = useState('');
   const [budget, setBudget] = useState(12000);
+  const [filterCategory, setFilterCategory] = useState<MemoryCategory | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<MemoryProjectionFilters['status'] | 'all'>('all');
+  const [filterTrust, setFilterTrust] = useState<'all' | 'authenticated' | 'unverified' | 'ai-proposal'>('all');
+  const [filterFactId, setFilterFactId] = useState('');
+  const [filterSession, setFilterSession] = useState('');
+  const [filterVersion, setFilterVersion] = useState<number | undefined>();
+  const [filterSourceKind, setFilterSourceKind] = useState<MemoryProjectionFilters['sourceKind'] | 'all'>('all');
+  const [filterSourceReference, setFilterSourceReference] = useState('');
+  const [filterUpdatedAfter, setFilterUpdatedAfter] = useState('');
   const [generated, setGenerated] = useState<ReturnType<typeof generateProjectContext> | null>(null);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiEndpoint, setAiEndpoint] = useState('https://api.openai.com/v1/chat/completions');
@@ -152,6 +165,10 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   const [aiBusy, setAiBusy] = useState(false);
   const aiController = useRef<AbortController | null>(null);
   const aiUserCancelled = useRef(false);
+  const projectionBaselineInput = useRef<HTMLInputElement>(null);
+  const [projectionBaseline, setProjectionBaseline] = useState<ProjectMemoryProjectionIndex | null>(null);
+  const [projectionBaselineError, setProjectionBaselineError] = useState('');
+  const [deltaOnly, setDeltaOnly] = useState(false);
   const categoryOptions: MemoryCategory[] = ['goal', 'decision', 'preference', 'constraint', 'task', 'risk', 'open-question'];
   const sessionChoices = useMemo(() => {
     const byId = new Map<string, SessionState>(sessions.map(session => [session.id, {
@@ -161,8 +178,22 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     return [...byId.values()];
   }, [sessionStates, sessions]);
   const currentProjectSession = useMemo(() => new Map(sessionChoices.map(session => [session.id, session])), [sessionChoices]);
+  const projection = useMemo(() => createProjectMemoryProjection(facts, Date.now(), project.id), [facts, project.id]);
+  const projectedFacts = useMemo(() => [...projection.currentFacts, ...projection.terminalHistory], [projection]);
+  const contextFilters = useMemo<MemoryProjectionFilters>(() => ({
+    ...(filterCategory !== 'all' ? { category: filterCategory } : {}),
+    ...(filterStatus !== 'all' ? { status: filterStatus } : {}),
+    ...(filterTrust !== 'all' ? { trust: filterTrust } : {}),
+    ...(filterFactId ? { factId: filterFactId } : {}),
+    ...(filterSession ? { sourceSessionId: filterSession } : {}),
+    ...(filterSession && filterVersion ? { sourceVersion: filterVersion } : {}),
+    ...(filterSourceKind !== 'all' ? { sourceKind: filterSourceKind } : {}),
+    ...(filterSourceReference ? { sourceReference: filterSourceReference } : {}),
+    ...(filterUpdatedAfter ? { updatedAfter: new Date(`${filterUpdatedAfter}T00:00:00`).getTime() } : {}),
+  }), [filterCategory, filterStatus, filterTrust, filterFactId, filterSession, filterVersion, filterSourceKind, filterSourceReference, filterUpdatedAfter]);
 
   async function refreshMemory() {
+    const readSequence = ++memoryReadSequence.current;
     setRefreshing(true);
     setGenerated(null);
     setError('');
@@ -171,12 +202,16 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
       const [nextFacts, nextSessions, nextTrust] = await Promise.all([
         listProjectMemory(project.id), listProjectSessionStates(project.id), getProjectTrustSummary(project.id),
       ]);
+      if (readSequence !== memoryReadSequence.current) return;
       source = 'session index';
       setFacts(nextFacts);
       setSessionStates(nextSessions);
       setTrust(nextTrust);
-    } catch (value) { setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`); }
-    finally { setRefreshing(false); }
+    } catch (value) {
+      if (readSequence === memoryReadSequence.current) setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`);
+    } finally {
+      if (readSequence === memoryReadSequence.current) setRefreshing(false);
+    }
   }
 
   async function setupTrustIdentity() {
@@ -266,13 +301,18 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   useEffect(() => {
     let active = true;
+    const readSequence = ++memoryReadSequence.current;
     setGenerated(null);
     let source = 'memory records';
     void Promise.all([listProjectMemory(project.id), listProjectSessionStates(project.id), getProjectTrustSummary(project.id)])
       .then(([nextFacts, nextSessions, nextTrust]) => {
-        if (active) { setFacts(nextFacts); setSessionStates(nextSessions); setTrust(nextTrust); setError(''); }
-      }).catch(value => { if (active) setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`); });
-    return () => { active = false; aiUserCancelled.current = true; aiController.current?.abort(); };
+        if (active && readSequence === memoryReadSequence.current) {
+          setFacts(nextFacts); setSessionStates(nextSessions); setTrust(nextTrust); setError('');
+        }
+      }).catch(value => {
+        if (active && readSequence === memoryReadSequence.current) setError(`${t.memoryLoadFailed} (${source}) · ${diagnosticMessage(value, 'Unknown storage error')}`);
+      });
+    return () => { active = false; if (readSequence === memoryReadSequence.current) memoryReadSequence.current++; aiUserCancelled.current = true; aiController.current?.abort(); };
   }, [project.id, reloadKey, t.memoryLoadFailed]);
 
   useEffect(() => {
@@ -304,10 +344,12 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     if (evidenceKind === 'conversation' && !evidenceSessionId && sessionChoices[0]) setEvidenceSessionId(sessionChoices[0].id);
   }, [evidenceKind, evidenceSessionId, sessionChoices]);
 
+  useEffect(() => { setGenerated(null); }, [query, budget, contextFilters]);
+
   const evidenceMessage = evidenceMessages.find(message => message.id === evidenceMessageId);
   const matchingMessages = evidenceMessages.filter(message => !messageSearch
     || `${message.role} ${message.content}`.toLocaleLowerCase().includes(messageSearch.toLocaleLowerCase())).slice(0, 100);
-  const selectableReplacements = facts.filter(fact => !isTerminalMemoryStatus(fact.status));
+  const selectableReplacements = projection.currentFacts;
 
   function resetFactForm() {
     setTopic(''); setStatement(''); setEvidenceQuote(''); setEvidenceReference(''); setEvidenceCommit('');
@@ -391,15 +433,47 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
   }
 
   function generateContext() {
+    if (working || refreshing) return;
     try {
-      setGenerated(generateProjectContext({ project, facts, sessions: sessionStates, query, budget }));
+      const currentProjection = createProjectMemoryProjection(facts, Date.now(), project.id);
+      const delta = projectionBaseline ? createProjectMemoryDelta(projectionBaseline, currentProjection) : undefined;
+      setGenerated(generateProjectContext({ project, projectId: project.id, facts, sessions: sessionStates, query, budget,
+        filters: contextFilters, projection: currentProjection, delta, deltaOnly }));
       setError('');
     } catch (value) { setError(value instanceof Error ? value.message : t.memoryContextFailed); }
   }
 
+  async function importProjectionBaseline(file?: File) {
+    if (!file) return;
+    setProjectionBaselineError('');
+    try {
+      if (file.size > MAX_PROJECTION_BASELINE_BYTES) throw new Error(t.memoryDeltaBaselineTooLarge);
+      const parsed: unknown = JSON.parse(await file.text());
+      setProjectionBaseline(parseProjectMemoryProjectionBaseline(parsed)); setDeltaOnly(false);
+      setGenerated(null);
+    } catch (value) { setProjectionBaselineError(value instanceof Error ? value.message : t.memoryContextFailed); }
+    finally { if (projectionBaselineInput.current) projectionBaselineInput.current.value = ''; }
+  }
+
+  function downloadProjectionBaseline() {
+    if (working || refreshing) return;
+    const currentProjection = createProjectMemoryProjection(facts, Date.now(), project.id);
+    const baseline = { format: 'threadpack-memory-projection-baseline', version: 1,
+      createdAt: currentProjection.asOf, index: createProjectMemoryProjectionIndex(currentProjection) };
+    const contents = JSON.stringify(baseline, null, 2);
+    if (new TextEncoder().encode(contents).byteLength > MAX_PROJECTION_BASELINE_BYTES) {
+      setProjectionBaselineError(t.memoryDeltaBaselineTooLarge); return;
+    }
+    const anchor = document.createElement('a');
+    anchor.href = URL.createObjectURL(new Blob([contents], { type: 'application/json;charset=utf-8' }));
+    anchor.download = 'threadpack-projection-baseline.json';
+    document.body.append(anchor); anchor.click(); anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 1500);
+  }
+
   async function copyContext() {
     if (!generated?.text) return;
-    if (generated.factStateKey && generated.factStateKey !== memoryFactsStateKey(facts)
+    if (generated.factStateKey && generated.factStateKey !== createProjectMemoryProjection(facts, Date.now(), project.id).stateKey
       || generated.projectStateKey && generated.projectStateKey !== memoryProjectStateKey(project)) {
       setGenerated(null); setError(t.memoryContextFailed); return;
     }
@@ -411,7 +485,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   function downloadContext() {
     if (!generated?.text) return;
-    if (generated.factStateKey && generated.factStateKey !== memoryFactsStateKey(facts)
+    if (generated.factStateKey && generated.factStateKey !== createProjectMemoryProjection(facts, Date.now(), project.id).stateKey
       || generated.projectStateKey && generated.projectStateKey !== memoryProjectStateKey(project)) {
       setGenerated(null); setError(t.memoryContextFailed); return;
     }
@@ -424,8 +498,15 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
   function downloadContextPackage() {
     if (!generated) return;
+    const currentProjection = createProjectMemoryProjection(facts, generated.projectionAsOf, project.id);
+    if (currentProjection.projectionVersion !== generated.projectionVersion
+      || currentProjection.stateKey !== generated.projectionStateKey
+      || generated.projectedFacts.some(fact => fact.evidence.some(evidence => evidence.sessionId
+        && currentProjectSession.get(evidence.sessionId)?.title !== evidence.sessionTitle))) {
+      setGenerated(null); setError(t.memoryContextFailed); return;
+    }
     let pack: ReturnType<typeof buildProjectContextPackage>;
-    try { pack = buildProjectContextPackage({ project, facts, sessions: sessionChoices, generated }); }
+    try { pack = buildProjectContextPackage({ project, facts, sessions: sessionChoices, generated, projection: currentProjection, createdAt: currentProjection.asOf }); }
     catch (value) { setGenerated(null); setError(diagnosticMessage(value, t.memoryContextFailed)); return; }
     const url = URL.createObjectURL(new Blob([pack.bytes], { type: 'application/zip' }));
     const anchor = document.createElement('a');
@@ -468,7 +549,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
       }
       if (!sources.length) throw new Error(t.memoryAIEmptyEvidence);
       const prompt = buildAIExtractionPrompt({ projectName: project.name, projectStatus: project.summary,
-        selectedFacts: facts.filter(fact => fact.status === 'confirmed' && (fact.expiresAt === undefined || fact.expiresAt > Date.now())).slice(0, 20).map(fact => ({
+        selectedFacts: projection.currentFacts.filter(fact => fact.status === 'confirmed').slice(0, 20).map(fact => ({
           category: fact.category, topic: fact.topic, statement: fact.statement, status: fact.status,
         })), messages: sources });
       const request = await fetch(endpoint, {
@@ -517,7 +598,7 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     <div className="project-memory-heading"><div><h3 id="project-memory-heading"><Sparkles size={15} />{t.projectMemoryTitle}<span>{facts.length}</span></h3><p>{t.projectMemoryHint}</p></div><button className="button secondary small" disabled={!!working || refreshing} onClick={() => { setCreateOpen(value => !value); setError(''); }}><Plus size={14} />{t.projectMemoryAdd}</button></div>
     {error && <p className="project-error" role="alert"><AlertCircle size={14} />{error}</p>}
     {refreshing && <p className="project-memory-loading" role="status"><LoaderCircle size={14} className="spin" />{t.projectWorking}</p>}
-    {facts.some(fact => !isTerminalMemoryStatus(fact.status) && fact.conflictsWith.length > 0) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
+    {projection.currentFacts.some(fact => fact.conflictsWith.length > 0) && <p className="memory-conflict-banner"><ShieldAlert size={14} />{t.memoryConflictAlert}</p>}
     <section className="memory-trust-panel" aria-label={t.memoryTrustTitle}>
       <div className="memory-trust-heading"><KeyRound size={15} /><strong>{t.memoryTrustTitle}</strong></div>
       {!trust.state ? <>
@@ -577,8 +658,9 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
     </div>}
 
     {!facts.length && !refreshing && <p className="project-empty">{t.projectMemoryEmpty}</p>}
-    <div className="memory-fact-list">{facts.map(fact => <article className={`memory-fact ${fact.status}`} key={fact.id}>
+    <div className="memory-fact-list">{projectedFacts.map(fact => <article className={`memory-fact ${fact.status}`} key={fact.id}>
       <div className="memory-fact-heading"><span className={`memory-status ${fact.status}`}>{memoryStatusLabel(fact.status, t)}</span>{(fact.status === 'confirmed' || fact.confirmationTrust === 'revoked') && <span className="memory-confirmation-trust">{confirmationTrustLabel(fact, t)}</span>}{isTerminalMemoryStatus(fact.status) && <span className="memory-confirmation-trust">{lifecycleTrustLabel(fact, t)}</span>}<span>{memoryCategoryLabel(fact.category, t)}</span><span>{fact.origin === 'ai' ? t.memoryOriginAI : t.memoryOriginUser}</span>{staleCount(fact) && <span className="memory-stale"><ShieldAlert size={12} />{t.memoryStaleEvidence}</span>}</div>
+      {fact.projectionWarnings.includes('ai-origin-claimed-confirmed') && <small className="memory-conflict-note">{t.memoryProjectionAIConfirmWarning}</small>}
       <strong>{fact.topic}</strong><p>{fact.statement}</p>
       {fact.conflictsWith.length > 0 && <small className="memory-conflict-note">{t.memoryPotentialConflict} · {fact.conflictsWith.length}</small>}
       {fact.supersedes && <small>{t.memorySupersedes} · {fact.supersedes}</small>}
@@ -594,14 +676,17 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
         {!!evidence.legacyRelationHistory?.length && <small>{t.memoryRelationHistoryUntrusted}</small>}
         {!!evidence.relationHistory?.length && evidence.relationBasis !== 'user_attestation' && <small>{t.memoryRelationHistoryUntrusted}</small>}
       </div>)}</div>
-      {!isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
+      {fact.projectionWarnings.includes('ai-origin-claimed-confirmed') && <div className="memory-fact-actions">
+        <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'needs-review')}>{t.memoryMarkReview}</button>
+      </div>}
+      {!fact.projectionWarnings.includes('ai-origin-claimed-confirmed') && !isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
         {fact.status !== 'confirmed' && <button className="text-button" disabled={!!working || !trust.readyForConfirmations} onClick={() => void reviewFact(fact, 'confirmed')}>{t.memoryConfirmFact}</button>}
         {fact.status === 'confirmed' && <button className="text-button danger-text" disabled={!!working} onClick={() => void reviewFact(fact, 'revoked')}>{t.memoryRevokeFact}</button>}
         <button className="text-button" disabled={!!working} onClick={() => void startCorrection(fact)}>{t.memoryCorrectFact}</button>
         {fact.status !== 'needs-review' && <button className="text-button" disabled={!!working} onClick={() => void reviewFact(fact, 'needs-review')}>{t.memoryMarkReview}</button>}
         <button className="text-button danger-text" disabled={!!working} onClick={() => void reviewFact(fact, 'rejected')}>{t.memoryRejectFact}</button>
       </div>}
-      {isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
+      {!fact.projectionWarnings.includes('ai-origin-claimed-confirmed') && isTerminalMemoryStatus(fact.status) && <div className="memory-fact-actions">
         <button className="text-button" disabled={!!working} onClick={() => startReconsideration(fact)}>{t.memoryReconsiderFact}</button>
       </div>}
       {fact.reconsiders && <small>{t.memoryReconsideredFrom} · {fact.reconsiders}</small>}
@@ -623,8 +708,26 @@ export default function ProjectMemoryPanel({ project, reloadKey, sessions, t, no
 
     <section className="memory-context-builder" aria-labelledby="memory-context-heading">
       <div className="project-sessions-heading"><h3 id="memory-context-heading">{t.memoryContextTitle}</h3></div>
-      <div className="memory-context-controls"><label className="project-search"><Search size={14} /><input maxLength={1000} value={query} placeholder={t.memoryContextQuery} onChange={event => setQuery(event.target.value)} /></label><label><span>{t.memoryContextBudget}</span><select value={budget} onChange={event => setBudget(Number(event.target.value))}>{[4000, 8000, 12000, 24000, 48000, 100000].map(value => <option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label><button className="button primary small" onClick={generateContext}>{t.memoryContextGenerate}</button></div>
-      {generated && <><div className="memory-context-summary"><span>{generated.usedCharacters.toLocaleString()} / {generated.budget.toLocaleString()}</span><span>{t.memoryContextOmissions} · {generated.omissions.length + generated.omittedSections.length}</span><span>{t.memoryPotentialConflict} · {generated.conflictCount}</span><span>{t.memoryContextUncertain} · {generated.proposedCount + generated.uncitedCount + generated.unverifiedEvidenceCount + generated.staleEvidenceCount}</span></div><textarea className="memory-context-output" aria-label={t.memoryContextTitle} readOnly value={generated.text} /><div className="memory-context-actions"><button className="button secondary small" disabled={!generated.text} onClick={() => void copyContext()}><Clipboard size={13} />{t.memoryContextCopy}</button><button className="button secondary small" disabled={!generated.text} onClick={downloadContext}><ArrowDownToLine size={13} />{t.memoryContextDownload}</button><button className="button primary small" disabled={!generated.text} onClick={downloadContextPackage}><Download size={13} />{t.memoryContextPackage}</button></div><ul className="memory-omission-list">{generated.omittedSections.map(section => <li key={section}>{t.memoryOmittedSection} · {section}</li>)}{generated.omissions.map(item => <li key={item.id}>{memoryCategoryLabel(item.category, t)} · {item.topic} · {item.reason === 'budget' ? t.memoryOmittedBudget : t.memoryOmittedIrrelevant}</li>)}</ul></>}
+      <div className="memory-context-controls"><label className="project-search"><Search size={14} /><input maxLength={1000} value={query} placeholder={t.memoryContextQuery} onChange={event => setQuery(event.target.value)} /></label><label><span>{t.memoryContextBudget}</span><select value={budget} onChange={event => setBudget(Number(event.target.value))}>{[4000, 8000, 12000, 24000, 48000, 100000].map(value => <option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label><button className="button primary small" disabled={!!working || refreshing} onClick={generateContext}>{t.memoryContextGenerate}</button></div>
+      <div className="memory-context-filters">
+        <label><span>{t.memoryContextCategoryFilter}</span><select value={filterCategory} onChange={event => setFilterCategory(event.target.value as MemoryCategory | 'all')}><option value="all">{t.memoryFilterAll}</option>{categoryOptions.map(category => <option key={category} value={category}>{memoryCategoryLabel(category, t)}</option>)}</select></label>
+        <label><span>{t.memoryContextStatusFilter}</span><select value={filterStatus ?? 'all'} onChange={event => setFilterStatus(event.target.value as MemoryProjectionFilters['status'] | 'all')}><option value="all">{t.memoryFilterAll}</option><option value="active">{t.memoryFilterActive}</option><option value="terminal">{t.memoryFilterTerminal}</option>{(['proposed', 'confirmed', 'needs-review', 'rejected', 'superseded', 'expired', 'revoked'] as MemoryStatus[]).map(status => <option key={status} value={status}>{memoryStatusLabel(status, t)}</option>)}</select></label>
+        <label><span>{t.memoryContextTrustFilter}</span><select value={filterTrust} onChange={event => setFilterTrust(event.target.value as typeof filterTrust)}><option value="all">{t.memoryFilterAll}</option><option value="authenticated">{t.memoryTrustAuthenticated}</option><option value="unverified">{t.memoryTrustUnverified}</option><option value="ai-proposal">{t.memoryTrustAIProposal}</option></select></label>
+        <label><span>{t.memoryContextFactFilter}</span><input maxLength={200} value={filterFactId} onChange={event => setFilterFactId(event.target.value.trim())} /></label>
+        <label><span>{t.memoryContextSourceFilter}</span><select value={filterSession} onChange={event => { setFilterSession(event.target.value); setFilterVersion(undefined); }}><option value="">{t.memoryFilterAll}</option>{sessionChoices.map(session => <option key={session.id} value={session.id}>{session.title}</option>)}</select></label>
+        {filterSession && <label><span>{t.memoryContextVersionFilter}</span><select value={filterVersion ?? ''} onChange={event => setFilterVersion(event.target.value ? Number(event.target.value) : undefined)}><option value="">{t.memoryFilterAll}</option>{Array.from({ length: currentProjectSession.get(filterSession)?.currentVersion ?? 1 }, (_, index) => index + 1).map(version => <option key={version} value={version}>v{version}</option>)}</select></label>}
+        <label><span>{t.memoryContextSourceKind}</span><select value={filterSourceKind} onChange={event => setFilterSourceKind(event.target.value as MemoryProjectionFilters['sourceKind'] | 'all')}><option value="all">{t.memoryFilterAll}</option><option value="conversation">{t.memoryConversation}</option><option value="repository">{t.memoryRepository}</option><option value="test">{t.memoryTest}</option><option value="user">{t.memoryNoCitation}</option></select></label>
+        <label><span>{t.memoryContextSourceReference}</span><input maxLength={1000} value={filterSourceReference} onChange={event => setFilterSourceReference(event.target.value)} /></label>
+        <label><span>{t.memoryContextUpdatedAfter}</span><input type="date" value={filterUpdatedAfter} onChange={event => setFilterUpdatedAfter(event.target.value)} /></label>
+      </div>
+      <input ref={projectionBaselineInput} className="file-input" type="file" accept=".json,application/json" aria-label={t.memoryDeltaBaselineImport} disabled={!!working || refreshing} onChange={event => void importProjectionBaseline(event.target.files?.[0])} />
+      <div className="memory-context-delta-controls">
+        <button className="button secondary small" disabled={!!working || refreshing} onClick={downloadProjectionBaseline}>{t.memoryDeltaBaselineDownload}</button>
+        <button className="button secondary small" disabled={!!working || refreshing} onClick={() => projectionBaselineInput.current?.click()}>{t.memoryDeltaBaselineImport}</button>
+        {projectionBaseline && <><span>{t.memoryDeltaBaselineLoaded} · {projectionBaseline.stateKey.slice(0, 16)}</span><label className="memory-delta-only"><input type="checkbox" aria-label={t.memoryDeltaOnly} disabled={!!working || refreshing} checked={deltaOnly} onChange={event => { setDeltaOnly(event.target.checked); setGenerated(null); }} />{t.memoryDeltaOnly}</label><button className="text-button" disabled={!!working || refreshing} onClick={() => { setProjectionBaseline(null); setDeltaOnly(false); setGenerated(null); }}>{t.memoryDeltaBaselineClear}</button></>}
+      </div>
+      {projectionBaselineError && <p role="alert" className="project-error">{projectionBaselineError}</p>}
+      {generated && <><div className="memory-context-summary"><span>{generated.usedCharacters.toLocaleString()} / {generated.budget.toLocaleString()}</span><span>{t.memoryContextOmissions} · {generated.omissions.length + generated.omittedSections.length}</span><span>{t.memoryPotentialConflict} · {generated.conflictCount}</span><span>{t.memoryContextUncertain} · {generated.proposedCount + generated.uncitedCount + generated.unverifiedEvidenceCount + generated.staleEvidenceCount}</span><span>Projection v{generated.projectionVersion}</span></div><textarea className="memory-context-output" aria-label={t.memoryContextTitle} readOnly value={generated.text} /><div className="memory-context-actions"><button className="button secondary small" disabled={!generated.text || !!working || refreshing} onClick={() => void copyContext()}><Clipboard size={13} />{t.memoryContextCopy}</button><button className="button secondary small" disabled={!generated.text || !!working || refreshing} onClick={downloadContext}><ArrowDownToLine size={13} />{t.memoryContextDownload}</button><button className="button primary small" disabled={!generated.text || !!working || refreshing} onClick={downloadContextPackage}><Download size={13} />{t.memoryContextPackage}</button></div><ul className="memory-omission-list">{generated.omittedSections.map(section => <li key={section}>{t.memoryOmittedSection} · {section}</li>)}{generated.omissions.map(item => <li key={item.id}>{memoryCategoryLabel(item.category, t)} · {item.topic} · {item.reason === 'budget' ? t.memoryOmittedBudget : item.reason === 'filtered' ? t.memoryOmittedFiltered : item.reason === 'terminal-status' ? t.memoryOmittedHistorical : t.memoryOmittedIrrelevant}</li>)}</ul></>}
     </section>
   </section>;
 }

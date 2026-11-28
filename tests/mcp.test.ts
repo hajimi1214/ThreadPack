@@ -133,6 +133,103 @@ test('MCP validates v9 migration records and the backup manifest', async () => {
   assert.equal(invalidResponse.error?.message, 'ThreadPack could not read the authorized project context.');
 });
 
+test('MCP context and tasks use the canonical trust projection and structured filters', async () => {
+  const backupPath = join(folder, 'canonical-projection.jsonl');
+  const now = 1_700_000_000_000;
+  const records = [
+    { type: 'threadpack_project', version: 2, projectId: 'canonical-project', createdAt: now,
+      project: { name: 'Canonical projection', summary: '', importantNotes: '', createdAt: now, updatedAt: now },
+      sessionCount: 0, revisionCount: 0, factCount: 4 },
+    ...[
+      { id: 'ai-legacy-confirmed', category: 'task', topic: 'Import', statement: 'The import is complete.', origin: 'ai', status: 'confirmed' },
+      { id: 'user-legacy-confirmed', category: 'decision', topic: 'Storage', statement: 'Keep the store local.', origin: 'user', status: 'confirmed' },
+      { id: 'rejected-record', category: 'decision', topic: 'Transport', statement: 'Use plain HTTP.', origin: 'user', status: 'rejected' },
+      { id: 'user-backup-task', category: 'task', topic: 'Backup', statement: 'Restore the last known good version.', origin: 'user', status: 'confirmed', taskState: 'in-progress' },
+    ].map((data, index) => {
+      const evidence = data.id === 'user-backup-task' ? [{ id: 'backup-evidence', kind: 'test', reference: 'Restore rehearsal',
+        quote: 'The last known good version was restored.', recordedAt: now, verification: 'user-recorded' }] : [];
+      const memory = { ...data, evidence, conflictsWith: [], createdAt: now + index, updatedAt: now + index,
+        ...(data.category === 'task' ? { taskState: 'in-progress' } : {}),
+        statusHistory: [{ status: data.status, changedAt: now + index }] };
+      return { type: 'memory', fingerprint: createHash('sha256').update(JSON.stringify(memory), 'utf8').digest('hex'), data: memory };
+    }),
+  ];
+  await writeFile(backupPath, `${records.map(record => JSON.stringify(record)).join('\n')}\n`, 'utf8');
+  const request = (id: number, filters: Record<string, unknown>) => JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: {
+    name: 'threadpack_project_context', arguments: { filters, budget: 4000 },
+  } });
+  const tasksRequest = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {
+    name: 'threadpack_project_tasks', arguments: { query: 'restore', factId: 'user-backup-task' },
+  } });
+  const invalidTasksRequest = JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: {
+    name: 'threadpack_project_tasks', arguments: { factId: 123 },
+  } });
+  const taskContextRequest = request(5, { category: 'task', status: 'active' });
+  const result = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--read-only'], {
+    encoding: 'utf8', input: `${request(1, { category: 'decision', status: 'active' })}\n${request(2, { status: 'terminal' })}\n${tasksRequest}\n${invalidTasksRequest}\n${taskContextRequest}\n`,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const responses = result.stdout.trim().split('\n').map(line => JSON.parse(line) as {
+    result?: { structuredContent?: { projectionVersion?: number; projectionStateKey?: string; projectionIndex?: Record<string, unknown>;
+      facts?: { id: string; category: string; origin: string; status: string; trust: string; confirmationTrust: string; lifecycleTrust: string;
+        evidence: { id: string; bindingStatus: string; relation: string; relationBasis: string; trust: string }[] }[];
+      terminalHistory?: { facts: { id: string; status: string; trust: string }[] }; filtersApplied?: Record<string, unknown>;
+      tasks?: { id: string; category: string; origin: string; status: string; trust: string; confirmationTrust: string; lifecycleTrust: string;
+        evidence: { evidenceId: string; bindingStatus: string; relation: string; relationBasis: string; trust: string }[] }[] };
+      content?: { text: string }[] };
+    error?: { code: number; message: string };
+  });
+  assert.equal(responses.length, 5, `${result.stdout}\n${result.stderr}`);
+  assert.ok(responses[0]!.result?.structuredContent, `${result.stderr}\n${JSON.stringify(responses[0])}`);
+  assert.ok(responses[1]!.result?.structuredContent, `${result.stderr}\n${JSON.stringify(responses[1])}`);
+  const active = responses[0]!.result!.structuredContent!;
+  assert.equal(active.projectionVersion, 1);
+  assert.deepEqual(active.filtersApplied, { category: 'decision', status: 'active' });
+  assert.deepEqual(active.facts!.map(fact => [fact.id, fact.status, fact.trust, fact.confirmationTrust]), [
+    ['user-legacy-confirmed', 'confirmed', 'legacy-confirmed-claim-unverified', 'legacy-unverified'],
+  ]);
+  assert.deepEqual(active.terminalHistory!.facts, []);
+
+  const terminal = responses[1]!.result!.structuredContent!;
+  assert.deepEqual(terminal.facts, []);
+  assert.deepEqual(terminal.terminalHistory!.facts.map(fact => [fact.id, fact.status, fact.trust]), [
+    ['rejected-record', 'rejected', 'historical-only'],
+  ]);
+  assert.ok(responses[2]!.result?.structuredContent, JSON.stringify(responses[2]));
+  const tasks = responses[2]!.result!.structuredContent!.tasks;
+  assert.ok(Array.isArray(tasks));
+  assert.equal(JSON.stringify(tasks).includes('ai-legacy-confirmed'), false);
+  assert.deepEqual((tasks as { id: string }[]).map(task => task.id), ['user-backup-task']);
+  assert.match(responses[2]!.result?.content?.[0]?.text ?? '', /Confirmation authentication is reported per task/);
+  assert.doesNotMatch(responses[2]!.result?.content?.[0]?.text ?? '', /legacy confirmed status is not authenticated/);
+  assert.equal(responses[3]!.error?.code, -32000, 'An invalid filter type must fail closed instead of being discarded.');
+  const taskContext = responses[4]!.result?.structuredContent;
+  const task = tasks[0]!;
+  const contextTask = taskContext?.facts?.find(fact => fact.id === task.id);
+  assert.ok(contextTask);
+  assert.equal(responses[2]!.result?.structuredContent?.projectionStateKey, taskContext?.projectionStateKey);
+  assert.deepEqual([task.id, task.category, task.origin, task.status, task.trust, task.confirmationTrust, task.lifecycleTrust],
+    [contextTask.id, contextTask.category, contextTask.origin, contextTask.status, contextTask.trust, contextTask.confirmationTrust, contextTask.lifecycleTrust]);
+  assert.deepEqual(task.evidence.map(({ evidenceId, bindingStatus, relation, relationBasis, trust }) => [evidenceId, bindingStatus, relation, relationBasis, trust]),
+    contextTask.evidence.map(({ id, bindingStatus, relation, relationBasis, trust }) => [id, bindingStatus, relation, relationBasis, trust]));
+
+  const baselineIndex = responses[0]!.result!.structuredContent!.projectionIndex!;
+  const updated = records[2] as { type: string; data: Record<string, unknown>; fingerprint: string };
+  updated.data.statement = 'Keep the primary store local and encrypted.';
+  updated.fingerprint = createHash('sha256').update(JSON.stringify(updated.data), 'utf8').digest('hex');
+  await writeFile(backupPath, `${records.map(record => JSON.stringify(record)).join('\n')}\n`, 'utf8');
+  const deltaRequest = JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: {
+    name: 'threadpack_project_context', arguments: { baselineIndex, budget: 4000 },
+  } }) + '\n';
+  const deltaResult = spawnSync(process.execPath, [cli, 'mcp', '--backup', backupPath, '--read-only'], { encoding: 'utf8', input: deltaRequest });
+  assert.equal(deltaResult.status, 0, deltaResult.stderr);
+  const deltaResponse = JSON.parse(deltaResult.stdout.trim()) as { result?: { content?: { text: string }[];
+    structuredContent?: { delta?: { fromStateKey: string; updatedIds: string[]; changedFacts: { statement: string }[] } } } };
+  assert.deepEqual(deltaResponse.result?.structuredContent?.delta?.updatedIds, ['user-legacy-confirmed']);
+  assert.match(deltaResponse.result?.content?.[0]?.text ?? '', /Incremental state changes/);
+  assert.match(JSON.stringify(deltaResponse.result?.structuredContent?.delta), /Keep the primary store local and encrypted/);
+});
+
 test('MCP binds a matching quote to its exact message rather than any revision message', async () => {
   const backupPath = join(folder, 'wrong-message-binding.jsonl');
   const messageOne = JSON.stringify({ id: 'message-1', role: 'user', content: 'The scheduled release is local.' });

@@ -1,0 +1,4 @@
+COMMAND: npx playwright test tests/browser/project-memory.spec.ts --workers=1 --output=test-results/ultimate-stage4-webkit
+Error: http://127.0.0.1:4318 is already used, make sure that nothing is running on the port/url or set reuseExistingServer:true in config.webServer.
+
+EXITCODE=1

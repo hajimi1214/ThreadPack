@@ -1,0 +1,83 @@
+COMMAND=THREADPACK_BROWSER=webkit THREADPACK_TEST_PORT=4356 npm run test:e2e -- tests/browser/project-memory.spec.ts --workers=1 --grep="context builder applies filters|superseded facts retain" --output=test-results/ultimate-stage4-focused-webkit
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts --workers=1 --grep=context builder applies filters|superseded facts retain --output=test-results/ultimate-stage4-focused-webkit
+
+[WebServer] (node:28012) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:15784) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 2 tests using 1 worker
+
+(node:56132) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 [webkit] › tests\browser\project-memory.spec.ts:238:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (2.4s)
+(node:52676) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  2 [webkit] › tests\browser\project-memory.spec.ts:636:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (14.9s)
+
+
+  1) [webkit] › tests\browser\project-memory.spec.ts:238:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline 
+
+    Error: page.goto: Page crashed
+    Call log:
+      - navigating to "http://127.0.0.1:4356/", waiting until "load"
+
+
+      238 | test('the context builder applies filters and exports an untrusted incremental delta from a project baseline', async ({ page }) => {
+      239 |   test.setTimeout(120_000);
+    > 240 |   await page.goto('/');
+          |              ^
+      241 |   await importConversation(page, 'incremental-baseline.json', 'The runtime stays local. Preserve the immutable source history.');
+      242 |   const dialog = await openProjectMemory(page);
+      243 |   await saveCurrentSession(dialog);
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:240:14
+
+    Error Context: test-results\ultimate-stage4-focused-webkit\project-memory-the-context-a0909-lta-from-a-project-baseline-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-focused-webkit\project-memory-the-context-a0909-lta-from-a-project-baseline-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-focused-webkit\project-memory-the-context-a0909-lta-from-a-project-baseline-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [webkit] › tests\browser\project-memory.spec.ts:636:1 › superseded facts retain signed history and can only return through an explicit reconsideration link 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' })
+    Expected substring: "Superseded"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' }) with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' })
+
+
+      657 |   await form.getByRole('button', { name: 'Confirm and save', exact: true }).click();
+      658 |   const superseded = dialog.locator('.memory-fact.superseded').filter({ hasText: 'The deployment stays on the internal network.' });
+    > 659 |   await expect(superseded).toContainText('Superseded');
+          |                            ^
+      660 |   await expect(superseded).toContainText('Confirmation was revoked');
+      661 |
+      662 |   await superseded.getByRole('button', { name: 'Reconsider as a new review item', exact: true }).click();
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:659:28
+
+    Error Context: test-results\ultimate-stage4-focused-webkit\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\ultimate-stage4-focused-webkit\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\ultimate-stage4-focused-webkit\project-memory-superseded--784f4-plicit-reconsideration-link-webkit\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2 failed
+    [webkit] › tests\browser\project-memory.spec.ts:238:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline 
+    [webkit] › tests\browser\project-memory.spec.ts:636:1 › superseded facts retain signed history and can only return through an explicit reconsideration link 
+EXITCODE=1

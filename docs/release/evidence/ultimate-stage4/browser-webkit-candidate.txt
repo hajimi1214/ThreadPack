@@ -1,0 +1,16 @@
+COMMAND: CI=1 THREADPACK_BROWSER=webkit THREADPACK_TEST_PORT=46203 node node_modules/playwright/cli.js test tests/browser/project-memory.spec.ts --workers=1 --grep='project facts cite saved messages|context builder applies filters|project without facts'
+[WebServer] (node:56060) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:20964) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 3 tests using 1 worker
+
+(node:11292) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (22.1s)
+  ok 2 [webkit] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (16.5s)
+  ok 3 [webkit] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (7.5s)
+
+  3 passed (1.4m)
+EXITCODE=0

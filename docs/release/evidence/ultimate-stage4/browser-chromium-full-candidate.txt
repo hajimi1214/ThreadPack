@@ -1,0 +1,76 @@
+COMMAND: CI=1 THREADPACK_TEST_PORT=46204 THREADPACK_BROWSER=chromium node node_modules/playwright/cli.js test tests/browser/project-memory.spec.ts --workers=1
+[WebServer] (node:40608) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:44700) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 22 tests using 1 worker
+
+(node:34060) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [chromium] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (4.9s)
+  ok  2 [chromium] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (4.5s)
+  ok  3 [chromium] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (2.1s)
+  ok  4 [chromium] › tests\browser\project-memory.spec.ts:323:1 › rejecting a fact invalidates generated Markdown and JSON context together (4.4s)
+  ok  5 [chromium] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (5.0s)
+  ok  6 [chromium] › tests\browser\project-memory.spec.ts:419:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (4.4s)
+  ok  7 [chromium] › tests\browser\project-memory.spec.ts:485:1 › user preferences are categorized, reviewed, and included with their lifecycle status (4.9s)
+  ok  8 [chromium] › tests\browser\project-memory.spec.ts:519:1 › rejected claims stay terminal until the user creates a linked review candidate (10.0s)
+  ok  9 [chromium] › tests\browser\project-memory.spec.ts:603:1 › expired facts leave current context while preserving signed history after reload (9.2s)
+  ok 10 [chromium] › tests\browser\project-memory.spec.ts:657:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (6.4s)
+  ok 11 [chromium] › tests\browser\project-memory.spec.ts:708:1 › version-one project backups restore after the IndexedDB schema migration (3.4s)
+  ok 12 [chromium] › tests\browser\project-memory.spec.ts:728:1 › project backup versions one through eight migrate with a deterministic untrusted history record (6.4s)
+  ok 13 [chromium] › tests\browser\project-memory.spec.ts:781:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (3.2s)
+  ok 14 [chromium] › tests\browser\project-memory.spec.ts:800:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (8.6s)
+  ok 15 [chromium] › tests\browser\project-memory.spec.ts:881:1 › indexed database version one projects survive the schema upgrade and accept memory facts (7.2s)
+  ok 16 [chromium] › tests\browser\project-memory.spec.ts:947:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (27.8s)
+  ok 17 [chromium] › tests\browser\project-memory.spec.ts:1136:1 › deleting an imported trust copy leaves the source project anchor intact (8.4s)
+  x  18 [chromium] › tests\browser\project-memory.spec.ts:1207:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit (23.6s)
+(node:59180) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 19 [chromium] › tests\browser\project-memory.spec.ts:1207:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit (retry #1) (14.5s)
+  ok 20 [chromium] › tests\browser\project-memory.spec.ts:1283:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (8.6s)
+  ok 21 [chromium] › tests\browser\project-memory.spec.ts:1406:1 › changing evidence relationships revokes the prior signed fact confirmation (4.5s)
+  ok 22 [chromium] › tests\browser\project-memory.spec.ts:1435:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (5.5s)
+  ok 23 [chromium] › tests\browser\project-memory.spec.ts:1524:1 › missing source revisions remain visible as unverified without breaking project memory reads (6.7s)
+
+
+  1) [chromium] › tests\browser\project-memory.spec.ts:1207:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item')
+    Expected: 2
+    Received: 3
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item') with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).locator('.project-list-item')
+        13 × locator resolved to 3 elements
+           - unexpected value "3"
+
+
+      1273 |     expect(trustedRecords.filter(record => record.type === 'trust_event')).toHaveLength(3);
+      1274 |     await restoreBackup(devicePage, deviceDialog, 'retrusted-project-roundtrip.jsonl', trustedBackupText);
+    > 1275 |     await expect(deviceDialog.locator('.project-list-item')).toHaveCount(2);
+           |                                                              ^
+      1276 |     const restoredTrust = trustedRecords.find(record => record.type === 'trust_state')!.data!;
+      1277 |     expect(restoredTrust.trustStatus).toBe('untrusted-import');
+      1278 |   } finally {
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:1275:62
+
+    Error Context: test-results\project-memory-an-isolated-7d47e-its-root-bound-recovery-kit-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-memory-an-isolated-7d47e-its-root-bound-recovery-kit-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-memory-an-isolated-7d47e-its-root-bound-recovery-kit-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 flaky
+    [chromium] › tests\browser\project-memory.spec.ts:1207:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit 
+  21 passed (3.7m)
+EXITCODE=0

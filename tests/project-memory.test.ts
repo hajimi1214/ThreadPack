@@ -4,6 +4,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { buildAIExtractionPrompt, parseAISuggestionResponse, validateAIEndpoint } from '../src/projects/memory-ai';
 import { generateProjectContext } from '../src/projects/memory-context';
 import { buildProjectContextPackage } from '../src/projects/memory-export';
+import { createProjectMemoryDelta, createProjectMemoryProjection, createProjectMemoryProjectionIndex, filterProjectedMemoryFacts, parseProjectMemoryProjectionBaseline } from '../src/projects/memory-projection';
 import { utf8ByteLength } from '../src/projects/limits';
 import type { ProjectMemoryFact } from '../src/projects/memory-types';
 
@@ -11,6 +12,7 @@ function fact(overrides: Partial<ProjectMemoryFact> & Pick<ProjectMemoryFact, 'i
   const defaults: ProjectMemoryFact = {
     key: `project\0${overrides.id}`, id: '', projectId: 'project', normalizedTopic: '',
     category: 'decision', topic: '', statement: '', origin: 'user', status: 'confirmed',
+    statusHistory: [{ status: 'confirmed', changedAt: 1 }],
     evidence: [{ id: `evidence-${overrides.id}`, kind: 'conversation', reference: 'Architecture chat v1 · message-2',
       quote: 'We agreed to keep this local.', sessionId: 'session', version: 1, messageId: 'message-2',
       messageFingerprint: 'a'.repeat(64), recordedAt: 1, verification: 'source-matched' }],
@@ -25,6 +27,159 @@ test('chunked UTF-8 byte counting matches encoding across surrogate boundaries',
     '🙂'.repeat(20_000),
   ];
   for (const value of values) assert.equal(utf8ByteLength(value), new TextEncoder().encode(value).byteLength);
+});
+
+test('one canonical projection normalizes expiry, AI legacy claims, filters, and trust dimensions', () => {
+  const confirmed = fact({ id: 'confirmed-local', topic: 'Runtime', statement: 'Keep the service local.', confirmationTrust: 'authenticated' });
+  const signedAI = fact({ id: 'signed-ai-claim', topic: 'Runtime', statement: 'The user reviewed this AI candidate.', origin: 'ai', status: 'confirmed',
+    confirmationTrust: 'authenticated', confirmationEventId: 'event-signed-ai' });
+  const legacyAI = fact({ id: 'ai-claimed-confirmed', topic: 'Runtime', statement: 'Cloud storage is mandatory.', origin: 'ai', status: 'confirmed',
+    confirmationTrust: 'authenticated', evidence: [{ ...fact({ id: 'evidence-source', topic: 'T', statement: 'S' }).evidence[0]!,
+      relation: 'supports', relationBasis: 'user_attestation', bindingStatus: 'invalid' }] });
+  const expired = fact({ id: 'expired', topic: 'Rollout', statement: 'Old deployment window.', status: 'needs-review',
+    expiresAt: 500, createdAt: 1, updatedAt: 2, statusHistory: [{ status: 'needs-review', changedAt: 1 }] });
+  const rejected = fact({ id: 'rejected', topic: 'Transport', statement: 'Use plain HTTP.', status: 'rejected',
+    lifecycleTrust: 'authenticated', statusHistory: [{ status: 'needs-review', changedAt: 1 }, { status: 'rejected', changedAt: 2 }] });
+
+  const projection = createProjectMemoryProjection([confirmed, signedAI, legacyAI, expired, rejected], 600);
+  assert.deepEqual(projection.currentFacts.map(item => [item.id, item.status]), [
+    ['confirmed-local', 'confirmed'], ['signed-ai-claim', 'confirmed'], ['ai-claimed-confirmed', 'needs-review'],
+  ]);
+  assert.equal(projection.currentFacts[2]!.storedStatus, 'confirmed');
+  assert.equal(projection.currentFacts.find(item => item.id === 'signed-ai-claim')?.trust, 'user-confirmed-by-locally-trusted-key');
+  assert.equal(projection.currentFacts[2]!.confirmationTrust, 'invalid');
+  assert.deepEqual(projection.currentFacts[2]!.statusHistory, legacyAI.statusHistory ?? [],
+    'A projected review warning must not fabricate a persisted lifecycle transition.');
+  assert.deepEqual(projection.currentFacts[2]!.evidence.map(item => [item.bindingStatus, item.relation, item.relationBasis]), [['invalid', 'unverified', 'none']]);
+  assert.deepEqual(projection.terminalHistory.map(item => [item.id, item.status, item.trust]), [
+    ['expired', 'expired', 'expired-history-only'], ['rejected', 'rejected', 'user-rejected-by-locally-trusted-key'],
+  ]);
+  assert.equal(projection.terminalHistory.find(item => item.id === 'expired')!.statusHistory.at(-1)?.status, 'expired');
+  assert.deepEqual(projection.conflictingFactIds, ['ai-claimed-confirmed']);
+  assert.deepEqual(filterProjectedMemoryFacts(projection.currentFacts, { trust: 'authenticated' }).map(item => item.id), ['confirmed-local', 'signed-ai-claim']);
+  assert.deepEqual(filterProjectedMemoryFacts(projection.currentFacts, { trust: 'ai-proposal' }).map(item => item.id), []);
+  assert.deepEqual(filterProjectedMemoryFacts(projection.terminalHistory, { trust: 'authenticated' }).map(item => item.id), ['rejected']);
+  assert.equal(projection.stateKey, createProjectMemoryProjection([rejected, expired, legacyAI, signedAI, confirmed], 600).stateKey);
+  assert.notEqual(projection.stateKey, createProjectMemoryProjection([confirmed, signedAI, legacyAI, expired, rejected], 400).stateKey);
+});
+
+test('context filters combine exact source and category, preserve conflicts, and can retrieve history explicitly', () => {
+  const first = fact({ id: 'task-source', category: 'task', topic: 'Backup', statement: 'Restore source revision one.',
+    status: 'needs-review', conflictsWith: ['task-conflict'], evidence: [{ ...fact({ id: 'source', topic: 's', statement: 's' }).evidence[0]!, sessionId: 'session-a', version: 1 }] });
+  const conflict = fact({ id: 'task-conflict', category: 'task', topic: 'Backup', statement: 'Discard old records.',
+    status: 'needs-review', conflictsWith: ['task-source'], evidence: [{ ...first.evidence[0]!, id: 'other-evidence', version: 1 }] });
+  const unrelated = fact({ id: 'decision', category: 'decision', topic: 'Transport', statement: 'Use the local transport.' });
+  const splitSource = fact({ id: 'split-source', category: 'task', topic: 'Backup', statement: 'Source filters must match one citation.',
+    evidence: [{ ...first.evidence[0]!, version: 2 }, { ...first.evidence[0]!, id: 'separate-session', sessionId: 'session-b' }] });
+  const terminal = fact({ id: 'rejected-old', category: 'task', topic: 'Backup', statement: 'Delete every previous backup.', status: 'rejected',
+    statusHistory: [{ status: 'needs-review', changedAt: 1 }, { status: 'rejected', changedAt: 2 }], evidence: [{ ...first.evidence[0]!, id: 'terminal-evidence' }] });
+  const facts = [first, conflict, unrelated, splitSource, terminal];
+  const projection = createProjectMemoryProjection(facts, 100);
+  const current = generateProjectContext({ project: { name: 'Project', summary: '', importantNotes: '' }, facts,
+    sessions: [{ id: 'session-a', title: 'History', currentVersion: 2 }], query: '', budget: 3000,
+    filters: { category: 'task', sourceSessionId: 'session-a', sourceVersion: 1 }, projection });
+  assert.deepEqual(current.includedFactIds, ['task-source', 'task-conflict']);
+  assert.deepEqual(current.includedHistoricalIds, []);
+  assert.deepEqual(current.conflictingFactIds, ['task-conflict', 'task-source']);
+  assert.equal(current.omissions.find(item => item.id === 'rejected-old')?.reason, 'terminal-status');
+
+  const historical = generateProjectContext({ project: { name: 'Project', summary: '', importantNotes: '' }, facts,
+    sessions: [{ id: 'session-a', title: 'History', currentVersion: 2 }], query: 'delete previous', budget: 3000,
+    filters: { status: 'terminal', sourceSessionId: 'session-a' }, projection });
+  assert.deepEqual(historical.includedFactIds, []);
+  assert.deepEqual(historical.includedHistoricalIds, ['rejected-old']);
+  assert.match(historical.text, /Historical match · never current/);
+  assert.match(historical.text, /REJECTED/);
+});
+
+test('an empty project exports its project-scoped context and rejects another project', () => {
+  const project = { id: 'empty-project', name: 'Empty project', summary: '', importantNotes: '' };
+  const generated = generateProjectContext({ project, projectId: project.id, facts: [], sessions: [], query: '', budget: 3000 });
+  const pack = buildProjectContextPackage({ project, facts: [], sessions: [], generated });
+  const memory = JSON.parse(strFromU8(unzipSync(pack.bytes)['threadpack-memory.json']!));
+  assert.equal(memory.projection.stateIndex.projectId, project.id);
+  assert.deepEqual(memory.facts, []);
+  assert.throws(() => buildProjectContextPackage({
+    project: { ...project, id: 'another-empty-project' }, facts: [], sessions: [], generated,
+  }), /out of date/);
+});
+
+test('an incremental pack exports only historical changes that fit the context budget', () => {
+  const project = { id: 'project', name: 'Budget test', summary: '', importantNotes: '' };
+  const outsideBudget = 'History outside budget. '.repeat(100);
+  const previous = [fact({ id: 'long-history', topic: 'Old constraint', statement: outsideBudget,
+    status: 'needs-review', evidence: [] })];
+  const baseline = createProjectMemoryProjectionIndex(createProjectMemoryProjection(previous));
+  const facts = [{ ...previous[0]!, status: 'rejected' as const, updatedAt: 2 }];
+  const projection = createProjectMemoryProjection(facts);
+  const generated = generateProjectContext({
+    project, facts, sessions: [], query: '', budget: 1000, projection,
+    delta: createProjectMemoryDelta(baseline, projection), deltaOnly: true,
+  });
+  assert.deepEqual(generated.includedHistoricalIds, []);
+  assert.equal(generated.delta?.omittedChangedCount, 1);
+  const pack = buildProjectContextPackage({ project, facts, sessions: [], generated, projection });
+  const files = unzipSync(pack.bytes);
+  const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!));
+  assert.deepEqual(memory.terminalHistory, []);
+  assert.deepEqual(memory.delta.historicalChanges, []);
+  assert.equal(memory.delta.omittedChangedCount, 1);
+  assert.doesNotMatch(strFromU8(files['PROJECT_CONTEXT.md']!), /History outside budget/);
+});
+
+test('projection baselines are project-bound and produce precise incremental status transitions', () => {
+  const baseFacts = [
+    fact({ id: 'changed', topic: 'Runtime', statement: 'Local runtime.', status: 'needs-review' }),
+    fact({ id: 'terminalizing', topic: 'Transport', statement: 'Plain HTTP.', status: 'needs-review', conflictsWith: ['related'] }),
+    fact({ id: 'related', topic: 'Transport', statement: 'Use HTTPS.', status: 'needs-review', conflictsWith: ['terminalizing'] }),
+    fact({ id: 'removed', topic: 'Obsolete', statement: 'Keep the old cache.' }),
+    fact({ id: 'already-terminal', topic: 'Old provider', statement: 'Deploy on the discontinued provider.', status: 'rejected' }),
+  ].map(item => ({ ...item, projectId: 'project-a' }));
+  const baselineProjection = createProjectMemoryProjection(baseFacts, 100, 'project-a');
+  const baselineIndex = createProjectMemoryProjectionIndex(baselineProjection);
+  const portableBaseline = { format: 'threadpack-memory-projection-baseline', version: 1, createdAt: 100, index: baselineIndex };
+  const parsedBaseline = parseProjectMemoryProjectionBaseline(JSON.parse(JSON.stringify(portableBaseline)));
+  const nextFacts = [
+    { ...baseFacts[0]!, statement: 'The local runtime is confirmed by current source.', revision: 2, updatedAt: 101 },
+    { ...baseFacts[1]!, status: 'rejected' as const, revision: 2, updatedAt: 101,
+      statusHistory: [{ status: 'needs-review' as const, changedAt: 1 }, { status: 'rejected' as const, changedAt: 101 }] },
+    baseFacts[2]!,
+    { ...baseFacts[4]!, statement: 'Historical record with a revised account.', revision: 2, updatedAt: 101 },
+    { ...fact({ id: 'added', topic: 'Backup', statement: 'Preserve all revisions.', status: 'proposed' }), projectId: 'project-a' },
+  ];
+  const currentProjection = createProjectMemoryProjection(nextFacts, 102, 'project-a');
+  const delta = createProjectMemoryDelta(parsedBaseline, currentProjection);
+  assert.deepEqual(delta.addedIds, ['added']);
+  assert.deepEqual(delta.updatedIds, ['already-terminal', 'changed']);
+  assert.deepEqual(delta.terminalizedIds, ['terminalizing']);
+  assert.deepEqual(delta.removedIds, ['removed']);
+  assert.deepEqual(delta.relatedConflictIds, ['related']);
+  assert.ok(delta.changedFacts.some(item => item.id === 'related'));
+  assert.equal(delta.historicalChanges[0]?.trust, 'historical-only');
+  assert.ok(delta.historicalChanges.some(item => item.id === 'already-terminal'));
+  const generated = generateProjectContext({ project: { name: 'Incremental', summary: '', importantNotes: '' }, facts: nextFacts,
+    sessions: [], query: '', budget: 20000, projection: currentProjection, delta });
+  assert.match(generated.text, /Incremental state changes/);
+  assert.match(generated.text, /The local runtime is confirmed by current source/);
+  assert.deepEqual(generated.delta, delta);
+  const packageResult = buildProjectContextPackage({ project: { name: 'Incremental', summary: '', importantNotes: '' },
+    facts: nextFacts, sessions: [], generated });
+  const packageMemory = JSON.parse(strFromU8(unzipSync(packageResult.bytes)['threadpack-memory.json']!)) as {
+    projection: { stateIndex: unknown };
+    delta?: { fromStateKey: string; toStateKey: string; terminalizedIds: string[] };
+  };
+  assert.equal(packageMemory.projection.stateIndex !== undefined, true);
+  assert.deepEqual(packageMemory.delta, JSON.parse(JSON.stringify(delta)));
+  assert.deepEqual(packageMemory.delta?.terminalizedIds, ['terminalizing']);
+  const deltaOnly = generateProjectContext({ project: { name: 'Incremental', summary: '', importantNotes: '' }, facts: nextFacts,
+    sessions: [], query: '', budget: 20000, projection: currentProjection, delta, deltaOnly: true });
+  const deltaPackage = buildProjectContextPackage({ project: { name: 'Incremental', summary: '', importantNotes: '' },
+    facts: nextFacts, sessions: [], generated: deltaOnly });
+  const deltaMemory = JSON.parse(strFromU8(unzipSync(deltaPackage.bytes)['threadpack-memory.json']!));
+  assert.deepEqual(deltaMemory.terminalHistory.map((item: { id: string }) => item.id), ['already-terminal', 'terminalizing']);
+  assert.throws(() => createProjectMemoryDelta({ ...baselineIndex, projectId: 'project-b' }, currentProjection), /another project/);
+  assert.throws(() => parseProjectMemoryProjectionBaseline({ ...portableBaseline,
+    index: { ...baselineIndex, facts: { ['__proto__']: { recordKey: 'bad', status: 'confirmed' } } } }), /invalid fact index/);
 });
 
 test('project context search ranks exact facts, reports stale evidence and omits whole records over budget', () => {
@@ -79,10 +234,12 @@ test('terminal facts stay out of current context and remain labeled in package h
   });
   const terminalFacts = [rejected, superseded, expired, revoked];
   const project = { name: 'Lifecycle', summary: '', importantNotes: '' };
-  const generated = generateProjectContext({ project, facts: terminalFacts, sessions: [], query: 'remote service', budget: 2000 });
+  const generated = generateProjectContext({ project, facts: terminalFacts, sessions: [], query: 'remote service', budget: 2000,
+    filters: { status: 'terminal' } });
   assert.equal(generated.includedFactIds.length, 0);
   assert.deepEqual(generated.omissions.map(item => item.reason), Array(4).fill('terminal-status'));
-  assert.doesNotMatch(generated.text, /undocumented remote service/i);
+  assert.match(generated.text, /Historical match · never current/);
+  assert.match(generated.text, /undocumented remote service/i);
 
   const pack = buildProjectContextPackage({ project, facts: terminalFacts, sessions: [], generated });
   const files = unzipSync(pack.bytes);
@@ -92,7 +249,7 @@ test('terminal facts stay out of current context and remain labeled in package h
     reviewSignals: { authenticatedRejections: number };
   };
   assert.equal(memory.facts.length, 0);
-  assert.deepEqual(memory.terminalHistory.map(item => item.status), ['rejected', 'superseded', 'expired', 'revoked']);
+  assert.deepEqual(memory.terminalHistory.map(item => item.status).sort(), ['expired', 'rejected', 'revoked', 'superseded']);
   assert.match(JSON.stringify(memory.terminalHistory), /"status":"rejected"/);
   assert.match(JSON.stringify(memory.terminalHistory), /"trust":"historical-only"/);
   assert.match(JSON.stringify(memory.terminalHistory), /"lifecycleTrust":"legacy-unverified"/);
@@ -153,7 +310,9 @@ test('portable AI context package retains evidence and tool entry instructions w
   const files = unzipSync(pack.bytes);
   const context = strFromU8(files['PROJECT_CONTEXT.md']!);
   const memory = JSON.parse(strFromU8(files['threadpack-memory.json']!)) as {
+    projection: { version: number; asOf: number; stateKey: string; stateIndex: unknown; filtersApplied: Record<string, unknown> };
     facts: { evidence: { sessionTitle?: string; verification: string; bindingStatus?: string; relation?: string; relationBasis?: string }[] }[];
+    terminalHistory: unknown[];
     budget: { includedFactIds: string[] };
   };
   assert.equal(pack.filename, 'threadpack-context-ThreadPack-Stage-5.zip');
@@ -167,6 +326,9 @@ test('portable AI context package retains evidence and tool entry instructions w
   assert.equal(memory.facts[0]!.evidence[0]!.bindingStatus, 'source_matched');
   assert.equal(memory.facts[0]!.evidence[0]!.relation, 'unverified');
   assert.deepEqual(memory.budget.includedFactIds, ['decision-1']);
+  assert.equal(memory.projection.stateKey, generated.projectionStateKey);
+  assert.deepEqual(memory.facts, JSON.parse(JSON.stringify(generated.projectedFacts)));
+  assert.deepEqual(memory.terminalHistory, generated.terminalHistory);
   assert.doesNotMatch(JSON.stringify(memory), /synthetic-api-key-do-not-store/);
   const rejected = { ...entry, status: 'rejected' as const, updatedAt: 2 };
   assert.throws(() => buildProjectContextPackage({ project: { name: 'ThreadPack Stage 5', summary: 'Connect tools.', importantNotes: '' },

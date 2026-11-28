@@ -1,0 +1,11 @@
+COMMAND=node --import tsx --test --test-name-pattern="projection baselines" tests/project-memory.test.ts
+✔ projection baselines are project-bound and produce precise incremental status transitions (57.5861ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1109.609
+EXITCODE=0

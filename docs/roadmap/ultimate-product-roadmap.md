@@ -8,7 +8,7 @@ This roadmap tracks the ten-stage product mission in `docs/release/ultimate-stag
 | 1 | User confirmation events and local trust authentication | PASS | `docs/release/ultimate-stage1-trust-authentication.md` |
 | 2 | Trusted memory lifecycle and terminal-history governance | CONDITIONAL PASS | `docs/release/ultimate-stage2-memory-lifecycle-report.md` |
 | 3 | Complete backup, restoration and historical migration | CONDITIONAL PASS | Source `e534644a0e2d148456f4595ac80b0fc525b1dee5`; `docs/release/ultimate-stage3-backup-migration-report.md`; v1-v8 and v9 migration/recovery tests pass on Windows browsers. Linux and crash-resume continuation remain unverified. |
-| 4 | Unified project memory and context projection | NOT STARTED | Shared cross-client projection work remains open. |
+| 4 | Unified project memory and context projection | CONDITIONAL PASS | `docs/release/ultimate-stage4-context-projection-report.md`; Windows candidate check, 253 unit/MCP tests, production build, Chromium full memory suite with one retry, and focused export/delta flows on Chromium/Firefox/WebKit. Linux and real client exchange not verified. |
 | 5 | Multi-AI bidirectional collaboration engine | NOT STARTED | Client identity and authorization expansion remains open. |
 | 6 | Multi-project management and client ecosystem | NOT STARTED | Ecosystem and configuration workflow work remains open. |
 | 7 | Security, reliability and performance | NOT STARTED | Long-run and adversarial verification remains open. |
@@ -17,4 +17,6 @@ This roadmap tracks the ten-stage product mission in `docs/release/ultimate-stag
 
 Stage 2 adds explicit rejected, superseded, expired and revoked fact states, signed lifecycle events when the local trust identity is available, exact duplicate rejection, user-linked reconsideration, optional expiration, terminal-history projections and a first-class user-preference category. Static backup import remains untrusted until locally re-trusted.
 
-Stage 2 remains conditional on Linux and resource-sensitive combined browser runs. Stage 3 preserves the v7 IndexedDB schema, imports v1-v8 into untrusted v9 project copies, and validates v9 exports with an ordered manifest. Its remaining Linux and true continuation-after-crash limits are listed in the Stage 3 report.
+Stage 4 routes Browser memory views, Markdown and JSON Context Pack generation, MCP project Context and Tasks through one canonical in-memory projection. It adds project-bound comparison baselines and filtered incremental context. Baselines are client-supplied comparison inputs and do not provide authentication or automatic cross-process synchronization.
+
+Stages 2–4 remain conditional on Linux verification, with the specific limitations recorded in each stage report. Stage 3 preserves the v7 IndexedDB schema, imports v1-v8 into untrusted v9 project copies, and validates v9 exports with an ordered manifest. Its remaining true continuation-after-crash limits are listed in the Stage 3 report. Real cross-AI exchange has not yet been verified.
