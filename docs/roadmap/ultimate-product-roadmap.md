@@ -17,6 +17,8 @@ This roadmap tracks the ten-stage product mission in `docs/release/ultimate-stag
 
 Stage 2 adds explicit rejected, superseded, expired and revoked fact states, signed lifecycle events when the local trust identity is available, exact duplicate rejection, user-linked reconsideration, optional expiration, terminal-history projections and a first-class user-preference category. Static backup import remains untrusted until locally re-trusted.
 
+The 2026-11-29 lifecycle hardening follow-up stages a replacement as a review candidate, commits the prior confirmation revocation and reciprocal supersession links together, then signs the replacement confirmation. The regression is verified on Chromium, with the changed replacement flow also passing on Firefox and WebKit. See `docs/release/phase-reports/ultimate-stage2-lifecycle-hardening.md`. Stage 2 remains conditional pending Linux, browser capability and failure-injection evidence.
+
 Stage 4 routes Browser memory views, Markdown and JSON Context Pack generation, MCP project Context and Tasks through one canonical in-memory projection. It adds project-bound comparison baselines and filtered incremental context. Baselines are client-supplied comparison inputs and do not provide authentication or automatic cross-process synchronization.
 
 Stages 2–4 remain conditional on Linux verification, with the specific limitations recorded in each stage report. Stage 3 preserves the v7 IndexedDB schema, imports v1-v8 into untrusted v9 project copies, and validates v9 exports with an ordered manifest. Its remaining true continuation-after-crash limits are listed in the Stage 3 report. Real cross-AI exchange has not yet been verified.

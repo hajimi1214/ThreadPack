@@ -1,0 +1,35 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts tests/browser/project-shared-state.spec.ts --workers=1
+
+
+Running 24 tests using 1 worker
+
+(node:46692) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [chromium] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (5.7s)
+  ok  2 [chromium] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (4.3s)
+  ok  3 [chromium] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (1.8s)
+  ok  4 [chromium] › tests\browser\project-memory.spec.ts:323:1 › rejecting a fact invalidates generated Markdown and JSON context together (4.1s)
+  ok  5 [chromium] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (4.6s)
+  ok  6 [chromium] › tests\browser\project-memory.spec.ts:419:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (4.8s)
+  ok  7 [chromium] › tests\browser\project-memory.spec.ts:534:1 › user preferences are categorized, reviewed, and included with their lifecycle status (3.5s)
+  ok  8 [chromium] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate (7.8s)
+  ok  9 [chromium] › tests\browser\project-memory.spec.ts:652:1 › expired facts leave current context while preserving signed history after reload (4.9s)
+  ok 10 [chromium] › tests\browser\project-memory.spec.ts:706:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (4.8s)
+  ok 11 [chromium] › tests\browser\project-memory.spec.ts:763:1 › saving a replacement for review keeps the earlier fact in nonterminal conflict review (3.6s)
+  ok 12 [chromium] › tests\browser\project-memory.spec.ts:810:1 › version-one project backups restore after the IndexedDB schema migration (3.2s)
+  ok 13 [chromium] › tests\browser\project-memory.spec.ts:830:1 › project backup versions one through eight migrate with a deterministic untrusted history record (5.1s)
+  ok 14 [chromium] › tests\browser\project-memory.spec.ts:883:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (2.7s)
+  ok 15 [chromium] › tests\browser\project-memory.spec.ts:902:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (5.2s)
+  ok 16 [chromium] › tests\browser\project-memory.spec.ts:983:1 › indexed database version one projects survive the schema upgrade and accept memory facts (3.7s)
+  ok 17 [chromium] › tests\browser\project-memory.spec.ts:1049:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (10.9s)
+  ok 18 [chromium] › tests\browser\project-memory.spec.ts:1238:1 › deleting an imported trust copy leaves the source project anchor intact (3.3s)
+  ok 19 [chromium] › tests\browser\project-memory.spec.ts:1309:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit (7.7s)
+  ok 20 [chromium] › tests\browser\project-memory.spec.ts:1385:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (6.5s)
+  ok 21 [chromium] › tests\browser\project-memory.spec.ts:1508:1 › changing evidence relationships revokes the prior signed fact confirmation (3.5s)
+  ok 22 [chromium] › tests\browser\project-memory.spec.ts:1537:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (5.0s)
+  ok 23 [chromium] › tests\browser\project-memory.spec.ts:1626:1 › missing source revisions remain visible as unverified without breaking project memory reads (6.5s)
+  ok 24 [chromium] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload (16.3s)
+
+  24 passed (2.2m)

@@ -1,0 +1,38 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts tests/browser/project-shared-state.spec.ts --workers=1
+
+
+Running 24 tests using 1 worker
+
+(node:57620) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [webkit] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (32.6s)
+  ok  2 [webkit] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (18.9s)
+  ok  3 [webkit] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (7.3s)
+  ok  4 [webkit] › tests\browser\project-memory.spec.ts:323:1 › rejecting a fact invalidates generated Markdown and JSON context together (17.1s)
+  ok  5 [webkit] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (15.8s)
+  ok  6 [webkit] › tests\browser\project-memory.spec.ts:419:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (22.2s)
+  ok  7 [webkit] › tests\browser\project-memory.spec.ts:534:1 › user preferences are categorized, reviewed, and included with their lifecycle status (12.9s)
+  ok  8 [webkit] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate (32.2s)
+  ok  9 [webkit] › tests\browser\project-memory.spec.ts:652:1 › expired facts leave current context while preserving signed history after reload (16.6s)
+  ok 10 [webkit] › tests\browser\project-memory.spec.ts:706:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (25.6s)
+  ok 11 [webkit] › tests\browser\project-memory.spec.ts:757:1 › saving a replacement for review keeps the earlier fact in nonterminal conflict review (19.0s)
+  ok 12 [webkit] › tests\browser\project-memory.spec.ts:804:1 › version-one project backups restore after the IndexedDB schema migration (9.3s)
+  ok 13 [webkit] › tests\browser\project-memory.spec.ts:824:1 › project backup versions one through eight migrate with a deterministic untrusted history record (16.1s)
+  ok 14 [webkit] › tests\browser\project-memory.spec.ts:877:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (9.3s)
+  ok 15 [webkit] › tests\browser\project-memory.spec.ts:896:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (24.0s)
+  ok 16 [webkit] › tests\browser\project-memory.spec.ts:977:1 › indexed database version one projects survive the schema upgrade and accept memory facts (12.7s)
+  ok 17 [webkit] › tests\browser\project-memory.spec.ts:1043:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (46.7s)
+  ok 18 [webkit] › tests\browser\project-memory.spec.ts:1232:1 › deleting an imported trust copy leaves the source project anchor intact (12.2s)
+  -  19 [webkit] › tests\browser\project-memory.spec.ts:1303:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 20 [webkit] › tests\browser\project-memory.spec.ts:1379:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (20.7s)
+  ok 21 [webkit] › tests\browser\project-memory.spec.ts:1502:1 › changing evidence relationships revokes the prior signed fact confirmation (18.5s)
+  ok 22 [webkit] › tests\browser\project-memory.spec.ts:1531:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (19.1s)
+  ok 23 [webkit] › tests\browser\project-memory.spec.ts:1620:1 › missing source revisions remain visible as unverified without breaking project memory reads (17.0s)
+  ok 24 [webkit] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload (6.4s)
+
+  Slow test file: [webkit] › tests\browser\project-memory.spec.ts (7.1m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  1 skipped
+  23 passed (7.3m)

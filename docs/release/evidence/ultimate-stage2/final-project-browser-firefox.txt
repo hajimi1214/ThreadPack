@@ -1,0 +1,36 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts tests/browser/project-shared-state.spec.ts --workers=1
+
+
+Running 24 tests using 1 worker
+
+(node:36360) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [firefox] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (11.8s)
+  ok  2 [firefox] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (7.6s)
+  ok  3 [firefox] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (2.9s)
+  ok  4 [firefox] › tests\browser\project-memory.spec.ts:323:1 › rejecting a fact invalidates generated Markdown and JSON context together (6.7s)
+  ok  5 [firefox] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (7.7s)
+  ok  6 [firefox] › tests\browser\project-memory.spec.ts:419:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (9.2s)
+  ok  7 [firefox] › tests\browser\project-memory.spec.ts:534:1 › user preferences are categorized, reviewed, and included with their lifecycle status (5.2s)
+  ok  8 [firefox] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate (13.0s)
+  ok  9 [firefox] › tests\browser\project-memory.spec.ts:652:1 › expired facts leave current context while preserving signed history after reload (8.5s)
+  ok 10 [firefox] › tests\browser\project-memory.spec.ts:706:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (8.4s)
+  ok 11 [firefox] › tests\browser\project-memory.spec.ts:757:1 › saving a replacement for review keeps the earlier fact in nonterminal conflict review (6.6s)
+  ok 12 [firefox] › tests\browser\project-memory.spec.ts:804:1 › version-one project backups restore after the IndexedDB schema migration (4.6s)
+  ok 13 [firefox] › tests\browser\project-memory.spec.ts:824:1 › project backup versions one through eight migrate with a deterministic untrusted history record (11.5s)
+  ok 14 [firefox] › tests\browser\project-memory.spec.ts:877:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (3.9s)
+  ok 15 [firefox] › tests\browser\project-memory.spec.ts:896:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (8.9s)
+  ok 16 [firefox] › tests\browser\project-memory.spec.ts:977:1 › indexed database version one projects survive the schema upgrade and accept memory facts (6.7s)
+  ok 17 [firefox] › tests\browser\project-memory.spec.ts:1043:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (19.3s)
+  ok 18 [firefox] › tests\browser\project-memory.spec.ts:1232:1 › deleting an imported trust copy leaves the source project anchor intact (5.7s)
+  -  19 [firefox] › tests\browser\project-memory.spec.ts:1303:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit
+  ok 20 [firefox] › tests\browser\project-memory.spec.ts:1379:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (9.8s)
+  ok 21 [firefox] › tests\browser\project-memory.spec.ts:1502:1 › changing evidence relationships revokes the prior signed fact confirmation (5.5s)
+  ok 22 [firefox] › tests\browser\project-memory.spec.ts:1531:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (8.7s)
+  ok 23 [firefox] › tests\browser\project-memory.spec.ts:1620:1 › missing source revisions remain visible as unverified without breaking project memory reads (9.2s)
+  ok 24 [firefox] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload (1.8s)
+
+  1 skipped
+  23 passed (3.2m)

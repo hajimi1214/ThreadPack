@@ -110,3 +110,7 @@ Firefox 和 WebKit 两项 skip 涉及安全本地文件权限及 Chromium Origin
 ## GitHub 候选交付
 
 阶段 2 源码提交为 59ecf052f508e7425af2f53bd797a44d724ad0b5。此报告和测试证据作为独立文档提交到 `release-candidate/third-round-stage5-baseline`，与源码提交分开记录。原始 main 工作区未修改。
+
+### 后续生命周期加固
+
+2026-11-29 的候选分支补充修复了替代确认顺序、AI 提案去重边界、候选恢复错误报告和 MCP 测试客户端认证。对应源码提交为 `d19a1d504a31a1c893a90c34124df63e8e4f0a55` 和 `92600d913b62d1c8f0926ef13e6a138f9f785ea3`。更新后的验证结果和条件项见 [阶段 2 生命周期加固补充报告](phase-reports/ultimate-stage2-lifecycle-hardening.md)。

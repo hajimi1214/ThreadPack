@@ -19,6 +19,8 @@ Active states are `proposed`, `needs-review` and `confirmed`. Terminal history s
 
 Replacement of an active fact records the old/new relationship with `supersedes` and `supersededBy`. User rejection prevents exact normalized duplicate claims from being silently recreated. The duplicate check applies across project sessions and does not claim semantic equivalence detection.
 
+For an authenticated replacement, the new fact remains `needs-review` while a signed transaction revokes the old confirmation, makes the old fact terminal, and records both relationship links. ThreadPack confirms the replacement in a subsequent signed event only after that transaction commits. This ordering keeps an interrupted replacement from leaving both claims current. Saving a replacement for review does not terminate the old fact.
+
 ## Expiration
 
 `expiresAt` is optional epoch-millisecond metadata. Expiration is materialized lazily by project memory reads, status operations, task listing, update-inbox import and backup export. Context and MCP projections also apply expiration immediately even before the stored terminal transition is materialized. Confirmed facts that expire preserve the original confirmation event and append a separate signed confirmation-revocation lifecycle event.

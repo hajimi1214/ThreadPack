@@ -1,0 +1,163 @@
+
+> threadpack@1.7.1 test:e2e
+> playwright test tests/browser/project-memory.spec.ts tests/browser/project-shared-state.spec.ts
+
+
+Running 24 tests using 8 workers
+
+(node:12884) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54700) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:57832) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55664) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23344) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13352) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:44436) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:58156) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok  1 [chromium] › tests\browser\project-memory.spec.ts:323:1 › rejecting a fact invalidates generated Markdown and JSON context together (23.7s)
+  ok  5 [chromium] › tests\browser\project-memory.spec.ts:534:1 › user preferences are categorized, reviewed, and included with their lifecycle status (24.4s)
+  ok  3 [chromium] › tests\browser\project-memory.spec.ts:187:1 › project facts cite saved messages, expose conflicts, and generate a budgeted handoff (26.0s)
+  ok  2 [chromium] › tests\browser\project-memory.spec.ts:241:1 › the context builder applies filters and exports an untrusted incremental delta from a project baseline (29.1s)
+  ok  8 [chromium] › tests\browser\project-memory.spec.ts:419:1 › AI proposals are source-checked, stay pending review, and leave no stored API key (31.2s)
+  ok  9 [chromium] › tests\browser\project-memory.spec.ts:652:1 › expired facts leave current context while preserving signed history after reload (32.7s)
+  ok 12 [chromium] › tests\browser\project-memory.spec.ts:804:1 › version-one project backups restore after the IndexedDB schema migration (28.3s)
+  ok 10 [chromium] › tests\browser\project-memory.spec.ts:706:1 › superseded facts retain signed history and can only return through an explicit reconsideration link (33.9s)
+  ok 11 [chromium] › tests\browser\project-memory.spec.ts:757:1 › saving a replacement for review keeps the earlier fact in nonterminal conflict review (33.6s)
+  x   6 [chromium] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack (41.8s)
+  ok 13 [chromium] › tests\browser\project-memory.spec.ts:824:1 › project backup versions one through eight migrate with a deterministic untrusted history record (31.0s)
+  ok 14 [chromium] › tests\browser\project-memory.spec.ts:877:1 › a legacy AI record claiming confirmed is read as a proposal and requires explicit review (14.3s)
+  ok 16 [chromium] › tests\browser\project-memory.spec.ts:977:1 › indexed database version one projects survive the schema upgrade and accept memory facts (16.9s)
+(node:54000) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 15 [chromium] › tests\browser\project-memory.spec.ts:896:1 › v9 backup manifests reject corruption and rollback staging before a clean retry (26.2s)
+  ok 20 [chromium] › tests\browser\project-memory.spec.ts:1502:1 › changing evidence relationships revokes the prior signed fact confirmation (16.0s)
+  ok 17 [chromium] › tests\browser\project-memory.spec.ts:1043:1 › local fact confirmations are signed, revocable, and retained as authenticated trust history (40.3s)
+  x   4 [chromium] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed (1.0m)
+  ok 22 [chromium] › tests\browser\project-memory.spec.ts:1232:1 › deleting an imported trust copy leaves the source project anchor intact (20.0s)
+  ok 23 [chromium] › tests\browser\project-memory.spec.ts:1620:1 › missing source revisions remain visible as unverified without breaking project memory reads (21.2s)
+  ok 21 [chromium] › tests\browser\project-memory.spec.ts:1531:1 › a user-attested evidence relation stays distinct from fact confirmation and backup import (29.2s)
+  ok 18 [chromium] › tests\browser\project-memory.spec.ts:1303:1 › an isolated device re-trusts a v8 backup with its root-bound recovery kit (49.1s)
+  ok 19 [chromium] › tests\browser\project-memory.spec.ts:1379:1 › legacy evidence binding is consistent across browser restore, Context Pack, and MCP (44.1s)
+  x   7 [chromium] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate (1.5m)
+  x  24 [chromium] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload (15.2s)
+
+
+  1) [chromium] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack
+
+    Test timeout of 30000ms exceeded.
+
+    Error: page.goto: net::ERR_ABORTED; maybe frame was detached?
+    Call log:
+      - navigating to "http://127.0.0.1:4318/", waiting until "load"
+
+
+      306 |
+      307 | test('a project without facts can export its project-scoped context pack', async ({ page }) => {
+    > 308 |   await page.goto('/');
+          |              ^
+      309 |   await importConversation(page, 'empty-memory.json', 'A project can save sessions before recording facts.');
+      310 |   const dialog = await openProjectMemory(page);
+      311 |   await saveCurrentSession(dialog);
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:308:14
+
+    Error Context: test-results\project-memory-a-project-w-b4b9e-project-scoped-context-pack-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-memory-a-project-w-b4b9e-project-scoped-context-pack-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-memory-a-project-w-b4b9e-project-scoped-context-pack-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed
+
+    Test timeout of 30000ms exceeded.
+
+    Tearing down "context" exceeded the test timeout of 30000ms.
+
+    Error: browserContext.close: Target page, context or browser has been closed
+
+    Test timeout of 30000ms exceeded.
+
+    Error Context: test-results\project-memory-memory-can--17061-ng-the-rejection-was-signed-chromium\error-context.md
+
+  3) [chromium] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog', { name: 'Local project library', exact: true }).getByLabel('Verifiable project confirmations')
+    Expected substring: "Signed confirmations are enabled on this device."
+    Received string:    "Verifiable project confirmationsImported trust events are not authenticated on this device. Re-trust with the recovery kit and matching public-key fingerprint.Recovery public-key fingerprint: dfb99b381ea1161393f4c3d7cf0d652cc4a889e4cbf18f7e7f65f99c085b5a89Recovery kit JSON fileRecovery-kit passphraseConfirm the fingerprint from your saved recovery recordRe-trust this device"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" getByRole('dialog', { name: 'Local project library', exact: true }).getByLabel('Verifiable project confirmations') with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'Local project library', exact: true }).getByLabel('Verifiable project confirmations')
+        11 × locator resolved to <section class="memory-trust-panel" aria-label="Verifiable project confirmations">…</section>
+           - unexpected value "Verifiable project confirmationsImported trust events are not authenticated on this device. Re-trust with the recovery kit and matching public-key fingerprint.Recovery public-key fingerprint: dfb99b381ea1161393f4c3d7cf0d652cc4a889e4cbf18f7e7f65f99c085b5a89Recovery kit JSON fileRecovery-kit passphraseConfirm the fingerprint from your saved recovery recordRe-trust this device"
+
+
+      640 |     await trustPanel.locator('input:not([type])').fill(recoveryBundle.publicKeyFingerprint);
+      641 |     await trustPanel.getByRole('button', { name: 'Re-trust this device', exact: true }).click();
+    > 642 |     await expect(trustPanel).toContainText('Signed confirmations are enabled on this device.');
+          |                              ^
+      643 |     await expect(importedRejected).toContainText('Lifecycle event signed by this project’s local trusted key');
+      644 |     await expect(importedRejected.getByRole('button', { name: 'Confirm', exact: true })).toHaveCount(0);
+      645 |     await expect(restoredDialog.locator('.memory-fact.needs-review')
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-memory.spec.ts:642:30
+
+    Error Context: test-results\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-memory-rejected-cl-ae209-s-a-linked-review-candidate-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [chromium] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload
+
+    Error: expect(received).toContain(expected) // indexOf
+
+    Expected substring: "UPDATED_SHARED_SESSION_MARKER"
+    Received string:    "{\"type\":\"threadpack_project\",\"version\":9,\"projectId\":\"07de6af3-b327-4537-8e25-52c492346135\",\"createdAt\":1795879927376,\"project\":{\"name\":\"Live shared project\",\"summary\":\"\",\"importantNotes\":\"\",\"createdAt\":1795879920947,\"updatedAt\":1795879927228},\"sessionCount\":1,\"revisionCount\":1,\"factCount\":0,\"updateCount\":0,\"claimCount\":0,\"trustStateCount\":1,\"trustEventCount\":0,\"migrationCount\":0}
+    {\"type\":\"session\",\"data\":{\"id\":\"71200bfa-8149-4021-994b-16aa8ce6b4de\",\"sessionKey\":\"source:generic:shared-session\",\"title\":\"Shared project evidence\",\"sourceName\":\"shared-session.json\",\"platform\":\"generic\",\"sourceId\":\"shared-session\",\"format\":\"Messages JSON export\",\"messageCount\":1,\"fingerprint\":\"d6236a506f76c795701d885d77b4c3d544c747492dd734c5f2514fadae01882a\",\"currentVersion\":1,\"createdAt\":1795879921551,\"updatedAt\":1795879921551}}
+    {\"type\":\"revision\",\"data\":{\"sessionId\":\"71200bfa-8149-4021-994b-16aa8ce6b4de\",\"version\":1,\"fingerprint\":\"d6236a506f76c795701d885d77b4c3d544c747492dd734c5f2514fadae01882a\",\"content\":\"{\\\"id\\\":\\\"message-1\\\",\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"The shared project state stays local.\\\",\\\"provenance\\\":{\\\"platform\\\":\\\"generic\\\",\\\"platformId\\\":\\\"shared-message\\\",\\\"recordIndex\\\":1,\\\"conversationSourceId\\\":\\\"shared-session\\\",\\\"conversationSourceRecordCount\\\":1,\\\"conversationTitle\\\":\\\"Shared project evidence\\\",\\\"conversationSource\\\":\\\"Messages JSON\\\"},\\\"kind\\\":\\\"message\\\"}\\n\",\"title\":\"Shared project evidence\",\"platform\":\"generic\",\"sourceId\":\"shared-session\",\"format\":\"Messages JSON export\",\"messageCount\":1,\"sourceName\":\"shared-session.json\",\"createdAt\":1795879921551}}
+    {\"type\":\"trust_state\",\"fingerprint\":\"2be1b7b9317047a52dfd54aac9986ab027f4ccd8ea61a8918a7a3279b1fc320b\",\"data\":{\"projectId\":\"07de6af3-b327-4537-8e25-52c492346135\",\"sourceProjectId\":\"07de6af3-b327-4537-8e25-52c492346135\",\"trustStatus\":\"untrusted-import\",\"rootKeyId\":\"p256-4b3635f8da9ad67e7c1c537d12cb6615\",\"rootPublicKeyJwk\":{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"verify\"],\"kty\":\"EC\",\"x\":\"NngtVhidNDBHsfQTGDlpYzozd2ZOXw32BZDjHZNKfrA\",\"y\":\"T753pPHdc0EW4T-tdRVMxOYOT-wS7cFl9UIgeGFiPw4\"},\"recoveryKeyId\":\"p256-5e62cbe36fffdf64ad0133be048725fc\",\"recoveryPublicKeyJwk\":{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"verify\"],\"kty\":\"EC\",\"x\":\"qUiuRydddTxPvXgW7VyavKPPEV_tW70x8TxfFDX7Htc\",\"y\":\"LPNN7mr1xpqB-iliMGNz9DKJt3BKVk7scbux-fPHAiM\"},\"recoveryBundle\":{\"schema\":\"threadpack.recovery.v1\",\"algorithm\":\"ECDSA-P256-SHA256\",\"keyId\":\"p256-5e62cbe36fffdf64ad0133be048725fc\",\"publicKeyJwk\":{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"verify\"],\"kty\":\"EC\",\"x\":\"qUiuRydddTxPvXgW7VyavKPPEV_tW70x8TxfFDX7Htc\",\"y\":\"LPNN7mr1xpqB-iliMGNz9DKJt3BKVk7scbux-fPHAiM\"},\"publicKeyFingerprint\":\"5e62cbe36fffdf64ad0133be048725fcf2ec3b4271f3654f87eb6d2de8b1c498\",\"authorizedRootKeyId\":\"p256-4b3635f8da9ad67e7c1c537d12cb6615\",\"authorizedRootPublicKeyJwk\":{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"verify\"],\"kty\":\"EC\",\"x\":\"NngtVhidNDBHsfQTGDlpYzozd2ZOXw32BZDjHZNKfrA\",\"y\":\"T753pPHdc0EW4T-tdRVMxOYOT-wS7cFl9UIgeGFiPw4\"},\"authorizedRootPublicKeyFingerprint\":\"4b3635f8da9ad67e7c1c537d12cb6615540f00079c01cccde01a17ad5425544b\",\"kdf\":\"PBKDF2-SHA-256\",\"iterations\":310000,\"salt\":\"tCSA8u-MthdLru703RvbYQ\",\"iv\":\"hHOySFyJeuhZQXQf\",\"ciphertext\":\"nV_y1TjSdyqtAe1iOOetRy7w75JqLgRQ099JdaKlCMh-7feTTtfcw9BfOgMT5Ey_K9MOadhj-ffhalfMEyMeiMzCNO1p04RFPPfslEN46_Lf6Ov0rzMaet3B984Q0b4sTHxQldMGpUKNkk6a3lf7yqngavnL7g5GDVXWdIT2zBd-Xb9D4msega9B5RenJMQTkt6RK2Scit6F-zxMpnnzERnZpFkkP8llXqBsad6nPTqvc8Np57-ql1NfrEOP_SR0avrNRvaLcyeh8It2_-PSToI9yShX6hbPUYeAlMet6TtS2TRl02U97d73V5xpnlT9lUm4rqMgkP5UoJnVSPtNyQhfJqHOt4DYfP1C5cT3AddTyO6OXJgQFesuPGadqUJSZ2ZxyuP1rnuONy7937VvX54etmLhMjen_3Kh59wxPbF2VzbZEISc7S-6QjDdcHCeBGA9-NtadTXgbA-c6BQK63ln925ASyPIpRPUbMa1j8GqQMgow1caytyYnHDTpb4DbogrD5_Cj7lpNRFqxoAfjIMFYA\"},\"activeKeyId\":\"p256-4b3635f8da9ad67e7c1c537d12cb6615\",\"sequence\":0,\"headHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"createdAt\":1795879926351,\"updatedAt\":1795879927228}}
+    {\"type\":\"manifest\",\"version\":1,\"recordCount\":4,\"recordChainHash\":\"8800bf9ffb106a803e282b4947ffac5f44def00e4c1ce092dc1336c0d7ae3af2\",\"recordCounts\":{\"session\":1,\"revision\":1,\"memory\":0,\"update\":0,\"claim\":0,\"trust_state\":1,\"trust_event\":0,\"migration\":0}}
+    "
+
+      124 |   await expect(dialog.getByLabel('Connect live local state')).toContainText('Shared file is current', { timeout: 30_000 });
+      125 |   sharedText = await page.evaluate(async () => await (window as unknown as { readSharedAuditFile: () => Promise<string> }).readSharedAuditFile());
+    > 126 |   expect(sharedText).toContain('UPDATED_SHARED_SESSION_MARKER');
+          |                      ^
+      127 |
+      128 |   await dialog.getByLabel('Current status', { exact: true }).fill('Automatically shared latest project status.');
+      129 |   await dialog.getByRole('button', { name: 'Save project details', exact: true }).click();
+        at D:\Github项目\ThreadPack-阶段资料\发布候选\第三轮第五阶段\tests\browser\project-shared-state.spec.ts:126:22
+
+    Error Context: test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\trace.zip
+    Usage:
+
+        npx playwright show-trace test-results\project-shared-state-proje-78f16-d-file-and-survive-a-reload-chromium\trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4 failed
+    [chromium] › tests\browser\project-memory.spec.ts:307:1 › a project without facts can export its project-scoped context pack
+    [chromium] › tests\browser\project-memory.spec.ts:364:1 › memory can be rejected after local signing-key loss without claiming the rejection was signed
+    [chromium] › tests\browser\project-memory.spec.ts:568:1 › rejected claims stay terminal until the user creates a linked review candidate
+    [chromium] › tests\browser\project-shared-state.spec.ts:38:1 › project changes update one authorized shared file and survive a reload
+  20 passed (2.0m)
