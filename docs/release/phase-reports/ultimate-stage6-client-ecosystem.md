@@ -30,6 +30,10 @@
 
 `threadpack mcp --check` 只读解析指定备份和收件箱，校验项目范围，报告本地只读或写入开关及当前可用工具，然后退出。诊断将收件箱状态区分为 `absent` 和 `valid`。缺少收件箱时不会自动创建文件。该检查不启动 MCP 会话，不探测外部客户端，也不判断写入目录的实际可写性。
 
+### MCP 配置引导
+
+项目页增加本地配置片段生成器，可生成 Codex TOML 或 JSON `mcpServers` 示例，并为 Claude Code、WorkBuddy 和通用目标标出建议文件名。配置以当前项目 ID 限定访问，默认显式只读。候选写入和任务协调可分别开启。启用写权限时片段会带入本地 client label 和相应开关，并提示用户保护配置及 inbox。生成器不会读取或改写客户端配置，且明确要求用户按客户端版本自行核对格式并运行本地诊断。客户端版本兼容和实机连接依然未验证。
+
 ## 阶段 6 目标核对
 
 | 目标 | 状态 | 证据或限制 |
@@ -41,9 +45,9 @@
 | 项目备份导入与导出 | VERIFIED | Chromium 项目库回归测试 |
 | 多个独立 MCP 实例 | PARTIAL | 实例可分别配置项目范围和工具授权；`--client-id` 仍是未认证标签 |
 | 客户端身份管理 | NOT VERIFIED | 尚无认证的客户端注册、凭据、撤销或身份验证流程 |
-| MCP 配置向导 | NOT IMPLEMENTED | 文档有手动命令示例，没有产品内向导 |
+| MCP 配置向导 | PARTIAL | 项目页可生成 Codex TOML 与通用 JSON stdio 示例；不会写入用户配置。Claude Code、WorkBuddy 与其他客户端的版本兼容性 NOT VERIFIED |
 | MCP 健康检查 | VERIFIED, LIMITED | 本地 `--check` 覆盖备份、收件箱解析、项目范围和工具授权配置，不代表外部客户端连接成功 |
-| 外部客户端能力检测 | NOT IMPLEMENTED | 本阶段没有探测 WorkBuddy、Codex、Claude Code 或其他客户端 |
+| 外部客户端能力检测 | NOT IMPLEMENTED | 本阶段没有探测 WorkBuddy、Codex、Claude Code 或其他客户端；只能检查 ThreadPack 本地配置 |
 | 配置诊断 | PARTIAL | 可诊断 ThreadPack 本地文件和权限参数；不解析用户级客户端配置。CLI 保持通用错误隐藏，不输出未筛选的底层错误 |
 | 持久连接日志 | NOT IMPLEMENTED | 项目候选与任务审计不是客户端连接日志 |
 | WorkBuddy、Codex、Claude Code 与其他 MCP 客户端实机验证 | NOT VERIFIED | 本阶段没有启动这些客户端或执行模型调用 |
@@ -60,11 +64,17 @@
 | `npm run build` | VERIFIED，包含 Web 与 CLI 构建 | `production-build.log` |
 | Chromium 项目库套件 | VERIFIED，7 通过 | `e2e-project-library-chromium.log` |
 | 归档页面重载及恢复专项 | VERIFIED，1 通过 | `e2e-project-archive.log` |
+| MCP 配置引导专项 | VERIFIED，1 通过 | `e2e-mcp-setup-guide.log` |
+| 配置引导后的 Chromium 项目库套件 | VERIFIED，8 通过，单 worker | `e2e-project-library-wizard-final.log` |
+| 配置引导后的生产构建 | VERIFIED，包含 Web 与 CLI 构建 | `production-build-wizard.log` |
+| 配置引导后的类型检查与全量单元测试 | VERIFIED，254 通过，0 失败 | `type-check-wizard.log`、`unit-tests-wizard.log` |
 | 产品源码与文档的 `git diff --check` | VERIFIED | 不含发布目录原始运行日志 |
 | Firefox、WebKit、Linux | NOT VERIFIED | 本次未执行 |
 | 外部 MCP 客户端与真实模型调用 | NOT VERIFIED | 本次未执行 |
 
 `e2e-project-archive-stale-port.log` 保留了一次测试环境失败记录。Playwright 复用了 4318 端口上的旧预览服务器，因此页面快照不含候选构建中的归档控件。随后改用隔离的 43917 与 43918 端口运行归档专项和项目库套件，分别 1/1 与 7/7 通过。首次调用 Playwright 时因使用了未配置名称的 `chromium` 项目而退出，随后依照配置设置 `THREADPACK_BROWSER=chromium` 重跑。上述失败均未被计入通过结果。
+
+配置引导迭代中，在 8 个 worker 下运行 Chromium 项目库套件时出现 6 项超时，记录在 `e2e-project-library-8worker-timeout.log`。使用相同测试、单 worker、独立端口重跑后 8/8 通过，结果保存在 `e2e-project-library-wizard-final.log`。单独的配置引导专项也通过。没有跳过或删除测试。
 
 保留原始运行日志会带入少量终端格式化空格，因此对全部暂存文件运行 `git diff --cached --check` 会报告日志行末空格和空白尾行。产品源码、测试源码、README、架构、路线图、验收矩阵和报告本身已单独通过 whitespace 检查；未改写原始输出以消除这些日志特征。
 
@@ -73,7 +83,7 @@
 ## 风险与剩余工作
 
 1. **P1（既有边界）** 客户端标签并非认证身份。当前机制只适用于用户控制的本地 stdio 进程和受操作系统权限保护的文件，不能作为多用户或远程授权边界。
-2. **P2** 尚无客户端配置向导、客户端注册/撤销界面、能力探测或持久连接日志。
+2. **P2** 配置向导只生成手动粘贴的示例，尚无客户端注册/撤销界面、能力探测或持久连接日志。
 3. **P2** 归档仅整理 ThreadPack 活动列表，不会撤销共享 MCP 文件连接。UI 已对此作出提示。
 4. **P2** 本次只在 Windows Chromium 环境验证，Linux、Firefox、WebKit 与真实外部 AI 客户端均未验证。
 5. **P3** `--check` 对预期错误使用 CLI 现有的通用错误隐藏行为，失败可识别但原因可能需要手动检查参数和文件。
@@ -84,7 +94,7 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| 阶段实现提交 | `2b2d9f80d4d3b39799ec7150101b32203bd0a305` |
+| 阶段实现提交 | 归档与诊断 `2b2d9f80d4d3b39799ec7150101b32203bd0a305`；项目范围 MCP 配置引导 `b4d1ef6728df8203ecb73e6a8e473378dddab455` |
 | 报告与路线图提交 | 本报告及路线图在实现提交之后另行提交，SHA 由其 Git 历史记录 |
 | 候选分支 | `release-candidate/third-round-stage5-baseline` |
 | 远程推送 | 仅推送候选分支，不触及 `main` |
